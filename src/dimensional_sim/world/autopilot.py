@@ -58,14 +58,11 @@ REST_MS = 10_000
 INVENTORY_SLOTS = 12
 STACK_LIMIT = 20
 OPENING_REPORT = (
-    "At the end of a long life, the summoning gift everyone dismissed finally answered.",
-    "A stone anchor caught your soul and returned you to the beginning.",
-    "Your explorer now follows the forest trail automatically. Watch the map and the current task to see where each life goes.",
-    "Forage, study, climb and fight to raise six attributes. Regular experience resets when a life ends; blue dimensional experience stays with you.",
-    "Hunger falls with time. Food found in the forest is eaten automatically when needed; each meal has a short cooldown.",
-    "When health reaches zero, you return to this anchor. The next life starts with fresh supplies and the experience that persisted.",
-    "Opening report: 0 Strength, Endurance and Will experience; 1 dimensional shard; Dimensional Clone awakened.",
-    "The shard and Clone have yet to reveal their purpose. Pause with P; zoom with + and -.",
+    "At the end of a long life, the summoning gift everyone dismissed answered. A stone anchor caught your soul and returned you to the beginning.",
+    "Your explorer follows the forest trail automatically. Watch the map and current task to see where this life goes.",
+    "Forage, study, climb and fight to raise six attributes. Regular experience resets each life; blue dimensional experience stays with you.",
+    "Hunger falls with time. Food is eaten automatically when needed, then cools down. At zero health, the anchor returns you with fresh supplies.",
+    "The first report recorded one dimensional shard and awakened a Clone. Their purpose is still hidden. Pause with P; zoom with + and -.",
 )
 LOG_TYPES = ("encounter", "eat", "rest", "life")
 

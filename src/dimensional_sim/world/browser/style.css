@@ -34,7 +34,7 @@
 .report{z-index:5;max-height:min(82vh,680px);overflow-y:auto;background:rgba(8,12,8,.94);box-shadow:0 24px 90px #000c}
 .report.opening{width:min(540px,92vw);max-width:none}
 .report.opening li{margin-bottom:8px;opacity:1;animation:none}
-.report button{position:sticky;bottom:0;background:#232a1d}
+.report button{background:#232a1d}
 @media(prefers-reduced-motion:reduce){.slots li.food{transition:none}}
 /* Touch: no double-tap zoom, text selection or long-press callout while playing.
    Pinch-zoom stays available for accessibility; the canvas already has touch-action:none. */
