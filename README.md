@@ -17,6 +17,9 @@ python -B -m dimensional_sim.world.cli browser --seed 482910
 Then open http://127.0.0.1:8765/. Development only: add --unlock-control for WASD.
 Each life ends at zero health; dimensional experience persists to the next life.
 Save/resume with --save run.json / --load run.json.
+
+Hosted build (runs the same Python in the browser via Pyodide; deploys to Vercel
+from GitHub, cloud saves in Supabase): see [hosting](docs/technical/hosting.md).
 For a scripted example (no interactive terminal required):
 ```powershell
 python -B -m dimensional_sim.world.cli demo --seed 482910

@@ -1,0 +1,13 @@
+{
+  "name": "dimsum-web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Hosted build of Dimensional Summoner: the Python simulation runs in the browser via Pyodide.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "pyodide": "314.0.7"
+  }
+}

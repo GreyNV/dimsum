@@ -4,6 +4,12 @@ Goal: testers open a link (phone or desktop), play their own world, and keep the
 progress. Today the game needs a local Python server ticking every 20ms, which
 Vercel (short-lived functions) cannot host.
 
+## Status (2026-10-04)
+Implemented with a change of approach: instead of porting the simulation to
+JavaScript, the hosted build runs the unchanged Python in the browser via Pyodide
+(no parity risk, one source of truth). See hosting.md. Supabase project "dimsum"
+holds cloud saves (no Supabase Auth needed: random id + secret per browser).
+
 ## Decision
 Run the simulation in the player's browser; Vercel serves static files; Supabase
 stores accounts and saves. Python stays the reference and balance lab.
@@ -43,6 +49,16 @@ stores accounts and saves. Python stays the reference and balance lab.
   can install it to the home screen.
 - Performance on phones: stamp-cached terrain (done), lazy chunk painting (done),
   DPR capped at 2 on small screens, optional OffscreenCanvas painting in a worker.
+
+## Current infrastructure (checked 2026-10-04)
+- GitHub GreyNV/dimsum: initial commit made locally by the owner (git writes are
+  not allowed from the remote tools; this session has no GitHub push access).
+- Vercel project "dimsum" (team greynvs-projects): no deployments yet. Vercel
+  Authentication (SSO protection) is ON for all deployments except custom domains,
+  so outside testers would hit a Vercel login. Turn it off for production (or add a
+  custom domain) before sharing links.
+- Supabase: one existing project, "GreyNV's Project" (us-east-1, Postgres 17).
+  Decide: reuse it with a dedicated schema/table, or create a "dimsum" project.
 
 ## Phases
 W0 Access: GitHub push access for GreyNV/dimsum in this session; Vercel and

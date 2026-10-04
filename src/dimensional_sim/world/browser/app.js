@@ -18,6 +18,9 @@ let swing = {serial: 0, active: false, slashAt: null, lastMs: -1, effects: []};
 /* Expedition presentation: reward popups and fading completed spots (cosmetic). */
 const hud = new ExpeditionHud(), rewards = [], fadingSpots = new Map();
 let lastRewardSeq = null, spotsSeen = new Map(), reportSeen = null, reportTimer = 0;
+const SEEN_REPORT_KEY = 'dimsum.report.seen';
+const seenReport = () => { try { return localStorage.getItem(SEEN_REPORT_KEY); } catch { return null; } };
+const markReport = report => { try { localStorage.setItem(SEEN_REPORT_KEY, `${report.life}:${report.seq}`); } catch { /* optional */ } };
 const manualAllowed = () => !state?.expedition || state.expedition.skills.includes('take_control');
 
 function status(message) { if ($('status').textContent !== message) $('status').textContent = message; }
@@ -94,7 +97,9 @@ function observeExpedition(next) {
   lastRewardSeq = Math.max(lastRewardSeq ?? 0, seq);
   const report = next.expedition.report;
   if (report && report.seq !== reportSeen) {
-    if (reportSeen !== null || reportIsFresh(next.expedition)) {
+    const already = seenReport() === `${report.life}:${report.seq}`;
+    if (!already && (reportSeen !== null || reportIsFresh(next.expedition))) {
+      markReport(report);
       hud.showReport(report);
       clearTimeout(reportTimer);
       reportTimer = setTimeout(() => hud.hideReport(), 9000 + report.lines.length * 180);
@@ -120,7 +125,12 @@ function repaintCanopies(tx, ty, resident) {
     if (chunk.tiles[ly][lx] === 'T') drawTree(ctx, tile.x * TILE_W, tile.y * TILE_H, visualHash(tile.x, tile.y, chunk.seed));
   }
 }
+/* Hosted build (web/): the simulation runs in a worker and host.js installs this
+ * transport. Locally, the Python server answers the same requests over HTTP. */
+const transport = window.DIMSUM_TRANSPORT || null;
+const hosted = !!transport?.hosted;
 async function request(path, body) {
+  if (transport) return transport.request(path, body);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2500);
   try {
@@ -287,10 +297,12 @@ addEventListener('keyup',event=>{
   controls.release(event.code);
   if(event.code==='Space') controls.attack(false);
 });
-addEventListener('blur',()=>setPause(true));
-document.addEventListener('visibilitychange',()=>{if(document.hidden)setPause(true);});
+// Locally a hidden tab pauses the shared server. Hosted, the idle world keeps going.
+addEventListener('blur',()=>{ if(hosted) controls.reset(); else setPause(true); });
+document.addEventListener('visibilitychange',()=>{ if(document.hidden){ if(hosted) controls.reset(); else setPause(true); } });
 addEventListener('pagehide',()=>{
   stopped=true; controls.reset();
+  if (hosted) return;  // host.js saves; there is no server lease to release
   // Best-effort release; server input lease still protects abrupt tab closure.
   fetch('/api/input',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(controls.payload(true,[])),keepalive:true}).catch(()=>{});

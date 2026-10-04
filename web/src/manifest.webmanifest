@@ -1,0 +1,10 @@
+{
+  "name": "Dimensional Summoner",
+  "short_name": "Dim-Sum",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0c120b",
+  "theme_color": "#11170f",
+  "description": "An idle summoner explores a character-art forest on auto-pilot."
+}

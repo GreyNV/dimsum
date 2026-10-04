@@ -24,6 +24,8 @@ world/browser_server.py, world/browser/: browser client; actors.js = battle/acto
 world/encounters.py, autopilot.py: biome encounter pools/spots and the auto-pilot
 expedition (docs/technical/world-autopilot.md). Manual control = locked skill.
 world/progression.py: regular/dimensional levels and speed from core.GameConfig.
+world/session.py: transport-free session (local server and hosted build share it).
+world/web.py + web/ + vercel.json: hosted Pyodide build (docs/technical/hosting.md).
 equipment-review/: unfinished unrelated React popup; preserve.
 
 ## Invariants and safe extensions
