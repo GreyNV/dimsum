@@ -185,6 +185,56 @@ export function crouchSprite(sprite) {
   return {paint: [...sprite.paint.slice(0, 6), sprite.paint[8]], glyph: [...sprite.glyph.slice(0, 6), sprite.glyph[8]]};
 }
 
+/** A clean pixel character drawn from the uploaded four-direction reference.
+ * Logical art is 16x20 pixels, enlarged with hard-edged rectangles at runtime.
+ * Four timed frames are derived for idle, walk and a future run animation. */
+function paintPixelPlayer(ctx, player, left, top, {compact = false, reducedMotion = false} = {}) {
+  const P = {edge:'#241c1b', hair:'#3c2a27', hairLight:'#60423a', skin:'#f0bc89',
+    skinLight:'#ffd0a0', scarf:'#944a3d', scarfLight:'#bd6c4e', tunic:'#484936',
+    tunicLight:'#69654a', belt:'#ae8355', pants:'#25332e', pantsLight:'#3a4a3c',
+    boot:'#5a4736', bootLight:'#9d8060', eye:'#30231e'};
+  const facing = ['north','south','east','west'].includes(player.facing) ? player.facing : 'south';
+  const moving = player.animation === 'walk' || player.animation === 'run';
+  const frame = reducedMotion ? 0 : Math.floor(player.animation_ms / (player.animation === 'run' ? 90 : 130)) % 4;
+  const stride = moving ? [0, 1, 0, -1][frame] : 0;
+  const breathe = !moving && !reducedMotion && Math.floor(player.animation_ms / 450) % 4 === 2 ? 1 : 0;
+  const side = facing === 'east' || facing === 'west';
+  ctx.save(); ctx.translate(left, top); ctx.scale(3, compact ? 2 : 3);
+  if (facing === 'west') { ctx.translate(16, 0); ctx.scale(-1, 1); }
+  const box = (color, x, y, w, h) => { ctx.fillStyle = P[color]; ctx.fillRect(x, y, w, h); };
+  // Boots and trouser legs change independently, so movement reads at game scale.
+  const legA = side ? 5 + stride : 5 - stride, legB = side ? 9 - stride : 9 + stride;
+  box('edge',legA-1,14,4,5); box('pants',legA,14,2,4);
+  box('edge',legB-1,14,4,5); box('pantsLight',legB,14,2,4);
+  box('edge',legA-2,18,5,2); box('boot',legA-1,18,4,1); box('bootLight',legA-1,19,3,1);
+  box('edge',legB-2,18,5,2); box('boot',legB-1,18,4,1); box('bootLight',legB-1,19,3,1);
+  // Rust scarf, muted green tunic, short travelling cloak and brass belt.
+  if (side) { box('edge',1,8,8,7); box('scarf',1,9,5,6); box('scarfLight',2,10,3,1); }
+  box('edge',3,8+breathe,10,8); box('tunic',4,9+breathe,8,6);
+  box('tunicLight',5,10+breathe,5,2); box('belt',4,14+breathe,8,1);
+  box('edge',2,9+breathe,3,6); box('scarf',3,9+breathe,2,4);
+  box('edge',11,9+breathe,3,6); box('scarf',11,9+breathe,2,4);
+  const swing = moving ? stride : 0;
+  box('skin',3,14+breathe+swing,2,2); box('skinLight',11,14+breathe-swing,2,2);
+  // Tousled dark hair is the strongest silhouette from the reference.
+  box('edge',4,1,9,8); box('hair',5,1,7,7); box('hair',3,3,10,4);
+  box('hairLight',5,2,4,1); box('hairLight',10,3,2,1);
+  box('edge',11,0,2,2); box('hair',12,1,2,2);
+  if (facing === 'north') {
+    box('hair',5,5,7,4); box('hairLight',6,6,4,1);
+    box('scarf',4,8,9,2); box('scarfLight',5,8,5,1);
+  } else if (side) {
+    box('edge',8,4,4,5); box('skin',9,5,3,3); box('skinLight',11,5,1,2);
+    box('eye',11,6,1,1); box('hair',8,3,4,2); box('scarf',5,8,8,2);
+    box('scarfLight',9,8,3,1);
+  } else {
+    box('edge',5,4,7,5); box('skin',6,4,5,4); box('skinLight',7,5,3,2);
+    box('eye',6,6,1,1); box('eye',10,6,1,1); box('hair',5,3,7,2);
+    box('scarf',4,8,9,2); box('scarfLight',5,8,6,1);
+  }
+  ctx.restore();
+}
+
 /** (x, y) is the tile-center position of the player in world pixels. `activity` is
  * the server's current encounter activity (or null); `clock` animates its pose. */
 export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null, clock = 0, equipment = {}, reducedMotion = false} = {}) {
@@ -194,7 +244,8 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
   let sprite = playerSprite(player);
   const compact = pose === 'crouch' || pose === 'sit' || pose === 'kneel';
   if (compact) sprite = crouchSprite(sprite);
-  const {width, height} = spriteSize(sprite);
+  const usingLegacyEquipment = Object.keys(equipment).length > 0;
+  const {width, height} = usingLegacyEquipment ? spriteSize(sprite) : {width: 48, height: compact ? 40 : 60};
   let bob = player.animation === 'idle' ? Math.floor(player.animation_ms / 600) % 2
     : player.animation === 'walk' ? Math.floor(player.animation_ms / 120) % 2 : 0;
   if (pose === 'crouch') bob = Math.floor(clock / 300) % 2;          // working hands
@@ -225,9 +276,10 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
     ray.addColorStop(0, '#fff3c400'); ray.addColorStop(.5, '#fff3c4'); ray.addColorStop(1, '#fff3c400');
     ctx.fillStyle = ray; ctx.fillRect(x - 9, top - 60, 18, height + 60); ctx.restore();
   }
-  paintPlayerLayers(ctx, player, left, top, equipment, compact);
+  if (usingLegacyEquipment) paintPlayerLayers(ctx, player, left, top, equipment, compact);
+  else paintPixelPlayer(ctx, player, left, top, {compact, reducedMotion});
   // Small brass clasp and collar glint keep the body readable over dark terrain.
-  if (!compact && !equipment.chest) {
+  if (usingLegacyEquipment && !compact && !equipment.chest) {
     ctx.fillStyle = '#ffe6a4'; ctx.fillRect(Math.round(x) - 2 + lx, top + 25, 4, 2);
     ctx.fillStyle = '#845528'; ctx.fillRect(Math.round(x) - 1 + lx, top + 27, 2, 2);
   }
