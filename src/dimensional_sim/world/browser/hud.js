@@ -158,7 +158,8 @@ export class ExpeditionHud {
     this.$('report').hidden = false;
     this.$('report').classList.toggle('opening', report.life === 0);
     this.$('report-close').textContent = report.life === 0 ? 'Begin the next life' : 'Continue';
-    this.$('report-close').focus();
+    this.$('report').focus({preventScroll: true});
+    this.$('report').scrollTop = 0;
   }
   hideReport() { this.$('report').hidden = true; }
 }
