@@ -51,6 +51,16 @@ class WebBridgeTests(unittest.TestCase):
         bulk.advance(5000, 10.0)
         self.assertEqual(bulk.save(), before)
 
+    def test_browser_boot_waits_for_first_input_before_progress(self):
+        game = WebGame(seed=3, start_paused=True)
+        before = game.save()
+        game.advance(5000, 5.0)
+        self.assertEqual(game.save(), before)
+        frame = json.loads(game.input(IDLE, 5.0))
+        self.assertFalse(frame["paused"])
+        game.advance(1000, 6.0)
+        self.assertEqual(json.loads(game.summary())["total_ms"], 1000)
+
 
 class SessionModuleTests(unittest.TestCase):
     def test_session_has_no_server_or_thread_imports(self):

@@ -111,7 +111,7 @@ class BrowserSession:
     over and the auto-pilot resumes MANUAL_HOLD seconds after the last command.
     Without an expedition the session is the original manual adapter.
     """
-    def __init__(self, game, expedition=None):
+    def __init__(self, game, expedition=None, *, start_paused=False):
         if game.world.cache_limit < 9:
             raise ValueError("browser view requires cache-limit >= 9")
         if expedition is not None and expedition.game is not game:
@@ -121,7 +121,7 @@ class BrowserSession:
         game.step_on_press = True  # manual taps move one cell; holds repeat
         self.lock = _NoLock()
         self.command = InputCommand()
-        self.paused = False
+        self.paused = start_paused
         self.input_time = float("-inf")
         self.manual_until = float("-inf")
 

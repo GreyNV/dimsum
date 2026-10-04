@@ -113,3 +113,37 @@ Plan and decisions: world-lives-plan.md. Code: progression.py, autopilot.py.
 Not wired into the idle-life simulator (core.py), journal or shards. No enemy AI
 (boars only strike back when punched), crafting/binding at the camp, equipment,
 more biomes, or a real unlock path for take_control. All numbers are untuned.
+
+## Browser presentation review (2026-10-04)
+The current dark-forest pool contains seven non-combat spots and the bramble boar.
+Each non-combat entry has a distinct larger spot silhouette; the boar has breathing
+and horn highlights. The anchor has a rune ring, taller stone, soul tether,
+floating fragments and fire sparks.
+The hosted open-terrain recipe was sampled at seed 482910 across 400 chunks:
+756 spots included all eight encounters (berries 179, branches 154, tracks 127,
+tree 78, spring 61, stone 53, carvings 30, boar 74). Both tree and rock placement
+rules had reachable candidates; carvings remain the rarest encounter. This is a
+content review sample, not a new pool version or a change to existing saves.
+These are client-only drawings from snapshot fields. Finished spots briefly show
+a dissolving seal, and active encounters have a glint on their progress bar.
+
+The player drawing now exposes independent body, chest, helmet, pants and boots
+layers. Future equipment art can overlay a slot in standing and compact activity
+poses without putting player graphics in locations or changing combat geometry.
+Face and hands remain in the base body under those overlays. No equipment item is yet represented
+in the forest save or granted by an encounter.
+
+The opening system report explains the auto-pilot, encounter experience, hunger,
+food cooldown and anchor return. It remains open until the player continues and
+the browser pauses the expedition while it is visible. Food slots darken after
+an automatic meal and brighten as the authoritative cooldown reaches zero.
+The browser session now starts paused until its first UI snapshot, so launching a
+server before opening the page cannot spend the first life behind the tutorial.
+In a local loaded-save browser check, a 12-second food cooldown stayed frozen at
+clock 0 while the report was open; after Continue, both food slots brightened
+from CSS brightness 0.48 to about 0.67 and finally 1.0 when ready.
+
+The [dark-forest sprite concept](../art/dark-forest-sprite-concept.png) records a
+higher-detail direction for the summoner, anchor, boar and all seven props. It is
+an art reference; the playable renderer uses the deterministic layered sprites
+described above, so this sheet is not loaded at runtime.

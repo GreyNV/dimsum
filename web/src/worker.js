@@ -8,8 +8,7 @@
  *               advances the expedition by measured elapsed milliseconds (the Python
  *               auto-pilot is partition-independent, so throttled timers are harmless).
  */
-/* global loadPyodide */
-importScripts('/pyodide/pyodide.js');
+import {loadPyodide} from '/pyodide/pyodide.mjs';
 
 let py = null, game = null, last = 0, loopTimer = 0;
 const MAX_STEP_MS = 60000;
@@ -55,11 +54,11 @@ async function init({save, seed, awayMs}) {
   const manifest = await boot();
   const WebGame = py.globals.get('WebGame');
   try {
-    game = save ? WebGame(save) : WebGame(null, seed);
+    game = save ? WebGame(save, seed, true) : WebGame(null, seed, true);
   } catch (error) {
     // A save from an incompatible build must not brick the game: start fresh, report it.
     postMessage({type: 'progress', stage: 'Save could not be loaded; starting a new life', fraction: 0.7, detail: String(error).slice(0, 300)});
-    game = WebGame(null, seed);
+    game = WebGame(null, seed, true);
     save = null;
   }
   let owed = save ? WebGame.offline_ms(awayMs | 0) : 0;

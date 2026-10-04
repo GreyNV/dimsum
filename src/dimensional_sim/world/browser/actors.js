@@ -19,6 +19,7 @@ export const ROLE = Object.freeze({
   // Player: rust cloak and brass trim contrast with the green forest.
   c: {fill: '#8e4731', ink: '#5a2a1b'}, t: {fill: '#d6a55e', ink: '#946733'},
   s: {fill: '#efc595', ink: '#3a2116'}, k: {fill: '#f5df8c', ink: '#8a6a2a'},
+  a: {fill: '#8ec8f4', ink: '#ecfaff'},
   p: {fill: '#4d3c2b', ink: '#2c2219'}, b: {fill: '#2b211a', ink: '#76604a'},
   // Enemy (bramble boar): wine fur, bone horns, ember eyes.
   f: {fill: '#7e3447', ink: '#4c1b2a'}, d: {fill: '#56202f', ink: '#2f0f18'},
@@ -35,17 +36,17 @@ const withLegs = (body, legs) => ({paint: [...body.paint.slice(0, -2), ...legs.p
 
 // 9 columns x 9 rows = 36x63 px: 1.5 tiles wide, ~2.25 tiles tall.
 const FRONT = {paint: [
-  '   ccc   ', '  ccccc  ', '  csssc  ', ' cctktcc ', 'cctttttcc',
+  '   ccc   ', '  ccccc  ', '  csssc  ', ' cctktcc ', 'ccttattcc',
   'scctktccs', ' cctttcc ', '  pp pp  ', '  bb bb  '], glyph: [
   '   /^\\   ', '  /:::\\  ', '  (o.o)  ', " /:'*':\\ ", '/:|:::|:\\',
   'o:|=*=|:o', ' \\|:::|/ ', '  || ||  ', '  -- --  ']};
 const BACK = {paint: [
-  '   ccc   ', '  ccccc  ', '  ccccc  ', ' ccctccc ', 'ccccccccc',
+  '   ccc   ', '  ccccc  ', '  ccccc  ', ' ccctccc ', 'ccccacccc',
   'scccccccs', ' ccccccc ', '  pp pp  ', '  bb bb  '], glyph: [
   '   /^\\   ', '  /:::\\  ', '  |:::|  ', ' /::v::\\ ', '/:::|:::\\',
   'o:::|:::o', ' \\:::::/ ', '  || ||  ', '  -- --  ']};
 const SIDE = {paint: [
-  '   ccc   ', '  ccccc  ', '  cccss  ', '  cctts  ', ' cctttc  ',
+  '   ccc   ', '  ccccc  ', '  cccss  ', '  cctts  ', ' cctatc  ',
   ' cctkts  ', ' cctttc  ', '   pp    ', '   bb    '], glyph: [
   '   /^\\   ', '  /:::\\  ', '  |:: .  ', '  /:=:   ', ' /:|::\\  ',
   ' |:=*=o  ', ' \\:|::/  ', '   ||    ', '   -=    ']};
@@ -78,6 +79,39 @@ export function playerSprite(player) {
     sprite = withLegs(sprite, legs); // lunge stance
   }
   return sprite;
+}
+
+/** Stable sprite layers. Equipment art can later replace one slot with a same-size
+ * paint/glyph sprite without changing terrain, facing or the combat state. */
+export const PLAYER_SLOTS = Object.freeze(['body', 'pants', 'boots', 'chest', 'helmet']);
+export function playerSpriteLayers(player, compact = false) {
+  const standing = playerSprite(player);
+  const sprite = compact ? crouchSprite(standing) : standing;
+  const layers = Object.fromEntries(PLAYER_SLOTS.map(slot => [slot, {paint: [], glyph: []}]));
+  sprite.paint.forEach((row, r) => {
+    [...row].forEach((role, c) => {
+      const logicalRow = compact && r === sprite.paint.length - 1 ? 8 : r;
+      const slot = role === 's' ? 'body' : logicalRow === 8 ? 'boots'
+        : logicalRow === 7 ? 'pants' : logicalRow <= 2 ? 'helmet' : 'chest';
+      for (const name of PLAYER_SLOTS) {
+        layers[name].paint[r] ??= ' '.repeat(row.length);
+        layers[name].glyph[r] ??= ' '.repeat(row.length);
+        if (name === slot && role !== ' ') {
+          layers[name].paint[r] = layers[name].paint[r].slice(0, c) + role + layers[name].paint[r].slice(c + 1);
+          layers[name].glyph[r] = layers[name].glyph[r].slice(0, c) + sprite.glyph[r][c] + layers[name].glyph[r].slice(c + 1);
+        }
+      }
+    });
+  });
+  return layers;
+}
+
+export function paintPlayerLayers(ctx, player, left, top, equipment = {}, compact = false) {
+  const layers = playerSpriteLayers(player, compact);
+  for (const slot of PLAYER_SLOTS) paintSprite(ctx, layers[slot], left, top);
+  // Equipment is a transparent overlay; face and hands remain part of the body.
+  for (const slot of PLAYER_SLOTS.slice(1)) if (equipment[slot])
+    paintSprite(ctx, compact ? crouchSprite(equipment[slot]) : equipment[slot], left, top);
 }
 
 // 11 columns x 7 rows = 44x49 px.
@@ -153,7 +187,7 @@ export function crouchSprite(sprite) {
 
 /** (x, y) is the tile-center position of the player in world pixels. `activity` is
  * the server's current encounter activity (or null); `clock` animates its pose. */
-export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null, clock = 0} = {}) {
+export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null, clock = 0, equipment = {}} = {}) {
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
   const pose = activity && player.animation !== 'attack' ? POSE[activity.kind] : null;
@@ -184,23 +218,35 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
   }
   // Seen from behind, a pulled-back fist hides behind the body; a strike is in front.
   if (fist && player.facing === 'north' && phase !== 'strike') drawFist(ctx, ...fist);
-  paintSprite(ctx, sprite, left, top);
+  const compact = pose === 'crouch' || pose === 'sit';
+  paintPlayerLayers(ctx, player, left, top, equipment, compact);
+  // Small brass clasp and collar glint keep the body readable over dark terrain.
+  if (!compact && !equipment.chest) {
+    ctx.fillStyle = '#ffe6a4'; ctx.fillRect(Math.round(x) - 2 + lx, top + 25, 4, 2);
+    ctx.fillStyle = '#845528'; ctx.fillRect(Math.round(x) - 1 + lx, top + 27, 2, 2);
+  }
   if (fist && !(player.facing === 'north' && phase !== 'strike')) drawFist(ctx, ...fist);
   if (pose === 'crouch') {  // hands working at the spot in front
     const hx = x + Math.round(Math.cos(angle) * 9), hy = y + ACTOR_FOOT - 6 + Math.round(Math.sin(angle) * 4) - bob;
     ctx.fillStyle = OUTLINE; ctx.fillRect(hx - 3, hy - 3, 6, 6);
     ctx.fillStyle = ROLE.s.fill; ctx.fillRect(hx - 2, hy - 2, 4, 4);
   }
-  if (activity) drawProgress(ctx, x, top - 6, activity.progress / 1000);
+  if (activity) drawProgress(ctx, x, top - 6, activity.progress / 1000, clock);
   return {left, top, width, height};
 }
 
-export function drawProgress(ctx, cx, y, fraction) {
-  const w = 24, x = Math.round(cx - w / 2), f = Math.max(0, Math.min(1, fraction));
-  ctx.fillStyle = OUTLINE; ctx.fillRect(x - 1, y - 1, w + 2, 5);
-  ctx.fillStyle = '#3b3418'; ctx.fillRect(x, y, w, 3);
-  ctx.fillStyle = '#e9c25c'; ctx.fillRect(x, y, Math.round(w * f), 3);
-  ctx.fillStyle = '#fff0b0'; ctx.fillRect(x, y, Math.round(w * f), 1);
+export function drawProgress(ctx, cx, y, fraction, clock = 0) {
+  const w = 32, x = Math.round(cx - w / 2), f = Math.max(0, Math.min(1, fraction));
+  const filled = Math.round(w * f);
+  ctx.fillStyle = OUTLINE; ctx.fillRect(x - 2, y - 2, w + 4, 8);
+  ctx.fillStyle = '#3b3418'; ctx.fillRect(x, y, w, 4);
+  ctx.fillStyle = '#cb873a'; ctx.fillRect(x, y, filled, 4);
+  ctx.fillStyle = '#ffe3a0'; ctx.fillRect(x, y, filled, 1);
+  if (filled > 1) {
+    ctx.fillStyle = '#fff6d7';
+    ctx.fillRect(x + Math.min(filled - 2, Math.floor(clock / 90) % Math.max(1, filled)), y + 1, 2, 2);
+  }
+  ctx.fillStyle = '#fff0b0'; ctx.fillRect(x + filled - 1, y - 3, 2, 10);
 }
 
 /** Enemy at tile center (x, y). `hit` = ms since last HP loss; `dying` = 0..1 progress. */
@@ -224,6 +270,19 @@ export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying =
   }
   drawShadow(ctx, x, y, 17);
   paintSprite(ctx, ENEMY, left, top, {flash: hit < 110, seed});
+  // Breath and horn glints distinguish a living boar from a static encounter prop.
+  if (hit >= 110) {
+    ctx.fillStyle = '#fff0c2';
+    ctx.fillRect(left + 5, top + 8, 2, 3);
+    ctx.fillRect(left + width - 7, top + 8, 2, 3);
+    if (!reducedMotion) {
+      ctx.save(); ctx.globalAlpha = .25 + .25 * Math.sin((clock + seed % 500) / 190);
+      ctx.fillStyle = '#f1d2be';
+      ctx.fillRect(x - 7, top + 31, 3, 2);
+      ctx.fillRect(x + 5, top + 31, 3, 2);
+      ctx.restore();
+    }
+  }
   drawHealth(ctx, x, top - 7, target.hp, Math.max(maxHp, target.hp));
   return {left, top, width, height};
 }
@@ -288,26 +347,29 @@ const SPOT_ROLES = Object.freeze({
   r: {fill: '#b8323f', ink: '#ffb0a0'}, l: {fill: '#3f6a2e', ink: '#8fbf5a'},
   o: {fill: '#7a5532', ink: '#c39a62'}, a: {fill: '#3c6f8f', ink: '#bfe8ff'},
   g: {fill: '#6d7468', ink: '#b9bfae'}, q: {fill: '#55743c', ink: '#a9c97a'},
-  u: {fill: '#3b2a1c', ink: '#8b6b4a'}, x: {fill: '#6d7468', ink: '#f2d27a'}
+  u: {fill: '#3b2a1c', ink: '#8b6b4a'}, x: {fill: '#6d7468', ink: '#f2d27a'},
+  y: {fill: '#e5c772', ink: '#fff3bc'}, c: {fill: '#a6bacc', ink: '#e8f5ff'}
 });
 export const SPOTS = Object.freeze({
-  bramble_berries: {paint: [' lrl l ', 'lrlrlrl', ' llrll '], glyph: [' ;o; ; ', ';o;o;o;', ' ;;o;; ']},
-  fallen_branches: {paint: ['  ooooo ', 'ooooo oo'], glyph: ['  =-=-= ', '-=-=- =-']},
-  animal_tracks: {paint: ['u   u  ', '  u   u', 'u   u  '], glyph: ['v   v  ', '  v   v', 'v   v  ']},
-  gnarled_tree: {paint: [' l ', ' l ', 'lol'], glyph: [' ( ', ' ) ', '\\|/']},
-  forest_spring: {paint: [' aaaaa ', 'gaaaaag'], glyph: [' ~~~~~ ', 'o~~~~~o']},
-  mossy_stone: {paint: [' qqq ', 'gqggq', 'ggggg'], glyph: [' ,,, ', ':,::,', '::::_']},
-  old_carvings: {paint: [' ggg ', 'gxgxg', 'ggggg'], glyph: [' ___ ', '|*o*|', '|___|']}
+  bramble_berries: {paint: ['  l r l  ', ' lrlrlrl ', 'lrrllrrll', ' lllrlll '], glyph: ['  / o \\  ', ' /o/o/o\\ ', ';o;v;o;v;', ' \\;o;;;/ ']},
+  fallen_branches: {paint: ['   l  l   ', ' oooooooo ', 'oooooooooo'], glyph: ['   /  \\   ', ' /==\\==\\  ', '=\\===/===/']},
+  animal_tracks: {paint: ['u  u   u ', '  u  u   ', 'u   u  u '], glyph: ['v  v   v ', '  v  v   ', 'v   v  v ']},
+  gnarled_tree: {paint: ['   lll   ', '  lllll  ', '  lolol  ', '   ooo   ', '  oo oo  '], glyph: ['   ^^^   ', '  /:::\\  ', '  (|:|)  ', '   |||   ', '  /| |\\  ']},
+  forest_spring: {paint: ['  cccccc  ', ' gaaaaaag ', 'gaaaaaaaag', ' gggggggg '], glyph: ['  .    .  ', ' /~~~~~~\\ ', '|~*~~~~*~|', ' \\______/ ']},
+  mossy_stone: {paint: ['   qqq   ', '  qgqgq  ', ' ggggggg ', '  ggggg  '], glyph: ['   .^.   ', '  /:,:\\  ', ' /:___:\\ ', '  \\___/  ']},
+  old_carvings: {paint: ['   xxx   ', '  ggggg  ', '  gxgxg  ', '  ggggg  '], glyph: ['   *:*   ', '  /___\\  ', '  |*o*|  ', '  /___\\  ']}
 });
 
 /** The anchor camp at the anchor cell: anchor stone, bedroll, fire pit. Ground
  * decoration only (non-blocking); future crafting and binding will happen here. */
 const CAMP_ROLES = Object.freeze({g: {fill: '#5d6470', ink: '#9fd0ff'}, v: {fill: '#2b3140', ink: '#cfe6ff'},
-  r: {fill: '#7b3b2e', ink: '#d9a06a'}, o: {fill: '#6a4a2c', ink: '#b88c58'}, f: {fill: '#d8762e', ink: '#ffe08a'}});
+  r: {fill: '#7b3b2e', ink: '#d9a06a'}, o: {fill: '#6a4a2c', ink: '#b88c58'}, f: {fill: '#d8762e', ink: '#ffe08a'},
+  a: {fill: '#a9bed4', ink: '#f1faff'}, c: {fill: '#294661', ink: '#99daff'}});
 export const CAMP = Object.freeze({
-  stone: {paint: [' gg ', 'gvvg', 'gvvg', 'gggg'], glyph: [' /\\ ', '|<>|', '|<>|', '/__\\']},
-  bedroll: {paint: ['rrrrrr', 'rrrrrr'], glyph: ['=====)', '=====)']},
-  fire: {paint: [' ff ', 'offo'], glyph: [' ^^ ', '>/\\<']}
+  stone: {paint: ['   aaa   ', '  agvga  ', '  gcvgg  ', '  gvcvg  ', '  gcvgg  ', '  ggvgg  ', ' ggggggg '],
+    glyph: ['   /\\    ', '  /<>\\   ', '  |*|:|  ', '  |:O:|  ', '  |:|*|  ', '  \\:::/  ', ' /_____\\ ']},
+  bedroll: {paint: [' rrrrrrr ', 'rrrrrrrrr', ' ooooooo '], glyph: [' /======\\', '|========', ' \\______/']},
+  fire: {paint: ['  f f  ', ' ffff  ', 'offffo ', ' ooooo '], glyph: ['  ^ ^  ', ' /^^\\  ', '>/\\/\\< ', ' \\____/']}
 });
 function paintParts(ctx, sprite, roles, left, top, alpha = 1) {
   ctx.globalAlpha = alpha;
@@ -327,14 +389,47 @@ export function drawCamp(ctx, x, y, {clock = 0, reducedMotion = false} = {}) {
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
   const pulse = reducedMotion ? .35 : .3 + .18 * Math.sin(clock / 520);
+  // The soul tether rises behind the stone, never entering the location asset.
+  ctx.save();
+  ctx.globalAlpha = reducedMotion ? .18 : .14 + pulse * .18;
+  const beam = ctx.createLinearGradient(x - 18, y - 88, x - 18, y + 12);
+  beam.addColorStop(0, '#9bd9ff00');
+  beam.addColorStop(.35, '#9bd9ff');
+  beam.addColorStop(1, '#cceeff00');
+  ctx.fillStyle = beam;
+  ctx.beginPath(); ctx.moveTo(x - 26, y - 86); ctx.lineTo(x - 10, y - 86);
+  ctx.lineTo(x - 2, y + 14); ctx.lineTo(x - 34, y + 14); ctx.closePath(); ctx.fill();
+  ctx.restore();
   ctx.save(); ctx.globalAlpha = pulse;
   const glow = ctx.createRadialGradient(x, y + 2, 2, x, y + 2, 46);
   glow.addColorStop(0, '#9fd0ff'); glow.addColorStop(1, '#9fd0ff00');
   ctx.fillStyle = glow; ctx.beginPath(); ctx.ellipse(x, y + 4, 46, 20, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-  paintParts(ctx, CAMP.stone, CAMP_ROLES, x - 30, y - 22);
-  paintParts(ctx, CAMP.bedroll, CAMP_ROLES, x + 10, y + 2);
+  ctx.save(); ctx.strokeStyle = '#80b9e3'; ctx.lineWidth = 2; ctx.globalAlpha = pulse + .18;
+  ctx.beginPath(); ctx.ellipse(x - 18, y + 14, 42, 13, 0, 0, Math.PI * 2); ctx.stroke();
+  for (let i = 0; i < 8; i++) {
+    const angle = i * Math.PI / 4, rx = x - 18 + Math.cos(angle) * 42, ry = y + 14 + Math.sin(angle) * 13;
+    ctx.fillStyle = '#d4eeff'; ctx.fillRect(Math.round(rx) - 1, Math.round(ry) - 1, 3, 3);
+  }
+  ctx.restore();
+  paintParts(ctx, CAMP.stone, CAMP_ROLES, x - 36, y - 56);
+  for (let i = 0; i < 4; i++) {
+    const phase = reducedMotion ? i * 1.57 : clock / 700 + i * 1.57;
+    const sx = x - 18 + Math.cos(phase) * (24 + i % 2 * 6);
+    const sy = y - 44 + Math.sin(phase) * 9 - i * 6;
+    ctx.save(); ctx.globalAlpha = .45 + pulse * .5;
+    ctx.fillStyle = '#c8edff'; ctx.fillRect(Math.round(sx) - 1, Math.round(sy) - 3, 3, 6);
+    ctx.fillStyle = '#f3fcff'; ctx.fillRect(Math.round(sx), Math.round(sy) - 2, 1, 3);
+    ctx.restore();
+  }
+  paintParts(ctx, CAMP.bedroll, CAMP_ROLES, x + 11, y + 2);
   const flicker = reducedMotion ? 0 : Math.floor(clock / 140) % 2;
   paintParts(ctx, CAMP.fire, CAMP_ROLES, x - 8, y + 10 - flicker);
+  if (!reducedMotion) for (let i = 0; i < 3; i++) {
+    const rise = (clock / 65 + i * 8) % 25;
+    ctx.globalAlpha = (1 - rise / 25) * .8; ctx.fillStyle = i ? '#ffb651' : '#fff1ba';
+    ctx.fillRect(x - 2 + i * 5 - Math.floor(rise / 5), y + 8 - rise, 2, 2);
+  }
+  ctx.globalAlpha = 1;
 }
 
 /** Spot at tile center (x, y); a sparkle marks it, brighter when it is the goal. */
@@ -361,6 +456,27 @@ export function drawSpot(ctx, spot, x, y, {clock = 0, goal = false, fade = 0} = 
     const sy = top - 7 + lift, size = goal ? 3 : 2;
     ctx.fillStyle = OUTLINE; ctx.fillRect(x - size - 1, sy - size - 1, size * 2 + 2, size * 2 + 2);
     ctx.fillStyle = goal ? '#fff0b0' : '#d8b860'; ctx.fillRect(x - size, sy - size, size * 2, size * 2);
+  }
+  ctx.restore();
+}
+
+/** A finished task leaves a brief, readable seal over its former spot. This is
+ * presentation only; the encounter log and simulation decide completion. */
+export function drawSpotCompletion(ctx, spot, x, y, age, reducedMotion = false) {
+  if (age < 0 || age >= 650) return;
+  const t = age / 650;
+  ctx.save(); ctx.globalAlpha = Math.max(0, 1 - t);
+  const color = spot.encounter === 'forest_spring' ? '#a9eaff'
+    : spot.encounter === 'old_carvings' ? '#d3b6ff' : '#ffe5a0';
+  ctx.strokeStyle = color; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.ellipse(x, y + 4, reducedMotion ? 19 : 6 + t * 23,
+    reducedMotion ? 8 : 3 + t * 9, 0, 0, Math.PI * 2); ctx.stroke();
+  for (let i = 0; i < 6; i++) {
+    const angle = i * Math.PI / 3 + (reducedMotion ? 0 : t * .5);
+    const radius = reducedMotion ? 21 : 8 + t * 26;
+    ctx.fillStyle = i % 2 ? '#fff9df' : color;
+    ctx.fillRect(Math.round(x + Math.cos(angle) * radius) - 2,
+      Math.round(y - 4 + Math.sin(angle) * radius * .55) - 2, 4, 4);
   }
   ctx.restore();
 }
