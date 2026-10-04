@@ -1,8 +1,8 @@
 /** Browser adapter: snapshots in, character art out. Python owns all game rules. */
 import {TILE_W, TILE_H, ZOOM, clamp, residentBounds, cameraView, follow, retainResident, tileAt, visualHash, Controls} from './view.js';
 import {PALETTE, OBJECT_PAD, paintChunk, drawTree, terrainColor} from './art.js';
-import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawDamage, drawFloat, drawSpot, drawSpotCompletion, drawCamp, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
-import {ExpeditionHud, activityText, newRewards, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
+import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawDamage, drawFloat, drawSpot, drawSpotCompletion, drawCamp, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
+import {ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('scene'), ctx = canvas.getContext('2d'), mini = $('minimap'), map = mini.getContext('2d');
@@ -18,6 +18,9 @@ let swing = {serial: 0, active: false, slashAt: null, lastMs: -1, effects: []};
 /* Expedition presentation: reward popups and fading completed spots (cosmetic). */
 const hud = new ExpeditionHud(), rewards = [], fadingSpots = new Map();
 let lastRewardSeq = null, spotsSeen = new Map(), reportSeen = null, reportTimer = 0;
+/* Prologue: where the old man stands, and his walk away once he has spoken (cosmetic). */
+let elder = null, elderLeaving = null;
+const ELDER_LEAVE_MS = 2200;
 const SEEN_REPORT_KEY = 'dimsum.report.seen';
 const seenReport = () => { try { return localStorage.getItem(SEEN_REPORT_KEY); } catch { return null; } };
 const markReport = (worldSeed, report) => { try { localStorage.setItem(SEEN_REPORT_KEY, reportStorageKey(worldSeed, report)); } catch { /* optional */ } };
@@ -97,8 +100,12 @@ function observeExpedition(next) {
     for (const entry of newRewards(next, lastRewardSeq))
       rewardTexts(entry).forEach((r, i) => rewards.push({...r, at: now + i * 180}));
   lastRewardSeq = Math.max(lastRewardSeq ?? 0, seq);
+  const prologue = next.expedition.prologue;
+  if (prologue) { elder = {...prologue.elder}; elderLeaving = null; }
+  else if (elder) { elderLeaving = {...elder, at: now}; elder = null; }
   const report = next.expedition.report;
-  if (report && report.seq !== reportSeen) {
+  // An empty report is the prologue's placeholder: the opening is told in the world.
+  if (report && report.lines.length && report.seq !== reportSeen) {
     const already = seenReport() === reportStorageKey(next.world_seed, report);
     if (!already && (report.life === 0 || reportSeen !== null || reportIsFresh(next.expedition))) {
       markReport(next.world_seed, report);
@@ -249,10 +256,25 @@ function render(now) {
     const actors=state.targets.filter(t=>t.hp>0 || (deaths.has(t.id) && now-deaths.get(t.id).at<600))
       .map(t=>({kind:'enemy',row:t.y,tx:t.x,ty:t.y,target:t}));
     actors.push({kind:'player',row:actor.y/TILE_H-.5,tx:state.player.x,ty:state.player.y});
+    const prologue = state.expedition?.prologue ?? null;
+    if (elder) actors.push({kind:'elder',row:elder.y,tx:elder.x,ty:elder.y,alpha:1,shift:0,
+      facing:state.player.x < elder.x ? 'west' : 'east',talking:prologue?.stage === 'listen'});
+    else if (elderLeaving) {
+      const age = now - elderLeaving.at;
+      if (age >= ELDER_LEAVE_MS) elderLeaving = null;
+      else actors.push({kind:'elder',row:elderLeaving.y,tx:elderLeaving.x,ty:elderLeaving.y,
+        alpha:1 - age / ELDER_LEAVE_MS,shift:reducedMotion ? 0 : age / ELDER_LEAVE_MS * TILE_W * 2.5,facing:'east',talking:false});
+    }
+    // Prologue poses: kneeling while waking, rising, then standing to listen.
+    let activity = state.expedition?.activity ?? null;
+    if (prologue) activity = prologue.stage === 'listen' ? null
+      : {...activity, kind: prologue.stage === 'awaken' || prologue.progress < 650 ? 'kneel' : 'stand'};
     actors.sort((a,b)=>a.row-b.row || (a.kind==='player')-(b.kind==='player'));
     for(const item of actors) {
       if(item.kind==='player') drawPlayer(ctx,state.player,actor.x,actor.y,attackPhase(state.player),
-        {activity:state.expedition?.activity ?? null, clock:state.clock_ms});
+        {activity, clock:state.clock_ms});
+      else if(item.kind==='elder') drawElder(ctx,(item.tx+.5)*TILE_W+item.shift,(item.ty+.5)*TILE_H,
+        {clock:state.clock_ms,facing:item.facing,alpha:item.alpha,talking:item.talking,reducedMotion});
       else {
         const t=item.target, hit=hits.get(t.id), death=deaths.get(t.id);
         drawEnemy(ctx,t,(t.x+.5)*TILE_W,(t.y+.5)*TILE_H,{clock:state.clock_ms,reducedMotion,
@@ -282,6 +304,21 @@ function render(now) {
         {color: rewards[i].color, duration: 1600, size: 9});
     }
     ctx.setTransform(dpr,0,0,dpr,0,0);
+    const opening = prologueView(prologue);
+    if (opening.dark) {
+      // Eyes closed: black. Opening: two lids part from the middle of the screen.
+      const lid = (1 - (reducedMotion ? opening.eyes : 1 - (1 - opening.eyes) ** 2)) * height / 2;
+      ctx.fillStyle = '#000';
+      if (opening.eyes <= 0) ctx.fillRect(0, 0, width, height);
+      else {
+        ctx.fillRect(0, 0, width, lid); ctx.fillRect(0, height - lid, width, lid);
+        for (const [y0, y1] of [[lid, lid + 40], [height - lid, height - lid - 40]]) {
+          const edge = ctx.createLinearGradient(0, y0, 0, y1);
+          edge.addColorStop(0, '#000'); edge.addColorStop(1, '#0000');
+          ctx.fillStyle = edge; ctx.fillRect(0, Math.min(y0, y1), width, 40);
+        }
+      }
+    }
     const shade=ctx.createRadialGradient(width/2,height/2,Math.min(width,height)*.27,width/2,height/2,Math.max(width,height)*.7);
     shade.addColorStop(0,'#00000000'); shade.addColorStop(1,'#070c0755');
     ctx.fillStyle=shade; ctx.fillRect(0,0,width,height);

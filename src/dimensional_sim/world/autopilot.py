@@ -20,13 +20,25 @@ vitals are partition-independent. Health 0 -> life report -> return to anchor:
 regular XP, inventory, vitals, actors and encounter rolls reset; dimensional XP,
 the discovery map and skills persist.
 
+Prologue (first life of a new expedition): the screen starts dark while the
+avatar wakes from the bandit ambush ("awaken"), then stands up ("stand_up") and
+listens to the old man who found them ("listen"). These are ordinary timed tasks,
+so the opening is as deterministic and save-safe as the rest of the expedition.
+
+Spawn windows (encounters.py): at the start of every life each limited encounter
+rolls how many of it may exist at once around the avatar (resident chunks). When a
+chunk first becomes resident its spots and asset-spawned boars are screened: any
+beyond the cap never appear this life. Completing or leaving one frees a slot for
+new ground. Food is scarce on purpose: passing the first biome takes some luck.
+Prayer at wayside shrines grants persistent blessing power and sometimes a boon.
+
 Manual control is the locked skill "take_control"; adapters must ignore player
 movement/attack input until it is unlocked.
 """
 from collections import deque
 
 from ..core import _softcapped_level
-from .encounters import ATTRIBUTES, BY_ID, ENCOUNTER_VERSION, ITEMS, chunk_spots, roll_loot
+from .encounters import ATTRIBUTES, BY_ID, ENCOUNTER_VERSION, ITEMS, chunk_spots, roll_loot, roll_window
 from .models import DELTAS, DIRECTIONS, ChunkKey, fields, identifier, integer
 from .progression import CONFIG, DIMENSIONAL_DIVISOR, dimensional_level, regular_level, scaled_ms, speed_permille
 from .runtime import Exploration, InputCommand, Target
@@ -57,14 +69,31 @@ RESTED_AT = 90 * POINT
 REST_MS = 10_000
 INVENTORY_SLOTS = 12
 STACK_LIMIT = 20
-OPENING_REPORT = (
-    "At the end of a long life, the summoning gift everyone dismissed answered. A stone anchor caught your soul and returned you to the beginning.",
-    "Your explorer follows the forest trail automatically. Watch the map and current task to see where this life goes.",
-    "Forage, study, climb and fight to raise six attributes. Regular experience resets each life; blue dimensional experience stays with you.",
-    "Hunger falls with time. Food is eaten automatically when needed, then cools down. At zero health, the anchor returns you with fresh supplies.",
-    "The first report recorded one dimensional shard and awakened a Clone. Their purpose is still hidden. Pause with P; zoom with + and -.",
+BOON_CHANCE = 40                   # percent of prayers the gods answer at once
+BOON = 15                          # health and hunger points restored by an answered prayer
+BOAR_ENCOUNTER = "bramble_boar"    # asset-spawned enemies count against this spawn window
+
+PROLOGUE_MS = {"awaken": 10_000, "stand_up": 3_500, "listen": 25_000}
+PROLOGUE_NEXT = {"awaken": "stand_up", "stand_up": "listen"}
+PROLOGUE_NAMES = {"awaken": "Wake up", "stand_up": "Stand up", "listen": "Listen to the old man"}
+# Memory fragments shown on the dark screen while the avatar wakes up.
+MEMORIES = (
+    "The forest road. Wagon wheels, laughter, a song left half-finished.",
+    "Arrows from the trees. Bandits. Steel and shouting, someone running.",
+    "A blade, cold and very close. The ground rushing up to meet you.",
+    "Silence. Then, from very far away, something old answers.",
 )
-LOG_TYPES = ("encounter", "eat", "rest", "life")
+# The old man who finds the newborn avatar beside the road.
+ELDER_LINES = (
+    "Why... I don't believe it. I witnessed the birth of an avatar - a dimensional avatar.",
+    "The bandits left you for dead. The gods saved you, but now you have to worship them.",
+    "Go explore the world, and don't forget to pray. Maybe the gods will bestow blessings on you.",
+    "Mind your hunger, too. This forest feeds only the lucky.",
+    "May the path be smooth. Only you will know what destiny awaits.",
+)
+LOG_TYPES = ("encounter", "eat", "rest", "life", "blessing", "lore")
+TASK_TYPES = ("perform", "pause", "rest", *PROLOGUE_MS)
+SCHEMA_VERSION = 3
 
 
 def _table():
@@ -76,7 +105,8 @@ def _ceil_div(a, b):
 
 
 class Expedition:
-    def __init__(self, game, *, skills=()):
+    def __init__(self, game, *, skills=(), fresh=True):
+        """fresh=True starts a new expedition (prologue first); loaders pass False."""
         self.game = game
         self.dimension = game.player.chunk.dimension
         self.skills = set()
@@ -90,12 +120,17 @@ class Expedition:
         self.sequence = 0
         self.decisions = 0
         self.best_depth = 0
-        self.report = {"seq": 0, "life": 0, "clock_ms": 0, "title": "The awakening",
-                       "lines": list(OPENING_REPORT)}
-        self._new_life_state()
+        self.blessing = 0
+        # No pop-up opening: the prologue tells the story in the world itself.
+        self.report = {"seq": 0, "life": 0, "clock_ms": 0, "title": "", "lines": []}
         self._spot_cache = {}
         self._field_cache = {}
+        self._new_life_state()
         self.anchor = self._anchor()
+        self.elder = self._elder_cell()
+        if fresh:
+            self.task = {"type": "awaken", "spot": None, "elapsed_ms": 0, "duration_ms": PROLOGUE_MS["awaken"]}
+            self._screen()
 
     def _new_life_state(self):
         self.regular = _table()
@@ -107,8 +142,19 @@ class Expedition:
         self.food_cooldown_ms = 0
         self.cause = None
         self.depth = 0
-        self.task = None   # {"type": "perform"|"pause"|"rest", "spot", "elapsed_ms", "duration_ms"}
+        self.task = None   # {"type": TASK_TYPES, "spot", "elapsed_ms", "duration_ms"}
         self.goal = None   # {"kind": "spot"|"target"|"wander"|"home", "id", "x", "y"}
+        self._reset_spawns()
+
+    def _reset_spawns(self):
+        """Roll this life's spawn windows; nothing has been screened yet."""
+        seed = derive_seed(self.game.world.world_seed, "spawn-window", self.life)
+        self.budget = {entry.id: limit for entry in BY_ID.values()
+                       if (limit := roll_window(entry, seed)) is not None}
+        self.spawned = {ident: 0 for ident in self.budget}   # total admitted this life
+        self.admitted = {}             # spot / asset-target id -> encounter id, this life
+        self.screened_chunks = set()   # chunk ids whose spots were screened
+        self.screened_targets = set()  # asset-spawned target ids screened
 
     # ----- public state -------------------------------------------------
     def unlock(self, skill):
@@ -123,6 +169,23 @@ class Expedition:
     def interrupt(self):
         """Manual input took over: drop the plan; a running punch still completes."""
         self.task, self.goal = None, None
+
+    @property
+    def in_prologue(self):
+        return bool(self.task) and self.task["type"] in PROLOGUE_MS
+
+    def prologue(self):
+        """Presentation of the opening scene, or None once it is over."""
+        if not self.in_prologue:
+            return None
+        stage = self.task["type"]
+        lines = MEMORIES if stage == "awaken" else ELDER_LINES if stage == "listen" else ()
+        return {"stage": stage, "progress": self.task["elapsed_ms"] * 1000 // self.task["duration_ms"],
+                "elder": {"x": self.elder[0], "y": self.elder[1]}, "lines": list(lines)}
+
+    def bounty(self):
+        """This life's spawn caps: [(encounter id, spawned so far, at-once limit)]."""
+        return [(ident, self.spawned[ident], self.budget[ident]) for ident in BY_ID if ident in self.budget]
 
     def ring(self, key):
         """Danger ring: Chebyshev chunk distance from the anchor chunk."""
@@ -148,6 +211,10 @@ class Expedition:
         if not task or task["type"] == "pause":
             return None
         progress = task["elapsed_ms"] * 1000 // task["duration_ms"]
+        if task["type"] in PROLOGUE_MS:
+            px, py = self._player()
+            return {"encounter": task["type"], "name": PROLOGUE_NAMES[task["type"]], "kind": task["type"],
+                    "x": px, "y": py, "progress": progress}
         if task["type"] == "rest":
             return {"encounter": "anchor_rest", "name": "Resting at the anchor camp", "kind": "rest",
                     "x": self.anchor[0], "y": self.anchor[1], "progress": progress}
@@ -160,6 +227,8 @@ class Expedition:
                 "x": gx, "y": gy, "progress": progress}
 
     def mode(self):
+        if self.in_prologue:
+            return "prologue"
         if self.task and self.task["type"] == "rest":
             return "rest"
         if self.game.player.animation == "attack" or (self.goal or {}).get("kind") == "target":
@@ -172,7 +241,8 @@ class Expedition:
 
     def vitals(self):
         return {"hunger": self.hunger // 10_000, "health": self.health // 10_000, "max": 10_000,
-                "food_cooldown_ms": self.food_cooldown_ms, "food_cooldown_total_ms": FOOD_COOLDOWN_MS}
+                "food_cooldown_ms": self.food_cooldown_ms, "food_cooldown_total_ms": FOOD_COOLDOWN_MS,
+                "blessing": self.blessing}
 
     def inventory_rows(self):
         return [{"id": item, "name": ITEMS[item].name, "kind": ITEMS[item].kind,
@@ -183,7 +253,7 @@ class Expedition:
         """Uncompleted spots in resident chunks (fight spots appear as targets)."""
         result = []
         for chunk in self._resident():
-            for spot in self._spots(chunk):
+            for spot in self._live(chunk):
                 entry = BY_ID[spot.encounter]
                 if spot.id in self.completed or entry.kind == "fight":
                     continue
@@ -235,6 +305,63 @@ class Expedition:
             cached = (chunk.seed, chunk_spots(chunk, life=self.life))
             self._spot_cache[key] = cached
         return cached[1]
+
+    def _live(self, chunk):
+        """Spots this life's spawn windows admitted."""
+        return [spot for spot in self._spots(chunk) if spot.id in self.admitted]
+
+    def _active(self, encounter):
+        """Admitted, unfinished instances of an encounter around the avatar now."""
+        count = 0
+        for chunk in self._resident():
+            count += sum(1 for spot in self._live(chunk)
+                         if spot.encounter == encounter and spot.id not in self.completed)
+        if encounter == BOAR_ENCOUNTER:
+            resident = {chunk.key for chunk in self._resident()}
+            count += sum(1 for t in self.game.targets.values() if not t.id.startswith("enc:")
+                         and t.hp > 0 and t.chunk in resident and t.id in self.admitted)
+        return count
+
+    def _admit(self, ident, encounter):
+        limit = self.budget.get(encounter)
+        if limit is not None:
+            if self._active(encounter) >= limit:
+                return False
+            self.spawned[encounter] += 1
+        self.admitted[ident] = encounter
+        return True
+
+    def _screen(self):
+        """Admit or drop newly resident spots and new asset boars (zero time, saved)."""
+        for chunk in self._resident():
+            ident = f"{chunk.key.dimension}:{chunk.key.x}:{chunk.key.y}"
+            if ident in self.screened_chunks:
+                continue
+            self.screened_chunks.add(ident)
+            for spot in self._spots(chunk):
+                self._admit(spot.id, spot.encounter)
+        for target in sorted(self.game.targets.values(), key=lambda t: t.id):
+            if target.id.startswith("enc:") or target.id in self.screened_targets:
+                continue
+            self.screened_targets.add(target.id)
+            if target.hp > 0 and not self._admit(target.id, BOAR_ENCOUNTER):
+                target.hp = 0   # beyond this life's window: the boar never shows up
+
+    def _elder_cell(self):
+        """Where the old man stands: two steps beside the anchor (one if cramped)."""
+        key = ChunkKey(self.dimension, 0, 0)
+        asset = (self.game.world.peek(key) or self.game.world.get(key)).asset
+        w, h = asset.width, asset.height
+        taken = {(s.x, s.y) for s in asset.spawns}
+        ax, ay = self.anchor
+
+        def free(x, y):
+            return 0 <= x < w and 0 <= y < h and not asset.collision[y][x] and (x, y) not in taken
+        for reach in (2, 1):
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                if all(free(ax + dx * step, ay + dy * step) for step in range(1, reach + 1)):
+                    return ax + dx * reach, ay + dy * reach
+        return ax, ay
 
     def _spot_by_id(self, spot_id):
         parts = (spot_id or "").split(":")
@@ -341,7 +468,7 @@ class Expedition:
     def _candidates(self):
         found = []
         for chunk in self._resident():
-            for spot in self._spots(chunk):
+            for spot in self._live(chunk):
                 entry = BY_ID[spot.encounter]
                 if spot.id in self.completed or entry.kind == "fight":
                     continue
@@ -411,12 +538,12 @@ class Expedition:
         return True
 
     # ----- rewards, food, death -----------------------------------------
-    def _entry(self, kind, text, *, encounter=None, attribute=None, xp=0, dim_xp=0, items=()):
+    def _entry(self, kind, text, *, encounter=None, attribute=None, xp=0, dim_xp=0, items=(), blessing=0):
         self.sequence += 1
         self.log.append({"seq": self.sequence, "clock_ms": self.total_ms, "life": self.life,
                          "type": kind, "encounter": encounter, "text": text,
                          "attribute": attribute, "xp": xp, "dim_xp": dim_xp,
-                         "items": [[item, count] for item, count in items]})
+                         "items": [[item, count] for item, count in items], "blessing": blessing})
         del self.log[:-LOG_LIMIT]
 
     def _add_item(self, item, count):
@@ -439,8 +566,14 @@ class Expedition:
                  if (kept := self._add_item(item, count))]
         if entry.heal:
             self.health = min(VITAL_MAX, self.health + entry.heal * POINT)
+        self.blessing += entry.blessing
         self._entry("encounter", entry.log, encounter=entry.id, attribute=entry.attribute,
-                    xp=entry.xp, dim_xp=dim, items=items)
+                    xp=entry.xp, dim_xp=dim, items=items, blessing=entry.blessing)
+        if entry.blessing and derive_seed(seed, "boon") % 100 < BOON_CHANCE:
+            self.health = min(VITAL_MAX, self.health + BOON * POINT)
+            self.hunger = min(VITAL_MAX, self.hunger + BOON * POINT)
+            self._entry("blessing", f"The gods answer: warmth spreads through you (+{BOON} health, +{BOON} hunger).",
+                        encounter=entry.id)
 
     def _eat(self):
         """Auto-eat: the food that restores the most without wasting, else the smallest."""
@@ -466,7 +599,9 @@ class Expedition:
         lines = [f"{name.capitalize()} experience gained: {self.regular[name]}"
                  f" (dimensional +{self.life_gain[name]})" for name in ATTRIBUTES]
         cause = {"starvation": "Cause: starvation", "boar": "Cause: a bramble boar"}.get(self.cause, "Cause: exhaustion")
-        lines += [f"Encounters completed: {len(self.completed)}",
+        bounty = ", ".join(f"{BY_ID[i].name.lower()} {n} (max {limit} at once)" for i, n, limit in self.bounty())
+        lines += [f"Forest bounty this life: {bounty}", f"Blessing power: {self.blessing}",
+                  f"Encounters completed: {len(self.completed)}",
                   f"Deepest ring reached: {self.depth} (best {self.best_depth})",
                   f"Survived: {lived // 60}m {lived % 60:02d}s", cause, "Returning to anchor..."]
         self.report = {"seq": self.sequence + 1, "life": self.life, "clock_ms": self.total_ms,
@@ -490,17 +625,18 @@ class Expedition:
         if here > self.depth:
             self.depth = here
             self.best_depth = max(self.best_depth, here)
+        self._screen()
         for chunk in self._resident():
             if chunk.key not in self.game.initialized_chunks:
                 continue
-            for spot in self._spots(chunk):
+            for spot in self._live(chunk):
                 entry = BY_ID[spot.encounter]
                 if entry.kind == "fight" and spot.id not in self.game.targets and spot.id not in self.completed:
                     hp = entry.hp + min(self.ring(spot.chunk), DANGER_RING_CAP)
                     self.game.targets[spot.id] = Target(spot.id, spot.chunk, spot.x, spot.y, hp)
         kinds = None
         for t in sorted(self.game.targets.values(), key=lambda t: t.id):
-            if t.hp == 0 and t.id not in self.completed:
+            if t.hp == 0 and t.id not in self.completed and t.id in self.admitted:
                 kinds = kinds or self.target_kinds()
                 self._reward(t.id, BY_ID[kinds[t.id]])
         self._eat()
@@ -561,7 +697,8 @@ class Expedition:
     # ----- simulation ---------------------------------------------------
     def _face(self, gx, gy):
         px, py = self._player()
-        direction = next((d for d, delta in DELTAS.items() if delta == (gx - px, gy - py)), None)
+        toward = ((gx > px) - (gx < px), (gy > py) - (gy < py))
+        direction = next((d for d, delta in DELTAS.items() if delta == toward), None)
         if direction and self.game.player.facing != direction:
             self.game.advance(0, InputCommand(direction))
         self.game.advance(0, InputCommand())
@@ -621,6 +758,15 @@ class Expedition:
                             self.goal = None
                             self.task = {"type": "pause", "spot": None, "elapsed_ms": 0,
                                          "duration_ms": PAUSE_AFTER_ACTIVITY_MS}
+                        elif done["type"] in PROLOGUE_MS:
+                            stage = PROLOGUE_NEXT.get(done["type"])
+                            if stage == "listen":
+                                self._face(*self.elder)   # turn to the old man
+                            if stage:
+                                self.task = {"type": stage, "spot": None, "elapsed_ms": 0,
+                                             "duration_ms": PROLOGUE_MS[stage]}
+                            else:
+                                self._entry("lore", "The old man walks off down the road. Explore - and don't forget to pray.")
                         elif done["type"] == "rest":
                             if self.health < RESTED_AT and (self.hunger > 0 or self._has_food()):
                                 self.task = {"type": "rest", "spot": None, "elapsed_ms": 0,
@@ -678,31 +824,39 @@ class Expedition:
 
     # ----- persistence --------------------------------------------------
     def to_dict(self):
-        return {"schema_version": 2, "encounters": ENCOUNTER_VERSION,
+        return {"schema_version": SCHEMA_VERSION, "encounters": ENCOUNTER_VERSION,
                 "exploration": self.game.to_dict(), "life": self.life, "total_ms": self.total_ms,
                 "regular": dict(self.regular), "dimensional": dict(self.dimensional),
                 "life_gain": dict(self.life_gain), "completed": sorted(self.completed),
                 "inventory": [[item, count] for item, count in self.inventory.items()],
                 "hunger": self.hunger, "health": self.health,
                 "food_cooldown_ms": self.food_cooldown_ms, "cause": self.cause,
-                "depth": self.depth, "best_depth": self.best_depth,
+                "depth": self.depth, "best_depth": self.best_depth, "blessing": self.blessing,
+                "budget": dict(self.budget), "spawned": dict(self.spawned),
+                "admitted": sorted([i, e] for i, e in self.admitted.items()), "screened_chunks": sorted(self.screened_chunks),
+                "screened_targets": sorted(self.screened_targets),
                 "log": [dict(entry, items=[list(i) for i in entry["items"]]) for entry in self.log],
                 "sequence": self.sequence, "decisions": self.decisions, "skills": sorted(self.skills),
                 "report": {**self.report, "lines": list(self.report["lines"])},
                 "task": dict(self.task) if self.task else None,
                 "goal": dict(self.goal) if self.goal else None}
 
+    SAVE_FIELDS = ("schema_version", "encounters", "exploration", "life", "total_ms", "regular",
+                   "dimensional", "life_gain", "completed", "inventory", "hunger", "health",
+                   "food_cooldown_ms", "cause", "depth", "best_depth", "blessing", "budget", "spawned",
+                   "admitted", "screened_chunks", "screened_targets", "log", "sequence",
+                   "decisions", "skills", "report", "task", "goal")
+
     @classmethod
     def from_dict(cls, data):
         if isinstance(data, dict) and data.get("schema_version") == 1:
             return cls._from_v1(data)
-        fields(data, ("schema_version", "encounters", "exploration", "life", "total_ms", "regular",
-                      "dimensional", "life_gain", "completed", "inventory", "hunger", "health",
-                      "food_cooldown_ms", "cause", "depth", "best_depth", "log", "sequence",
-                      "decisions", "skills", "report", "task", "goal"))
-        if data["schema_version"] != 2 or data["encounters"] != ENCOUNTER_VERSION:
+        if isinstance(data, dict) and data.get("schema_version") == 2:
+            data = cls._upgrade_v2(data)
+        fields(data, cls.SAVE_FIELDS)
+        if data["schema_version"] != SCHEMA_VERSION or data["encounters"] != ENCOUNTER_VERSION:
             raise ValueError("unsupported expedition save")
-        result = cls(Exploration.from_dict(data["exploration"]), skills=data["skills"])
+        result = cls(Exploration.from_dict(data["exploration"]), skills=data["skills"], fresh=False)
         try:
             result.life = integer(data["life"], "life", 1)
             result.total_ms = integer(data["total_ms"], "total time", 0)
@@ -732,17 +886,43 @@ class Expedition:
             result.cause = data["cause"]
             result.depth = integer(data["depth"], "depth", 0)
             result.best_depth = integer(data["best_depth"], "best depth", result.depth)
+            result.blessing = integer(data["blessing"], "blessing power", 0)
+            if data["budget"] is None:   # upgraded save: roll this life's windows now
+                result._reset_spawns()
+            else:
+                limited = {entry.id for entry in BY_ID.values() if entry.window is not None}
+                if type(data["budget"]) is not dict or set(data["budget"]) != limited \
+                        or type(data["spawned"]) is not dict or set(data["spawned"]) != limited:
+                    raise ValueError("invalid spawn windows")
+                result.budget = {k: integer(v, "spawn window", 0, 2000) for k, v in data["budget"].items()}
+                result.spawned = {k: integer(v, "spawned count", 0) for k, v in data["spawned"].items()}
+                admitted = data["admitted"]
+                if type(admitted) is not list or any(type(row) is not list or len(row) != 2 or row[1] not in BY_ID
+                                                     for row in admitted):
+                    raise ValueError("invalid admitted spawns")
+                for ident, _ in admitted:
+                    identifier(ident, "admitted spawn")
+                result.admitted = dict(admitted)
+                if len(result.admitted) != len(admitted):
+                    raise ValueError("duplicate admitted spawn")
+                for name in ("screened_chunks", "screened_targets"):
+                    values = data[name]
+                    if type(values) is not list or len(set(values)) != len(values) or any(
+                            type(v) is not str or not 1 <= len(v) <= 200 for v in values):
+                        raise ValueError(f"invalid {name}")
+                    setattr(result, name, set(values))
             if type(data["log"]) is not list or len(data["log"]) > LOG_LIMIT:
                 raise ValueError("invalid expedition log")
             for entry in data["log"]:
                 fields(entry, ("seq", "clock_ms", "life", "type", "encounter", "text", "attribute",
-                               "xp", "dim_xp", "items"))
+                               "xp", "dim_xp", "items", "blessing"))
                 if entry["type"] not in LOG_TYPES or (entry["encounter"] is not None and entry["encounter"] not in BY_ID) \
                         or (entry["attribute"] is not None and entry["attribute"] not in ATTRIBUTES):
                     raise ValueError("invalid log entry")
                 if type(entry["items"]) is not list or any(type(i) is not list or len(i) != 2 or i[0] not in ITEMS
                                                            for i in entry["items"]):
                     raise ValueError("invalid log items")
+                integer(entry["blessing"], "log blessing", 0)
             result.log = [dict(e) for e in data["log"]]
             result.sequence = integer(data["sequence"], "log sequence", 0)
             result.decisions = integer(data["decisions"], "decision counter", 0)
@@ -752,9 +932,10 @@ class Expedition:
                 raise ValueError("invalid report")
             result.report = {**report, "lines": list(report["lines"])}
             task = data["task"]
+            result.task = None
             if task is not None:
                 fields(task, ("type", "spot", "elapsed_ms", "duration_ms"))
-                if task["type"] not in ("perform", "pause", "rest"):
+                if task["type"] not in TASK_TYPES:
                     raise ValueError("invalid task")
                 integer(task["duration_ms"], "task duration", 1)
                 integer(task["elapsed_ms"], "task elapsed", 0, task["duration_ms"] - 1)
@@ -772,6 +953,32 @@ class Expedition:
         return result
 
     @classmethod
+    def _upgrade_v2(cls, data):
+        """encounters-v2 saves keep progress, vitals and inventory; this life's spots
+        re-roll under v3 (no prologue, fresh spawn windows, spot plans dropped)."""
+        fields(data, ("schema_version", "encounters", "exploration", "life", "total_ms", "regular",
+                      "dimensional", "life_gain", "completed", "inventory", "hunger", "health",
+                      "food_cooldown_ms", "cause", "depth", "best_depth", "log", "sequence",
+                      "decisions", "skills", "report", "task", "goal"))
+        if data["encounters"] != "encounters-v2":
+            raise ValueError("unsupported expedition save")
+        exploration = dict(data["exploration"])
+        try:
+            exploration["targets"] = [t for t in exploration["targets"] if not str(t["id"]).startswith("enc:")]
+            exploration["hit_targets"] = [t for t in exploration["hit_targets"] if not str(t).startswith("enc:")]
+            log = [dict(entry, blessing=0) for entry in data["log"]]
+            completed = [c for c in data["completed"] if not str(c).startswith("enc:")]
+        except (TypeError, KeyError) as exc:
+            raise ValueError("malformed expedition save") from exc
+        task = data["task"]
+        if isinstance(task, dict) and task.get("type") == "perform":
+            task = None
+        return {**data, "schema_version": SCHEMA_VERSION, "encounters": ENCOUNTER_VERSION,
+                "exploration": exploration, "completed": completed, "log": log, "task": task,
+                "goal": None, "blessing": 0, "budget": None, "spawned": None, "admitted": None,
+                "screened_chunks": None, "screened_targets": None}
+
+    @classmethod
     def _from_v1(cls, data):
         """encounters-v1 saves: keep the world and actor state, start life 1 fresh.
         v1 XP (one track, x10 smaller scale) becomes regular XP x10."""
@@ -782,7 +989,7 @@ class Expedition:
         game = Exploration.from_dict(data["exploration"])
         for target_id in [t for t in game.targets if t.startswith("enc:")]:
             del game.targets[target_id]  # v1 fight spots: v2 re-rolls encounters
-        result = cls(game, skills=data["skills"])
+        result = cls(game, skills=data["skills"], fresh=False)
         fields(data["xp"], ATTRIBUTES)
         for name in ATTRIBUTES:
             result.regular[name] = integer(data["xp"][name], "attribute XP", 0) * 10

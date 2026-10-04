@@ -8,18 +8,17 @@ The game should be approachable on mobile, playable in short visits, and rewardi
 
 ## Opening sequence
 
-The character dies old, having achieved nothing because his power was considered useless. At that moment the dormant ability awakens and creates the anchor. The first system report establishes the core rules:
+Revised 2026-10-04. A traveller is ambushed by bandits on a forest road and left for dead. The character survives, but wakes with memories of the attack and something new inside: the gods have made them a dimensional avatar, bound to an anchor at the place where they woke.
 
-```text
-Strength experience gained: 0
-Endurance experience gained: 0
-Will experience gained: 0
-Dimensional shards gained: 1
-Ability unlocked: Dimensional Clone
-Returning to anchor...
-```
+The world build plays this as the first scene of the first life:
 
-The first automatic life begins after this report. The confirmed base attributes are Strength, Endurance, Agility, Intelligence, Perception and Willpower, each with regular and dimensional experience.
+1. **Wake up.** The screen is black; only the current task, health and hunger show. Memories of the ambush surface one line at a time, then the eyes open.
+2. **Stand up.** The forest appears around the anchor. The avatar rises.
+3. **The old man.** A traveller standing nearby speaks: he has witnessed the birth of a dimensional avatar. The gods saved you, but now you must worship them. Explore the world, and don't forget to pray; maybe the gods will bestow blessings. May the path be smooth; only you will know what destiny awaits.
+
+He walks off, the rest of the interface fades in and the auto-pilot begins. Prayer at shrines grants blessing power. Later lives return to the anchor with a life report, as before. The earlier "dies old, power dismissed" framing and its system report are superseded for the world build; the idle simulator text has not been changed yet.
+
+The confirmed base attributes are Strength, Endurance, Agility, Intelligence, Perception and Willpower, each with regular and dimensional experience.
 
 ## Design pillars
 

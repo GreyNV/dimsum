@@ -8,7 +8,9 @@ become ordinary runtime Targets at their spot. To change placement rules or a
 pool for existing worlds, add a new versioned pool instead of editing in place.
 
 The first pool is bare-handed: nothing here needs equipment. No providers, wall
-clock, hash() or shared RNG.
+clock, hash() or shared RNG. Food sources, shrines and boars carry a spawn window:
+each life rolls how many may exist at once (enforced by the auto-pilot), so food
+stays scarce; spawn_window() is where action mastery will widen it later.
 """
 from collections import deque
 from dataclasses import dataclass
@@ -16,9 +18,9 @@ from dataclasses import dataclass
 from .models import DELTAS, ChunkKey, identifier, integer
 from .seeds import derive_seed
 
-ENCOUNTER_VERSION = "encounters-v2"  # v2: XP x10, loot, heal; spots re-roll per life
+ENCOUNTER_VERSION = "encounters-v3"  # v3: shrines (prayer) and per-life spawn windows
 ATTRIBUTES = ("strength", "endurance", "agility", "intelligence", "perception", "willpower")
-KINDS = ("forage", "gather", "observe", "climb", "drink", "meditate", "study", "fight")
+KINDS = ("forage", "gather", "observe", "climb", "drink", "meditate", "study", "pray", "fight")
 RARITIES = ("common", "uncommon", "rare")
 NEAR = (None, "T", "^")
 
@@ -86,6 +88,8 @@ class EncounterDef:
     hp: int = 0
     loot: tuple = ()
     heal: int = 0       # health points restored on completion
+    blessing: int = 0   # blessing power granted (prayer); persists across lives
+    window: tuple | None = None  # (low, high) cap on how many exist at once; rolled per life; None = unlimited
 
     def __post_init__(self):
         identifier(self.id, "encounter ID")
@@ -106,28 +110,40 @@ class EncounterDef:
             raise ValueError("loot must be a tuple of Loot")
         if (self.kind == "fight") != (self.hp > 0):
             raise ValueError("fights, and only fights, have hit points")
+        integer(self.blessing, "encounter blessing", 0, 10)
+        if (self.kind == "pray") != (self.blessing > 0):
+            raise ValueError("prayers, and only prayers, grant blessings")
+        if self.window is not None:
+            if type(self.window) is not tuple or len(self.window) != 2:
+                raise ValueError("spawn window must be a (low, high) tuple")
+            integer(self.window[0], "spawn window low", 0, 1000)
+            integer(self.window[1], "spawn window high", self.window[0], 1000)
 
 
 # Dark forest, no equipment: everything here is done with bare hands.
 # XP is regular (current-life) XP; 20% also goes to the persistent dimensional track.
 DARK_FOREST = (
-    EncounterDef("bramble_berries", "Bramble berries", "forage", "perception", 40, 2400, 30,
+    EncounterDef("bramble_berries", "Bramble berries", "forage", "perception", 40, 2400, 30, window=(0, 2),
                  log="Picked bramble berries without getting scratched (much).",
                  loot=(Loot("wild_berries", 2, 4), Loot("bramble_thorn", 1, 1, 30))),
     EncounterDef("fallen_branches", "Fallen branches", "gather", "strength", 30, 2200, 24,
                  log="Hauled a pile of fallen branches off the trail.", loot=(Loot("stick", 2, 3),)),
     EncounterDef("animal_tracks", "Animal tracks", "observe", "perception", 50, 3000, 20,
                  log="Read fresh tracks in the mud - something heavy passed here."),
-    EncounterDef("gnarled_tree", "Gnarled tree", "climb", "agility", 60, 3200, 12, near="T",
+    EncounterDef("gnarled_tree", "Gnarled tree", "climb", "agility", 60, 3200, 12, near="T", window=(0, 1),
                  log="Climbed a gnarled tree and scouted the canopy.",
                  loot=(Loot("bird_egg", 1, 1, 50), Loot("stick", 1, 1, 40))),
-    EncounterDef("forest_spring", "Forest spring", "drink", "endurance", 40, 2000, 12, heal=10,
+    EncounterDef("forest_spring", "Forest spring", "drink", "endurance", 40, 2000, 12, heal=10, window=(1, 2),
                  log="Drank from a cold spring and caught your breath."),
     EncounterDef("mossy_stone", "Mossy stone", "meditate", "willpower", 60, 4000, 8, near="^",
                  log="Sat by a mossy stone until the forest went quiet."),
     EncounterDef("old_carvings", "Old carvings", "study", "intelligence", 80, 3600, 5, "uncommon",
                  log="Traced old carvings - the marks look almost like a summoning circle."),
-    EncounterDef("bramble_boar", "Bramble boar", "fight", "strength", 100, 1, 14, hp=3,
+    EncounterDef("wayside_shrine", "Wayside shrine", "pray", "willpower", 50, 3600, 7, "uncommon",
+                 blessing=1, window=(1, 1),
+                 log="Knelt at a moss-grown shrine and prayed to the gods who spared you."),
+    # Asset-spawned boars (one per chunk) share this window with boar spots.
+    EncounterDef("bramble_boar", "Bramble boar", "fight", "strength", 100, 1, 14, hp=3, window=(1, 2),
                  log="Drove off a bramble boar with your bare fists.",
                  loot=(Loot("boar_meat", 1, 2), Loot("boar_hide", 1, 1, 60))),
 )
@@ -213,6 +229,27 @@ def roll_loot(entry, seed):
         if roll % 100 < loot.chance:
             result.append((loot.item, loot.low + (roll // 100) % (loot.high - loot.low + 1)))
     return result
+
+
+def spawn_window(entry, mastery=0):
+    """(low, high) cap on how many of one encounter exist at once, or None (unlimited).
+
+    Hook for action mastery: each mastery level widens the window (+1 high, and
+    +1 low every second level). Nothing grants mastery yet, so it stays 0."""
+    if entry.window is None:
+        return None
+    integer(mastery, "mastery", 0, 1000)
+    low, high = entry.window
+    return low + mastery // 2, high + mastery
+
+
+def roll_window(entry, seed, mastery=0):
+    """This life's at-once cap for `entry` (None = unlimited), rolled at the anchor."""
+    window = spawn_window(entry, mastery)
+    if window is None:
+        return None
+    low, high = window
+    return low + derive_seed(seed, "window", entry.id) % (high - low + 1)
 
 
 def chunk_spots(chunk, pools=POOLS, life=1):
