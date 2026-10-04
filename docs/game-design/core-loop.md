@@ -17,6 +17,14 @@
 5. Vitality reaches zero and the character returns to the anchor.
 6. Regular discipline XP and current-life state reset; dimensional discipline XP persists.
 
+In the browser expedition, death first opens a 30-second anchor interlude. The
+player may offer whole stacks of remaining current-life resources for persistent
+dimensional dust (berries/stick 1, egg/thorn 2, meat 3, hide 4 each). The first
+offer holds the next life until the player chooses Begin; no action lets the
+countdown start it automatically. Unoffered inventory is lost at the transition.
+Dust has no purchase use yet. This adds one optional choice to the otherwise
+automatic life loop; it does not alter the separate idle core's return API.
+
 ## Long-term loop
 
 ```text

@@ -1,7 +1,7 @@
 /** Browser adapter: snapshots in, character art out. Python owns all game rules. */
 import {TILE_W, TILE_H, ZOOM, clamp, residentBounds, cameraView, follow, retainResident, tileAt, visualHash, Controls} from './view.js';
 import {PALETTE, OBJECT_PAD, paintChunk, drawTree, terrainColor} from './art.js';
-import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawDamage, drawFloat, drawSpot, drawSpotCompletion, drawCamp, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
+import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawDamage, drawFloat, drawSpot, drawSpotCompletion, drawCamp, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
 import {ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
 
 const $ = id => document.getElementById(id);
@@ -17,7 +17,7 @@ const hpSeen = new Map(), hits = new Map(), deaths = new Map();
 let swing = {serial: 0, active: false, slashAt: null, lastMs: -1, effects: []};
 /* Expedition presentation: reward popups and fading completed spots (cosmetic). */
 const hud = new ExpeditionHud(), rewards = [], fadingSpots = new Map();
-let lastRewardSeq = null, spotsSeen = new Map(), reportSeen = null, reportTimer = 0;
+let lastRewardSeq = null, spotsSeen = new Map(), reportSeen = null, reportTimer = 0, pendingAction = null;
 /* Prologue: where the old man stands, and his walk away once he has spoken (cosmetic). */
 let elder = null, elderLeaving = null;
 const ELDER_LEAVE_MS = 2200;
@@ -66,6 +66,7 @@ function adopt(next) {
   state = next; mapDirty = true;
   if (firstSnapshot && $('report').hidden) setPause(false);
   hud.update(next);
+  updateAnchor(next.expedition);
   const position = {x:(next.player.x + .5) * TILE_W, y:(next.player.y + .5) * TILE_H};
   if (!actor || Math.abs(actor.x - position.x) + Math.abs(actor.y - position.y) > TILE_W * 5) {
     actor = {...position}; camera = {...position};
@@ -74,6 +75,26 @@ function adopt(next) {
   const biome = (here?.biome || 'dark_forest').replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
   if ($('biome').textContent !== biome) $('biome').textContent = biome;
   updateActivity();
+}
+function updateAnchor(ex) {
+  const anchor = ex?.anchor_space, panel = $('anchor-space');
+  panel.hidden = !anchor;
+  document.body.classList.toggle('anchor-active', !!anchor);
+  if (!anchor) return;
+  $('anchor-countdown').textContent = anchor.waiting ? 'The next life waits for your choice.'
+    : `Next life in ${Math.ceil(anchor.remaining_ms / 1000)}s unless you offer a resource.`;
+  $('anchor-dust').textContent = String(ex.dust);
+  const signature = JSON.stringify(ex.inventory);
+  if (panel.dataset.inventory === signature) return;
+  panel.dataset.inventory = signature;
+  const offers = $('anchor-offers');
+  offers.replaceChildren(...ex.inventory.map(row => {
+    const button = document.createElement('button');
+    button.type = 'button'; button.dataset.trade = row.id;
+    button.textContent = `Offer ${row.count} ${row.name.toLowerCase()}`;
+    return button;
+  }));
+  if (!ex.inventory.length) offers.textContent = 'Nothing left to offer.';
 }
 function observeCombat(next) {
   const now = performance.now();
@@ -105,7 +126,7 @@ function observeExpedition(next) {
   else if (elder) { elderLeaving = {...elder, at: now}; elder = null; }
   const report = next.expedition.report;
   // An empty report is the prologue's placeholder: the opening is told in the world.
-  if (report && report.lines.length && report.seq !== reportSeen) {
+  if (report && report.lines.length && report.seq !== reportSeen && !next.expedition.anchor_space) {
     const already = seenReport() === reportStorageKey(next.world_seed, report);
     if (!already && (report.life === 0 || reportSeen !== null || reportIsFresh(next.expedition))) {
       markReport(next.world_seed, report);
@@ -116,6 +137,7 @@ function observeExpedition(next) {
     }
     reportSeen = report.seq;
   }
+  if (next.expedition.anchor_space && report) reportSeen = report.seq;
   if (state?.expedition && next.expedition.life !== state.expedition.life) {
     actor = null; hits.clear(); deaths.clear(); hpSeen.clear(); rewards.length = 0; fadingSpots.clear();
   }
@@ -162,9 +184,10 @@ async function poll() {
   const started = performance.now();
   try {
     const body = controls.payload(paused, [...chunks.keys()]);
+    if (pendingAction) body.action = pendingAction;
     const attackRevision = controls.attackRevision;
     const next = await request('/api/input', body);
-    controls.acknowledge(body, attackRevision); adopt(next);
+    controls.acknowledge(body, attackRevision); pendingAction = null; adopt(next);
     if (connection !== 'connected') { connection = 'connected'; status(''); }
   } catch {
     connection = 'disconnected';
@@ -220,6 +243,17 @@ function drawMap() {
 function render(now) {
   const dt=Math.min(100,now-lastFrame || 16); lastFrame=now;
   ctx.setTransform(dpr,0,0,dpr,0,0); ctx.fillStyle=PALETTE.void; ctx.fillRect(0,0,width,height);
+  if (state?.expedition?.anchor_space) {
+    const glow=ctx.createRadialGradient(width/2,height*.42,10,width/2,height*.42,Math.max(width,height)*.65);
+    glow.addColorStop(0,'#18314a');glow.addColorStop(.45,'#0e1b2b');glow.addColorStop(1,'#060b13');
+    ctx.fillStyle=glow;ctx.fillRect(0,0,width,height);
+    const scale=Math.min(2.6,width/240,height/340);
+    ctx.translate(width/2,height*.38);ctx.scale(scale,scale);
+    drawCamp(ctx,-48,22,{clock:state.expedition.total_ms,reducedMotion});
+    drawPlayer(ctx,state.player,59,26,null,{clock:state.expedition.total_ms});
+    if(!stopped)requestAnimationFrame(render);
+    return;
+  }
   if (state && actor && camera) {
     const tx=(state.player.x+.5)*TILE_W, ty=(state.player.y+.5)*TILE_H;
     actor.x=reducedMotion ? tx : follow(actor.x,tx,dt,55);
@@ -242,7 +276,10 @@ function render(now) {
     for(const chunk of visible) ctx.drawImage(pictures.get(chunk.id).ground,chunk.x*chunk.width*TILE_W,chunk.y*chunk.height*TILE_H);
     for(const chunk of visible) ctx.drawImage(pictures.get(chunk.id).objects,chunk.x*chunk.width*TILE_W-OBJECT_PAD,chunk.y*chunk.height*TILE_H-OBJECT_PAD);
     const anchor = state.expedition?.anchor;
-    if (anchor) drawCamp(ctx, (anchor.x+.5)*TILE_W, (anchor.y+.5)*TILE_H, {clock: state.clock_ms, reducedMotion});
+    if (anchor) {
+      drawAmbushSite(ctx, (anchor.x+.5)*TILE_W, (anchor.y+.5)*TILE_H);
+      drawCamp(ctx, (anchor.x+.5)*TILE_W, (anchor.y+.5)*TILE_H, {clock: state.clock_ms, reducedMotion});
+    }
     const goal = state.expedition?.goal;
     for (const spot of state.spots || []) drawSpot(ctx, spot, (spot.x+.5)*TILE_W, (spot.y+.5)*TILE_H,
       {clock: state.clock_ms, goal: !!goal && goal.x === spot.x && goal.y === spot.y});
@@ -272,7 +309,7 @@ function render(now) {
     actors.sort((a,b)=>a.row-b.row || (a.kind==='player')-(b.kind==='player'));
     for(const item of actors) {
       if(item.kind==='player') drawPlayer(ctx,state.player,actor.x,actor.y,attackPhase(state.player),
-        {activity, clock:state.clock_ms});
+        {activity, clock:state.clock_ms, reducedMotion});
       else if(item.kind==='elder') drawElder(ctx,(item.tx+.5)*TILE_W+item.shift,(item.ty+.5)*TILE_H,
         {clock:state.clock_ms,facing:item.facing,alpha:item.alpha,talking:item.talking,reducedMotion});
       else {
@@ -358,6 +395,11 @@ $('pause').addEventListener('click',()=>setPause(!paused));
 // Some mobile browsers still zoom on a double tap over HUD text; touch-action covers the rest.
 document.addEventListener('dblclick',event=>event.preventDefault());
 $('report-close').addEventListener('click',()=>{hud.hideReport();setPause(false);canvas.focus();});
+$('anchor-offers').addEventListener('click',event=>{
+  const item=event.target.closest('button[data-trade]')?.dataset.trade;
+  if(item && !pendingAction) pendingAction={type:'trade',item};
+});
+$('anchor-begin').addEventListener('click',()=>{ if(!pendingAction) pendingAction={type:'begin_life'}; });
 $('resume').addEventListener('click',()=>{setPause(false);canvas.focus();});
 $('zoom-in').addEventListener('click',()=>changeZoom(.1));
 $('zoom-out').addEventListener('click',()=>changeZoom(-.1));

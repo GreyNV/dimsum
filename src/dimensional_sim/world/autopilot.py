@@ -16,9 +16,9 @@ Lives (design: core-loop.md): attributes have regular XP (this life) and
 dimensional XP (persists; 20% of gains). Speed from progression.py shortens
 activities and punch pauses; Endurance slows hunger and softens hits. Hunger and
 health are integer micro-points; every rate change ends a simulation step, so
-vitals are partition-independent. Health 0 -> life report -> return to anchor:
-regular XP, inventory, vitals, actors and encounter rolls reset; dimensional XP,
-the discovery map and skills persist.
+vitals are partition-independent. Health 0 -> anchor interlude -> next life:
+remaining inventory can become persistent dust before regular XP, inventory,
+vitals, actors and encounter rolls reset. Dimensional XP, discovery and skills persist.
 
 Prologue (first life of a new expedition): the screen starts dark while the
 avatar wakes from the bandit ambush ("awaken"), then stands up ("stand_up") and
@@ -46,6 +46,10 @@ from .seeds import derive_seed
 
 SKILLS = ("take_control",)
 LOG_LIMIT = 16
+ANCHOR_COUNTDOWN_MS = 30_000
+# Dust is permanent; any unoffered inventory is lost when the next life starts.
+DUST_VALUE = {"wild_berries": 1, "bird_egg": 2, "boar_meat": 3,
+              "stick": 1, "bramble_thorn": 2, "boar_hide": 4}
 PAUSE_AFTER_ACTIVITY_MS = 450
 PAUSE_BETWEEN_PUNCHES_MS = 220
 MAX_EVENTS_PER_ADVANCE = 1_000_000
@@ -91,9 +95,9 @@ ELDER_LINES = (
     "Mind your hunger, too. This forest feeds only the lucky.",
     "May the path be smooth. Only you will know what destiny awaits.",
 )
-LOG_TYPES = ("encounter", "eat", "rest", "life", "blessing", "lore")
+LOG_TYPES = ("encounter", "eat", "rest", "life", "blessing", "lore", "trade")
 TASK_TYPES = ("perform", "pause", "rest", *PROLOGUE_MS)
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _table():
@@ -121,6 +125,9 @@ class Expedition:
         self.decisions = 0
         self.best_depth = 0
         self.blessing = 0
+        self.dust = 0
+        self.anchor_ms = None
+        self.anchor_wait = False
         # No pop-up opening: the prologue tells the story in the world itself.
         self.report = {"seq": 0, "life": 0, "clock_ms": 0, "title": "", "lines": []}
         self._spot_cache = {}
@@ -227,6 +234,8 @@ class Expedition:
                 "x": gx, "y": gy, "progress": progress}
 
     def mode(self):
+        if self.anchor_ms is not None:
+            return "anchor"
         if self.in_prologue:
             return "prologue"
         if self.task and self.task["type"] == "rest":
@@ -612,9 +621,35 @@ class Expedition:
         press = self.game.step_on_press
         self.game = Exploration(self.game.world, self.dimension, animations=self.game.animations, **config)
         self.game.step_on_press = press
+        self.anchor_ms = ANCHOR_COUNTDOWN_MS
+        self.anchor_wait = False
+        self.task = None
+        self.goal = None
+        self._field_cache.clear()
+
+    def anchor_action(self, action):
+        """Offer one whole item stack, or explicitly begin the next life."""
+        if self.anchor_ms is None or type(action) is not dict:
+            raise ValueError("anchor action requires the anchor space")
+        if action.get("type") == "begin_life" and set(action) == {"type"}:
+            self._begin_life()
+            return
+        if action.get("type") != "trade" or set(action) != {"type", "item"} or action["item"] not in DUST_VALUE:
+            raise ValueError("invalid anchor action")
+        item = action["item"]
+        count = self.inventory.pop(item, 0)
+        if count:
+            gained = count * DUST_VALUE[item]
+            self.dust += gained
+            self.anchor_wait = True
+            self._entry("trade", f"Offered {count} {ITEMS[item].name.lower()} for {gained} dimensional dust.",
+                        items=[(item, -count)])
+
+    def _begin_life(self):
+        self.anchor_ms = None
+        self.anchor_wait = False
         self.life += 1
         self._new_life_state()
-        self._field_cache.clear()
 
     def _settle(self):
         """Zero-time bookkeeping before each step. Returns True if a life ended."""
@@ -721,6 +756,16 @@ class Expedition:
                 events += 1
                 if events > MAX_EVENTS_PER_ADVANCE:
                     raise RuntimeError("auto-pilot made no progress")
+                if self.anchor_ms is not None:
+                    if remaining == 0 or self.anchor_wait:
+                        break
+                    step = min(remaining, self.anchor_ms)
+                    self.anchor_ms -= step
+                    self.total_ms += step
+                    remaining -= step
+                    if self.anchor_ms == 0:
+                        self._begin_life()
+                    continue
                 if self._settle():
                     self.game.step_on_press = False
                     continue
@@ -832,6 +877,7 @@ class Expedition:
                 "hunger": self.hunger, "health": self.health,
                 "food_cooldown_ms": self.food_cooldown_ms, "cause": self.cause,
                 "depth": self.depth, "best_depth": self.best_depth, "blessing": self.blessing,
+                "dust": self.dust, "anchor_ms": self.anchor_ms, "anchor_wait": self.anchor_wait,
                 "budget": dict(self.budget), "spawned": dict(self.spawned),
                 "admitted": sorted([i, e] for i, e in self.admitted.items()), "screened_chunks": sorted(self.screened_chunks),
                 "screened_targets": sorted(self.screened_targets),
@@ -843,7 +889,7 @@ class Expedition:
 
     SAVE_FIELDS = ("schema_version", "encounters", "exploration", "life", "total_ms", "regular",
                    "dimensional", "life_gain", "completed", "inventory", "hunger", "health",
-                   "food_cooldown_ms", "cause", "depth", "best_depth", "blessing", "budget", "spawned",
+                   "food_cooldown_ms", "cause", "depth", "best_depth", "blessing", "dust", "anchor_ms", "anchor_wait", "budget", "spawned",
                    "admitted", "screened_chunks", "screened_targets", "log", "sequence",
                    "decisions", "skills", "report", "task", "goal")
 
@@ -853,6 +899,8 @@ class Expedition:
             return cls._from_v1(data)
         if isinstance(data, dict) and data.get("schema_version") == 2:
             data = cls._upgrade_v2(data)
+        if isinstance(data, dict) and data.get("schema_version") == 3:
+            data = cls._upgrade_v3(data)
         fields(data, cls.SAVE_FIELDS)
         if data["schema_version"] != SCHEMA_VERSION or data["encounters"] != ENCOUNTER_VERSION:
             raise ValueError("unsupported expedition save")
@@ -887,6 +935,13 @@ class Expedition:
             result.depth = integer(data["depth"], "depth", 0)
             result.best_depth = integer(data["best_depth"], "best depth", result.depth)
             result.blessing = integer(data["blessing"], "blessing power", 0)
+            result.dust = integer(data["dust"], "dimensional dust", 0)
+            result.anchor_ms = data["anchor_ms"]
+            if result.anchor_ms is not None:
+                integer(result.anchor_ms, "anchor countdown", 1, ANCHOR_COUNTDOWN_MS)
+            if type(data["anchor_wait"]) is not bool or (data["anchor_wait"] and result.anchor_ms is None):
+                raise ValueError("invalid anchor wait")
+            result.anchor_wait = data["anchor_wait"]
             if data["budget"] is None:   # upgraded save: roll this life's windows now
                 result._reset_spawns()
             else:
@@ -953,9 +1008,32 @@ class Expedition:
         return result
 
     @classmethod
+    def _upgrade_v3(cls, data):
+        """New encounter locations change spot rolls; retain earned progress only."""
+        fields(data, tuple(name for name in cls.SAVE_FIELDS if name not in
+                           ("dust", "anchor_ms", "anchor_wait")))
+        if data["encounters"] != "encounters-v3":
+            raise ValueError("unsupported expedition save")
+        exploration = dict(data["exploration"])
+        try:
+            exploration["targets"] = [t for t in exploration["targets"] if not str(t["id"]).startswith("enc:")]
+            exploration["hit_targets"] = [t for t in exploration["hit_targets"] if not str(t).startswith("enc:")]
+            completed = [c for c in data["completed"] if not str(c).startswith("enc:")]
+        except (TypeError, KeyError) as exc:
+            raise ValueError("malformed expedition save") from exc
+        task = data["task"]
+        if isinstance(task, dict) and task.get("type") == "perform":
+            task = None
+        return {**data, "schema_version": SCHEMA_VERSION, "encounters": ENCOUNTER_VERSION,
+                "exploration": exploration, "completed": completed, "task": task, "goal": None,
+                "budget": None, "spawned": None, "admitted": None,
+                "screened_chunks": None, "screened_targets": None,
+                "dust": 0, "anchor_ms": None, "anchor_wait": False}
+
+    @classmethod
     def _upgrade_v2(cls, data):
         """encounters-v2 saves keep progress, vitals and inventory; this life's spots
-        re-roll under v3 (no prologue, fresh spawn windows, spot plans dropped)."""
+        re-roll under v4 (no prologue, fresh spawn windows, spot plans dropped)."""
         fields(data, ("schema_version", "encounters", "exploration", "life", "total_ms", "regular",
                       "dimensional", "life_gain", "completed", "inventory", "hunger", "health",
                       "food_cooldown_ms", "cause", "depth", "best_depth", "log", "sequence",
@@ -976,7 +1054,8 @@ class Expedition:
         return {**data, "schema_version": SCHEMA_VERSION, "encounters": ENCOUNTER_VERSION,
                 "exploration": exploration, "completed": completed, "log": log, "task": task,
                 "goal": None, "blessing": 0, "budget": None, "spawned": None, "admitted": None,
-                "screened_chunks": None, "screened_targets": None}
+                "screened_chunks": None, "screened_targets": None,
+                "dust": 0, "anchor_ms": None, "anchor_wait": False}
 
     @classmethod
     def _from_v1(cls, data):
