@@ -464,15 +464,16 @@ export function drawSpot(ctx, spot, x, y, {clock = 0, goal = false, fade = 0} = 
  * presentation only; the encounter log and simulation decide completion. */
 export function drawSpotCompletion(ctx, spot, x, y, age, reducedMotion = false) {
   if (age < 0 || age >= 650) return;
-  const t = reducedMotion ? .55 : age / 650;
+  const t = age / 650;
   ctx.save(); ctx.globalAlpha = Math.max(0, 1 - t);
   const color = spot.encounter === 'forest_spring' ? '#a9eaff'
     : spot.encounter === 'old_carvings' ? '#d3b6ff' : '#ffe5a0';
   ctx.strokeStyle = color; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.ellipse(x, y + 4, 6 + t * 23, 3 + t * 9, 0, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(x, y + 4, reducedMotion ? 19 : 6 + t * 23,
+    reducedMotion ? 8 : 3 + t * 9, 0, 0, Math.PI * 2); ctx.stroke();
   for (let i = 0; i < 6; i++) {
     const angle = i * Math.PI / 3 + (reducedMotion ? 0 : t * .5);
-    const radius = 8 + t * 26;
+    const radius = reducedMotion ? 21 : 8 + t * 26;
     ctx.fillStyle = i % 2 ? '#fff9df' : color;
     ctx.fillRect(Math.round(x + Math.cos(angle) * radius) - 2,
       Math.round(y - 4 + Math.sin(angle) * radius * .55) - 2, 4, 4);

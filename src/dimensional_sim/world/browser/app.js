@@ -241,8 +241,8 @@ function render(now) {
       {clock: state.clock_ms, goal: !!goal && goal.x === spot.x && goal.y === spot.y});
     for (const [id, f] of fadingSpots) {
       const age = now - f.at;
-      if (age > 500) { fadingSpots.delete(id); continue; }
-      drawSpot(ctx, f.spot, (f.spot.x+.5)*TILE_W, (f.spot.y+.5)*TILE_H, {fade: age / 500});
+      if (age >= 650) { fadingSpots.delete(id); continue; }
+      drawSpot(ctx, f.spot, (f.spot.x+.5)*TILE_W, (f.spot.y+.5)*TILE_H, {fade: Math.min(1, age / 500)});
       drawSpotCompletion(ctx, f.spot, (f.spot.x+.5)*TILE_W, (f.spot.y+.5)*TILE_H, age, reducedMotion);
     }
     // Actors are depth-sorted by feet row; canopies south of each actor are repainted over it.
