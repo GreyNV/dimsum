@@ -179,7 +179,7 @@ function drawFist(ctx, sx, sy, fx, fy) {
 
 /** Activity poses (presentation only) for encounter kinds performed in place. */
 export const POSE = Object.freeze({forage: 'crouch', gather: 'crouch', observe: 'crouch',
-  drink: 'crouch', study: 'crouch', meditate: 'sit', climb: 'climb', rest: 'sit'});
+  drink: 'crouch', study: 'crouch', meditate: 'sit', climb: 'climb', rest: 'sit', pray: 'kneel', kneel: 'kneel'});
 export function crouchSprite(sprite) {
   // Drop the lower cloak and legs; boots stay under the body.
   return {paint: [...sprite.paint.slice(0, 6), sprite.paint[8]], glyph: [...sprite.glyph.slice(0, 6), sprite.glyph[8]]};
@@ -192,12 +192,13 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
   x = Math.round(x); y = Math.round(y);
   const pose = activity && player.animation !== 'attack' ? POSE[activity.kind] : null;
   let sprite = playerSprite(player);
-  if (pose === 'crouch' || pose === 'sit') sprite = crouchSprite(sprite);
+  const compact = pose === 'crouch' || pose === 'sit' || pose === 'kneel';
+  if (compact) sprite = crouchSprite(sprite);
   const {width, height} = spriteSize(sprite);
   let bob = player.animation === 'idle' ? Math.floor(player.animation_ms / 600) % 2
     : player.animation === 'walk' ? Math.floor(player.animation_ms / 120) % 2 : 0;
   if (pose === 'crouch') bob = Math.floor(clock / 300) % 2;          // working hands
-  if (pose === 'sit') bob = 0;
+  if (pose === 'sit' || pose === 'kneel') bob = 0;
   if (pose === 'climb') bob = -Math.round(Math.abs(Math.sin(clock / 260)) * 6);
   const reach = punchReach(player, phase);
   const angle = FACING_ANGLE[player.facing] ?? Math.PI / 2;
@@ -218,7 +219,12 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
   }
   // Seen from behind, a pulled-back fist hides behind the body; a strike is in front.
   if (fist && player.facing === 'north' && phase !== 'strike') drawFist(ctx, ...fist);
-  const compact = pose === 'crouch' || pose === 'sit';
+  if (activity?.kind === 'pray') {  // a thin column of light over the kneeling avatar
+    ctx.save(); ctx.globalAlpha = .18 + .12 * Math.sin(clock / 350);
+    const ray = ctx.createLinearGradient(x, top - 60, x, top + height);
+    ray.addColorStop(0, '#fff3c400'); ray.addColorStop(.5, '#fff3c4'); ray.addColorStop(1, '#fff3c400');
+    ctx.fillStyle = ray; ctx.fillRect(x - 9, top - 60, 18, height + 60); ctx.restore();
+  }
   paintPlayerLayers(ctx, player, left, top, equipment, compact);
   // Small brass clasp and collar glint keep the body readable over dark terrain.
   if (!compact && !equipment.chest) {
@@ -357,7 +363,9 @@ export const SPOTS = Object.freeze({
   gnarled_tree: {paint: ['   lll   ', '  lllll  ', '  lolol  ', '   ooo   ', '  oo oo  '], glyph: ['   ^^^   ', '  /:::\\  ', '  (|:|)  ', '   |||   ', '  /| |\\  ']},
   forest_spring: {paint: ['  cccccc  ', ' gaaaaaag ', 'gaaaaaaaag', ' gggggggg '], glyph: ['  .    .  ', ' /~~~~~~\\ ', '|~*~~~~*~|', ' \\______/ ']},
   mossy_stone: {paint: ['   qqq   ', '  qgqgq  ', ' ggggggg ', '  ggggg  '], glyph: ['   .^.   ', '  /:,:\\  ', ' /:___:\\ ', '  \\___/  ']},
-  old_carvings: {paint: ['   xxx   ', '  ggggg  ', '  gxgxg  ', '  ggggg  '], glyph: ['   *:*   ', '  /___\\  ', '  |*o*|  ', '  /___\\  ']}
+  old_carvings: {paint: ['   xxx   ', '  ggggg  ', '  gxgxg  ', '  ggggg  '], glyph: ['   *:*   ', '  /___\\  ', '  |*o*|  ', '  /___\\  ']},
+  wayside_shrine: {paint: ['    y    ', '  ggggg  ', ' ggggggg ', '  gxyxg  ', '  ggggg  ', ' qgggggq '],
+    glyph: ['    +    ', '  /^^^\\  ', ' /_____\\ ', '  |*i*|  ', '  |___|  ', ' ;/___\\; ']}
 });
 
 /** The anchor camp at the anchor cell: anchor stone, bedroll, fire pit. Ground
@@ -467,7 +475,7 @@ export function drawSpotCompletion(ctx, spot, x, y, age, reducedMotion = false) 
   const t = age / 650;
   ctx.save(); ctx.globalAlpha = Math.max(0, 1 - t);
   const color = spot.encounter === 'forest_spring' ? '#a9eaff'
-    : spot.encounter === 'old_carvings' ? '#d3b6ff' : '#ffe5a0';
+    : spot.encounter === 'old_carvings' ? '#d3b6ff' : spot.encounter === 'wayside_shrine' ? '#fff6cf' : '#ffe5a0';
   ctx.strokeStyle = color; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.ellipse(x, y + 4, reducedMotion ? 19 : 6 + t * 23,
     reducedMotion ? 8 : 3 + t * 9, 0, 0, Math.PI * 2); ctx.stroke();
@@ -501,3 +509,42 @@ export function occludingTreeTiles(tx, ty) {
 
 export const actorFootY = ty => (ty + .5) * TILE_H + ACTOR_FOOT;
 export const tileCenter = (tx, ty) => ({x: (tx + .5) * TILE_W, y: (ty + .5) * TILE_H});
+
+/** The old man who finds the newborn avatar: hooded grey robe, white beard, staff.
+ * Presentation only; the server says where he stands during the prologue. */
+const ELDER_ROLES = Object.freeze({h: {fill: '#6b6457', ink: '#a39a86'}, r: {fill: '#57594f', ink: '#8d8f80'},
+  s: {fill: '#d8b48c', ink: '#3a2618'}, w: {fill: '#ece6d6', ink: '#b9b19c'}, o: {fill: '#7b5a36', ink: '#b88c58'},
+  g: {fill: '#f1d27a', ink: '#fff6cf'}, b: {fill: '#3a2c20', ink: '#76604a'}});
+export const ELDER = Object.freeze({paint: [
+  ' g  hhh   ', ' o hhhhh  ', ' o hsshh  ', ' oswwwhr  ', ' o wwwrrr ',
+  ' o rwrrrr ', ' o rrrrrr ', ' o rrrrrr ', ' o  bb bb '], glyph: [
+  ' *  /^\\   ', ' | /:::\\  ', ' | (o.:\\  ', ' |-;;;:|\\ ', ' | ;;;:::\\',
+  ' | |;::::|', ' | |::::| ', ' | /::::\\ ', ' |  -- -- ']});
+export function drawElder(ctx, x, y, {clock = 0, facing = 'west', alpha = 1, talking = false, reducedMotion = false} = {}) {
+  setupText(ctx);
+  x = Math.round(x); y = Math.round(y);
+  const sprite = facing === 'east' ? mirrorSprite(ELDER) : ELDER;
+  const width = sprite.paint[0].length * CELL_W, height = sprite.paint.length * CELL_H;
+  const sway = reducedMotion ? 0 : Math.floor(clock / 900) % 2;
+  const left = x - width / 2, top = y + ACTOR_FOOT - height + sway;
+  ctx.save(); ctx.globalAlpha = alpha;
+  ctx.fillStyle = 'rgba(3, 6, 3, .5)';
+  ctx.beginPath(); ctx.ellipse(x, y + ACTOR_FOOT - 1, 15, 4, 0, 0, Math.PI * 2); ctx.fill();
+  paintParts(ctx, sprite, ELDER_ROLES, left, top, alpha);
+  // Lantern-warm glint on the staff head.
+  const gx = facing === 'east' ? left + width - CELL_W * 2 : left + CELL_W;
+  ctx.globalAlpha = alpha * (.35 + (reducedMotion ? .1 : .15 * Math.sin(clock / 300)));
+  const glow = ctx.createRadialGradient(gx + 2, top + 3, 1, gx + 2, top + 3, 14);
+  glow.addColorStop(0, '#ffe7a0'); glow.addColorStop(1, '#ffe7a000');
+  ctx.fillStyle = glow; ctx.fillRect(gx - 12, top - 11, 28, 28);
+  if (talking) {  // three speech dots above the hood
+    for (let i = 0; i < 3; i++) {
+      const lift = reducedMotion ? 0 : Math.round(Math.max(0, Math.sin(clock / 160 - i * .9)) * 3);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = OUTLINE; ctx.fillRect(x - 9 + i * 7, top - 12 - lift, 6, 6);
+      ctx.fillStyle = '#f3e7c6'; ctx.fillRect(x - 8 + i * 7, top - 11 - lift, 4, 4);
+    }
+  }
+  ctx.restore();
+  return {left, top, width, height};
+}

@@ -7,7 +7,7 @@
 .pause-overlay{background:rgba(14,20,12,.86)}
 .vitals{position:absolute;top:24px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:18px;padding:9px 16px;font:10px ui-monospace,Consolas,monospace;color:#cbbf9c}
 .vital{display:flex;align-items:center;gap:8px}.vital-label{letter-spacing:1.5px;color:#a99d7d;font-size:9px}
-.vital .bar{width:150px;height:9px;background:rgba(0,0,0,.45);border:1px solid rgba(0,0,0,.7);position:relative;overflow:hidden}
+.vital .bar{width:120px;height:9px;background:rgba(0,0,0,.45);border:1px solid rgba(0,0,0,.7);position:relative;overflow:hidden}
 .vital .bar i{position:absolute;inset:0 auto 0 0;width:100%;transition:width .25s linear}
 .health .bar i{background:linear-gradient(#ef7a63,#b8382d)}.hunger .bar i{background:linear-gradient(#f0c56a,#b9862f)}
 .vital b{min-width:24px;text-align:right;font-size:11px;color:#f1e3bd}.vital.low b{color:#ff8f78}.vital.low .bar{box-shadow:0 0 6px #ff5a4088}
@@ -41,3 +41,30 @@
 /* Touch: no double-tap zoom, text selection or long-press callout while playing.
    Pinch-zoom stays available for accessibility; the canvas already has touch-action:none. */
 html,body{touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}button{touch-action:manipulation}input,textarea{-webkit-user-select:text;user-select:text}
+
+/* Prologue (2026-10-04): the avatar wakes from the bandit ambush. Only the task line,
+   health and hunger show; everything else fades in once the old man has spoken. */
+.expedition,.map-panel,.inventory,.controls,.cooldown,.life-line,.location .eyebrow,.location h1{transition:opacity 1.4s ease .3s}
+body.prologue .expedition,body.prologue .map-panel,body.prologue .inventory,body.prologue .controls,
+body.prologue .cooldown,body.prologue .life-line,body.prologue .location .eyebrow,body.prologue .location h1{opacity:0;pointer-events:none;transition:none}
+body.prologue .location h1,body.prologue .location .eyebrow{height:0;margin:0;overflow:hidden}
+body.prologue .cooldown,body.prologue .life-line{display:none}
+body.prologue .location{width:auto;min-width:210px;padding:12px 16px}
+body.prologue .location-line{border-top:0;padding-top:0}
+body.prologue-dark .panel{background:rgba(0,0,0,.35);border-color:rgba(120,100,70,.35)}
+#blessing{color:#f3dc9a}
+.memory{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:3;transition:opacity 1.6s ease}
+body.eyes-open .memory{opacity:0}
+.memory ol{list-style:none;margin:0;padding:0 24px;max-width:620px;display:flex;flex-direction:column;gap:18px;text-align:center}
+.memory li{font:italic 17px/1.6 Georgia,serif;color:#d9cfb2;opacity:0;animation:memory 2.4s ease forwards;text-shadow:0 0 18px #000}
+.memory li:last-child{color:#cfe6ff}
+@keyframes memory{0%{opacity:0;filter:blur(3px)}100%{opacity:.92;filter:blur(0)}}
+.dialogue{position:absolute;left:50%;bottom:34px;transform:translateX(-50%);width:min(560px,calc(100vw - 24px));padding:12px 18px 14px;border-left:2px solid rgba(200,150,90,.7);z-index:3}
+.dialogue .eyebrow{margin-bottom:6px;color:#d6b07a}
+#dialogue-text{margin:0;min-height:3.2em;font:15px/1.6 Georgia,serif;color:#efe2c0}
+.dialogue-pips{display:flex;gap:5px;margin-top:8px}.dialogue-pips i{width:14px;height:3px;background:rgba(255,255,255,.15)}
+.dialogue-pips i.done{background:#a98c5a}.dialogue-pips i.now{background:#f0d9a6}
+@media(max-width:720px){.memory li{font-size:14px}.dialogue{bottom:16px;padding:10px 12px}#dialogue-text{font-size:13px}
+body.prologue .vitals{bottom:auto;top:96px}}
+@media(prefers-reduced-motion:reduce){.memory li{animation:none;opacity:.92}.memory{transition:none}}
+@media(max-width:720px){body:not(.prologue) .vitals{bottom:190px}}

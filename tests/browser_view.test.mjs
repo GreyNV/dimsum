@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {visualHash, residentBounds, cameraView, follow, retainResident, tileAt, Controls, TILE_W, TILE_H} from '../src/dimensional_sim/world/browser/view.js';
 import {groundMarks, paintChunk, TREE, terrainColor, OBJECT_PAD, clearStamps, stampCount, TILE_VARIANTS, TREE_VARIANTS, ROCK_VARIANTS} from '../src/dimensional_sim/world/browser/art.js';
-import {playerSprite, playerSpriteLayers, PLAYER_SLOTS, ENEMY, ROLE, spriteSize, mirrorSprite, paintSprite, punchReach, hiddenBehind, occludingTreeTiles, SPOTS, POSE, crouchSprite, drawSpot, CAMP} from '../src/dimensional_sim/world/browser/actors.js';
-import {activityText, newRewards, ATTRIBUTES, rewardTexts, reportIsFresh, reportStorageKey, ExpeditionHud} from '../src/dimensional_sim/world/browser/hud.js';
+import {playerSprite, playerSpriteLayers, PLAYER_SLOTS, ENEMY, ROLE, spriteSize, mirrorSprite, paintSprite, punchReach, hiddenBehind, occludingTreeTiles, SPOTS, POSE, crouchSprite, drawSpot, CAMP, ELDER} from '../src/dimensional_sim/world/browser/actors.js';
+import {activityText, newRewards, ATTRIBUTES, rewardTexts, reportIsFresh, reportStorageKey, ExpeditionHud, prologueView} from '../src/dimensional_sim/world/browser/hud.js';
 const pose = (facing, animation='idle', animation_ms=0) => ({facing, animation, animation_ms, active:false});
 const chunk = (x=0,y=0) => ({id:'forest:'+x+':'+y,x,y,width:32,height:16,seed:1234,
   tiles:Array(16).fill('.'.repeat(32)),collision:Array(16).fill('0'.repeat(32))});
@@ -240,4 +240,34 @@ test('food slot visibly and accessibly recovers during its shared cooldown',()=>
   assert.deepEqual(states.map(row=>row[2]),[true,true,false]);
   assert.match(states[0][3],/15 seconds/);
   assert.match(states[2][3],/Food ready$/);
+});
+
+test('prologue: dark awakening with memories, eyes open, then the old man speaks',()=>{
+  const memories=['a','b','c','d'];
+  const dark=progress=>prologueView({stage:'awaken',progress,lines:memories,elder:{x:1,y:0}});
+  assert.equal(dark(0).dark,true); assert.equal(dark(0).memories,1); assert.equal(dark(0).eyes,0);
+  assert.ok(dark(400).memories>dark(0).memories && dark(799).memories===4,'memories surface one by one');
+  assert.ok(dark(910).eyes>0 && dark(910).eyes<1 && dark(1000).eyes===1,'eyes open at the end');
+  const elder=['Why... I don\'t believe it.','The gods saved you.'];
+  const talk=progress=>prologueView({stage:'listen',progress,lines:elder});
+  assert.equal(talk(0).text,''); assert.equal(talk(0).line,0);
+  assert.equal(talk(400).text,elder[0],'a line finishes typing before its turn ends');
+  assert.equal(talk(500).line,1); assert.ok(talk(600).text.length<elder[1].length);
+  assert.equal(talk(1000).text,elder[1]);
+  assert.equal(prologueView(null).stage,null);
+  const ex=(stage,progress)=>({expedition:{control:'auto',prologue:{stage,progress,lines:[]},activity:{name:'x',kind:stage,progress}}});
+  assert.equal(activityText(ex('awaken',420)),'Wake up - 42%');
+  assert.equal(activityText(ex('stand_up',990)),'Stand up - 99%');
+  assert.equal(activityText(ex('listen',10)),'Listening to the old man');
+  ELDER.paint.forEach((row,r)=>{assert.equal(row.length,ELDER.paint[0].length);assert.equal(ELDER.glyph[r].length,row.length);});
+  for(const role of new Set(ELDER.paint.join('').replaceAll(' ',''))) assert.ok('hrswogb'.includes(role),role);
+});
+test('prayer: shrine art, kneeling pose and blessing rewards',()=>{
+  const shrine=SPOTS.wayside_shrine;
+  shrine.paint.forEach((row,r)=>{assert.equal(row.length,shrine.paint[0].length);assert.equal(shrine.glyph[r].length,row.length);});
+  assert.equal(POSE.pray,'kneel');
+  const prayer={type:'encounter',xp:50,attribute:'willpower',items:[],text:'Knelt',blessing:1};
+  assert.deepEqual(rewardTexts(prayer).map(r=>r.text),['+50 Willpower','+1 blessing']);
+  assert.deepEqual(rewardTexts({type:'blessing',items:[],text:'The gods answer'}).map(r=>r.text),['The gods answer']);
+  assert.match(activityText({expedition:{control:'auto',activity:{name:'Wayside shrine',kind:'pray',progress:300}}}),/^Praying at wayside shrine - 30%/);
 });

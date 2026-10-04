@@ -8,6 +8,7 @@ import time
 
 from .animation import rotate
 from .autopilot import INVENTORY_SLOTS
+from .encounters import BY_ID
 from .models import ChunkKey, fields, integer
 from .progression import attribute_report
 from .runtime import InputCommand
@@ -71,7 +72,10 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual")
                 "depth": expedition.depth, "best_depth": expedition.best_depth,
                 "punch_damage": expedition.punch_damage(), "report": expedition.report,
                 "anchor": {"x": expedition.anchor[0], "y": expedition.anchor[1]},
-                "skills": sorted(expedition.skills), "control": control}}
+                "skills": sorted(expedition.skills), "control": control,
+                "prologue": expedition.prologue(),
+                "bounty": [{"id": i, "name": BY_ID[i].name, "spawned": n, "limit": limit}
+                           for i, n, limit in expedition.bounty()]}}
     return {**frame_extra, "world_seed": str(game.world.world_seed), "clock_ms": game.elapsed_ms,
         "movement_interval_ms": game.movement_interval_ms,
         "player": {"x": px, "y": py, "facing": p.facing, "animation": p.animation,

@@ -133,17 +133,55 @@ poses without putting player graphics in locations or changing combat geometry.
 Face and hands remain in the base body under those overlays. No equipment item is yet represented
 in the forest save or granted by an encounter.
 
-The opening system report explains the auto-pilot, encounter experience, hunger,
-food cooldown and anchor return. It remains open until the player continues and
-the browser pauses the expedition while it is visible. Food slots darken after
-an automatic meal and brighten as the authoritative cooldown reaches zero.
-The browser session now starts paused until its first UI snapshot, so launching a
-server before opening the page cannot spend the first life behind the tutorial.
-In a local loaded-save browser check, a 12-second food cooldown stayed frozen at
-clock 0 while the report was open; after Continue, both food slots brightened
-from CSS brightness 0.48 to about 0.67 and finally 1.0 when ready.
+The earlier opening system report has been replaced by the prologue below. Life
+reports still pause the expedition while they are visible. Food slots darken
+after an automatic meal and brighten as the authoritative cooldown reaches zero.
+The browser session starts paused until its first UI snapshot, so launching a
+server before opening the page cannot spend the first life before the scene begins.
+In a local loaded-save browser check of the previous opening, a 12-second food
+cooldown stayed frozen at clock 0 while the report was open; after Continue, both
+food slots brightened from CSS brightness 0.48 to about 0.67 and finally 1.0.
 
 The [dark-forest sprite concept](../art/dark-forest-sprite-concept.png) records a
 higher-detail direction for the summoner, anchor, boar and all seven props. It is
 an art reference; the playable renderer uses the deterministic layered sprites
 described above, so this sheet is not loaded at runtime.
+
+## Prologue, prayer and spawn windows (encounters-v3, 2026-10-04)
+The pop-up opening report is gone; the first life opens with a playable scene.
+- Prologue (new expeditions only; deterministic timed tasks, saved like any task):
+  `awaken` 10 s - the screen is black except the task line, health and hunger;
+  memory fragments of the bandit ambush surface one by one, then the eyes open.
+  `stand_up` 3.5 s - the world appears; the avatar rises beside the anchor.
+  `listen` 25 s - the old man (two cells beside the anchor) speaks five lines
+  (autopilot.ELDER_LINES) in a dialogue strip; the avatar faces him. Then he walks
+  off, a "The road" log entry is written and the rest of the HUD fades in.
+  Snapshot: expedition.prologue = {stage, progress 0..1000, elder{x,y}, lines}
+  or null. The client draws the dark screen, eyelids, old man and typing text.
+  New worlds start paused (local server and hosted worker) so the scene begins
+  when the page is ready.
+- Prayer: `wayside_shrine` (kind pray, Willpower 50 XP, 3.6 s, uncommon). Each
+  prayer adds 1 blessing power (persists across lives, shown in the vitals bar and
+  life report). 40% of prayers get an immediate boon: +15 health and +15 hunger
+  ("The gods answer"). What blessing power buys is still open.
+- Spawn windows: limited encounters roll, at the start of each life, how many may
+  exist at once around the avatar (the 3x3 resident chunks):
+  berries 0-2, gnarled tree 0-1, spring 1-2, shrine 1, boar 1-2 (spots and the
+  one asset-spawned boar per chunk share the boar window). Non-food encounters
+  are unlimited. When a chunk first becomes resident its spots and asset boars are
+  screened in order; any beyond the cap never appear this life (a dropped asset
+  boar is set to 0 HP and never rewards). Finishing or leaving one frees a slot
+  for new ground. encounters.spawn_window(entry, mastery) is the hook for future
+  action mastery (+1 high per level, +1 low every second level; nothing grants
+  mastery yet). The life report lists "Forest bounty this life".
+- Balance sample (6 seeds x 30 min, auto-pilot): mean life 6.0 min with no caps,
+  5.1 min with these caps; every death was still a boar fight, never starvation.
+  Tighter food (all caps at 1) gave 4.0 min. Food is now scarcer; boars remain
+  the main killer, so starvation pressure needs further tuning.
+- Saves: expedition schema 3 adds blessing, budget, spawned, admitted
+  ([id, encounter]), screened_chunks, screened_targets and log.blessing.
+  Schema 2 (encounters-v2) saves upgrade: progress, vitals and inventory stay;
+  spot plans, enc: targets and spot completions drop; no prologue; this life's
+  windows are rolled on load.
+- The bandit-ambush memories were written fresh for this build; the original
+  ambush text from the earlier game was not available here.
