@@ -1,0 +1,38 @@
+# Dimensional Summoner
+Python >=3.10 standard-library idle simulator. Read docs/technical/world-foundation.md
+before world edits; it defines scope, frozen APIs, owners and acceptance criteria.
+
+## Run/test ? PowerShell
+```powershell
+$env:PYTHONPATH = "src"
+python -B -m unittest discover -s tests -v
+python -B -m dimensional_sim.cli --seconds 600 --seed 1
+python -m pip wheel . --no-deps --wheel-dir .codex/artifacts/wheels
+```
+See docs/technical/world-quickstart.md for spatial CLI commands.
+Quick play: python -B -m dimensional_sim.world.cli play --seed 482910.
+Pipeline: python -B -m dimensional_sim.world.cli generate-assets --biome dark_forest --seed 482910 --chunks 24 --size 64x32 --variants 6.
+
+## Map
+core.py/content.py: idle lives, six attributes, schema5.
+world/models.py,seeds.py: validated contracts/stable seeds.
+world/assets.py,pipeline.py: registry vs OFFLINE asset provider.
+world/generation.py,repository.py: composition/cache/discovery/world snapshots.
+world/animation.py,runtime.py: player animation/movement/combat/timing.
+world/renderer.py: pure layers/camera/map; world/cli.py: adapters.
+world/browser_server.py, world/browser/: browser client; actors.js = battle/actor art.
+world/encounters.py, autopilot.py: biome encounter pools/spots and the auto-pilot
+expedition (docs/technical/world-autopilot.md). Manual control = locked skill.
+world/progression.py: regular/dimensional levels and speed from core.GameConfig.
+equipment-review/: unfinished unrelated React popup; preserve.
+
+## Invariants and safe extensions
+Never use hash(), wall clock or shared RNG for generation. Seed/version/specs/catalog/
+coordinates reproduce canonical chunks. Runtime, renderer, animation and minimap
+must never call providers/AI/network. Player graphics never belong in locations.
+Add biomes as validated catalog assets, preserving reachable midpoint exits/spawns;
+test negative transitions and snapshot replay. Add animations via validated frame
+durations/active-window/hitbox metadata; test bulk/split timing, never infer damage
+from pixels. Register only through validation; freeze catalog for existing worlds.
+Run focused tests before/after a subsystem, then full unittest. Preserve existing
+idle save/return/progression rules. No credentials or new runtime dependencies needed.

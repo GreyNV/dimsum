@@ -1,0 +1,143 @@
+/** Expedition HUD: vitals, attributes (regular + dimensional), inventory, log and
+ * life reports. Reads snapshot fields only; never decides game rules. */
+export const ATTRIBUTES = Object.freeze([
+  ['strength', 'Strength', 'STR'], ['endurance', 'Endurance', 'END'], ['agility', 'Agility', 'AGI'],
+  ['intelligence', 'Intelligence', 'INT'], ['perception', 'Perception', 'PER'], ['willpower', 'Willpower', 'WIL']]);
+export const LABEL = Object.freeze(Object.fromEntries(ATTRIBUTES.map(([id, name]) => [id, name])));
+const VERB = Object.freeze({forage: 'Foraging', gather: 'Gathering', observe: 'Studying', climb: 'Climbing',
+  drink: 'Drinking at', meditate: 'Meditating by', study: 'Deciphering'});
+export const ITEM_COLOR = Object.freeze({wild_berries: '#e0505e', bird_egg: '#efe6cf', boar_meat: '#d9776a',
+  stick: '#c39a62', bramble_thorn: '#a9c97a', boar_hide: '#a6845d'});
+
+/** One-line description of what the auto-pilot is doing. */
+export function activityText(state, paused = false) {
+  if (paused) return 'Paused - the forest can wait';
+  const ex = state.expedition;
+  if (!ex) return null;
+  if (ex.control === 'manual') return 'You have taken control';
+  if (ex.activity) {
+    const pct = Math.floor(ex.activity.progress / 10);
+    if (ex.activity.kind === 'rest') return `Resting at the anchor camp - ${pct}%`;
+    return `${VERB[ex.activity.kind] || 'Investigating'} ${ex.activity.name.toLowerCase()} - ${pct}%`;
+  }
+  if (ex.mode === 'home') return 'Badly hurt - heading back to the anchor camp';
+  if (ex.mode === 'fight') return 'Fists up - punching a bramble boar';
+  if (ex.mode === 'travel' && ex.goal) {
+    const spot = state.spots?.find(s => s.x === ex.goal.x && s.y === ex.goal.y);
+    if (spot) return `Heading for ${spot.name.toLowerCase()}`;
+  }
+  return ex.depth > 0 ? `Exploring the dark forest - ring ${ex.depth}` : 'Exploring the dark forest';
+}
+
+/** Floating texts for new log entries: XP, items gained, food eaten. */
+export function rewardTexts(entry) {
+  const texts = [];
+  if (entry.type === 'encounter' && entry.xp) texts.push({text: `+${entry.xp} ${LABEL[entry.attribute]}`, color: '#bfe39a'});
+  for (const [item, count] of entry.items || []) {
+    if (count > 0) texts.push({text: `+${count} ${item.replaceAll('_', ' ')}`, color: ITEM_COLOR[item] || '#e7d7b0'});
+  }
+  if (entry.type === 'eat') texts.push({text: entry.text.replace(/^Ate /, '').replace(/\.$/, ''), color: '#f0c56a'});
+  return texts;
+}
+
+/** New log entries since `lastSeq`. */
+export function newRewards(state, lastSeq) {
+  return (state.expedition?.log || []).filter(entry => entry.seq > lastSeq);
+}
+
+/** Show a report on load only while it is fresh (the intro, or a death just now). */
+export function reportIsFresh(ex, windowMs = 20000) {
+  return !!ex?.report && ex.total_ms - ex.report.clock_ms < windowMs;
+}
+
+export class ExpeditionHud {
+  constructor(doc = document) {
+    this.doc = doc; this.signature = ''; this.vitalsSignature = '';
+    this.$ = id => doc.getElementById(id);
+  }
+  update(state) {
+    const ex = state.expedition;
+    if (!ex) return;
+    this.updateVitals(ex);
+    const signature = JSON.stringify([ex.attributes, ex.log.map(e => e.seq), ex.inventory, ex.skills, ex.control]);
+    if (signature === this.signature) return;
+    this.signature = signature;
+    this.renderAttributes(ex);
+    this.renderInventory(ex);
+    this.renderLog(ex);
+    this.doc.body.classList.toggle('manual-unlocked', ex.skills.includes('take_control'));
+  }
+  updateVitals(ex) {
+    const v = ex.vitals, cd = v.food_cooldown_ms;
+    const signature = [v.health, v.hunger, Math.ceil(cd / 250), ex.life, ex.depth, ex.best_depth].join();
+    if (signature === this.vitalsSignature) return;
+    this.vitalsSignature = signature;
+    for (const [name, value] of [['health', v.health], ['hunger', v.hunger]]) {
+      const pct = Math.max(0, Math.min(100, value / v.max * 100));
+      this.$(`${name}-bar`).style.width = pct.toFixed(1) + '%';
+      this.$(`${name}-value`).textContent = String(Math.ceil(pct));
+      this.$(`${name}-bar`).closest('.vital').classList.toggle('low', pct < 30);
+    }
+    const ring = this.$('food-ring');
+    ring.style.strokeDashoffset = String(50.27 * (cd / v.food_cooldown_total_ms));
+    this.$('food-label').textContent = cd ? `Food in ${Math.ceil(cd / 1000)}s` : 'Food ready';
+    this.$('life').textContent = `Life ${ex.life}`;
+    this.$('depth').textContent = `Ring ${ex.depth} - best ${ex.best_depth}`;
+  }
+  renderAttributes(ex) {
+    this.$('attributes').replaceChildren(...ATTRIBUTES.map(([id, name, short]) => {
+      const a = ex.attributes[id], li = this.doc.createElement('li');
+      li.title = `${name}: level ${a.level} (${a.into}/${a.next} XP this life)\n`
+        + `Dimensional level ${a.dim_level} (${a.dim_into}/${a.dim_next}, persists)\nSpeed x${(a.speed / 1000).toFixed(2)}`;
+      const label = this.doc.createElement('span'); label.textContent = short;
+      const value = this.doc.createElement('b'); value.textContent = String(a.level);
+      const dim = this.doc.createElement('em'); dim.textContent = `◆${a.dim_level}`;
+      const bar = this.doc.createElement('i'), fill = this.doc.createElement('s');
+      fill.style.width = Math.min(100, a.into / a.next * 100).toFixed(1) + '%';
+      bar.append(fill);
+      li.append(label, value, dim, bar);
+      if (a.xp || a.dim_xp) li.className = 'earned';
+      return li;
+    }));
+  }
+  renderInventory(ex) {
+    const rows = ex.inventory;
+    this.$('inventory-count').textContent = `${rows.length}/${ex.inventory_slots}`;
+    const slots = [];
+    for (let i = 0; i < ex.inventory_slots; i++) {
+      const row = rows[i], li = this.doc.createElement('li');
+      if (!row) { li.className = 'empty'; slots.push(li); continue; }
+      li.className = row.kind;
+      li.title = `${row.name} x${row.count}` + (row.food ? ` - restores ${row.food} hunger (eaten automatically)` : ' - material');
+      li.textContent = row.glyph;
+      li.style.color = ITEM_COLOR[row.id] || '#e7d7b0';
+      const count = this.doc.createElement('small'); count.textContent = String(row.count);
+      li.append(count);
+      slots.push(li);
+    }
+    this.$('inventory').replaceChildren(...slots);
+  }
+  renderLog(ex) {
+    const entries = [...ex.log].reverse().slice(0, 4);
+    this.$('log').replaceChildren(...(entries.length ? entries.map(entry => {
+      const li = this.doc.createElement('li');
+      const head = this.doc.createElement('b');
+      head.textContent = entry.type === 'encounter'
+        ? `+${entry.xp} ${LABEL[entry.attribute]}` + (entry.dim_xp ? ` (◆+${entry.dim_xp})` : '')
+        : {eat: 'Ate', rest: 'Rested', life: 'Anchor'}[entry.type];
+      const text = this.doc.createElement('span'); text.textContent = entry.text;
+      li.append(head, text);
+      return li;
+    }) : [Object.assign(this.doc.createElement('li'), {className: 'empty', textContent: 'Nothing found yet - the forest is wide.'})]));
+  }
+  showReport(report) {
+    this.$('report-title').textContent = report.title;
+    this.$('report-lines').replaceChildren(...report.lines.map((line, i) => {
+      const li = this.doc.createElement('li'); li.textContent = line;
+      li.style.animationDelay = (i * 0.18) + 's';
+      return li;
+    }));
+    this.$('report').hidden = false;
+  }
+  hideReport() { this.$('report').hidden = true; }
+}

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dimensional-summoner-sim"
+version = "0.7.0"
+description = "Deterministic Phase One simulation and balance laboratory"
+requires-python = ">=3.10"
+
+[project.scripts]
+dimensional-sim = "dimensional_sim.cli:main"
+dimensional-world = "dimensional_sim.world.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.setuptools.package-data]
+"dimensional_sim.world" = ["browser/*.html", "browser/*.css", "browser/*.js"]

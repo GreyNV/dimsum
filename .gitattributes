@@ -1,0 +1,6 @@
+# Store text with LF in the repository; check out with native line endings.
+* text=auto
+*.png binary
+*.whl binary
+*.zip binary
+*.exe binary
