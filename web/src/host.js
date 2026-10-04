@@ -162,6 +162,7 @@ async function start() {
   const seed = crypto.getRandomValues(new Uint32Array(1))[0];
   const awayMs = local ? Math.max(0, Date.now() - local.saved_at) : 0;
   const result = await call('init', {save: local ? local.data : null, seed, awayMs});
+  worker.postMessage({id: 0, type: 'visibility', active: !document.hidden});
   window.DIMSUM_TRANSPORT = {
     hosted: true,
     async request(path, body) {
@@ -183,6 +184,7 @@ async function start() {
   setInterval(saveCloud, CLOUD_SAVE_MS);
   saveCloud();
   document.addEventListener('visibilitychange', () => {
+    worker.postMessage({id: 0, type: 'visibility', active: !document.hidden});
     if (document.visibilityState === 'hidden') saveLocal().then(saveCloud).catch(() => {});
   });
   addEventListener('pagehide', () => { if (latest) store.set(LOCAL_KEY, latest); });

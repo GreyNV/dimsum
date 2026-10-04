@@ -179,7 +179,8 @@ function drawFist(ctx, sx, sy, fx, fy) {
 
 /** Activity poses (presentation only) for encounter kinds performed in place. */
 export const POSE = Object.freeze({forage: 'crouch', gather: 'crouch', observe: 'crouch',
-  drink: 'crouch', study: 'crouch', meditate: 'sit', climb: 'climb', rest: 'sit', pray: 'kneel', kneel: 'kneel'});
+  drink: 'crouch', study: 'crouch', meditate: 'sit', climb: 'climb', rest: 'sit',
+  think: 'sit', contemplate: 'sit', pray: 'kneel', kneel: 'kneel'});
 export function crouchSprite(sprite) {
   // Drop the lower cloak and legs; boots stay under the body.
   return {paint: [...sprite.paint.slice(0, 6), sprite.paint[8]], glyph: [...sprite.glyph.slice(0, 6), sprite.glyph[8]]};
@@ -271,11 +272,13 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
   // Seen from behind, a pulled-back fist hides behind the body; a strike is in front.
   if (fist && player.facing === 'north' && phase !== 'strike') drawFist(ctx, ...fist);
   if (activity?.kind === 'pray') {  // a thin column of light over the kneeling avatar
-    ctx.save(); ctx.globalAlpha = .18 + .12 * Math.sin(clock / 350);
+    ctx.save(); ctx.globalAlpha = .32 + .16 * Math.sin(clock / 350);
     const ray = ctx.createLinearGradient(x, top - 60, x, top + height);
     ray.addColorStop(0, '#fff3c400'); ray.addColorStop(.5, '#fff3c4'); ray.addColorStop(1, '#fff3c400');
     ctx.fillStyle = ray; ctx.fillRect(x - 9, top - 60, 18, height + 60); ctx.restore();
   }
+  const hands = pose === 'crouch' ? workingHands(activity, player.facing, x, y, clock, reducedMotion) : null;
+  if (hands?.behind) for (const arm of hands.arms) drawFist(ctx, ...arm);   // seen from behind
   if (usingLegacyEquipment) paintPlayerLayers(ctx, player, left, top, equipment, compact);
   else paintPixelPlayer(ctx, player, left, top, {compact, reducedMotion});
   // Small brass clasp and collar glint keep the body readable over dark terrain.
@@ -284,22 +287,40 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
     ctx.fillStyle = '#845528'; ctx.fillRect(Math.round(x) - 1 + lx, top + 27, 2, 2);
   }
   if (fist && !(player.facing === 'north' && phase !== 'strike')) drawFist(ctx, ...fist);
-  if (pose === 'crouch') {  // hands working at the spot in front
-    const hx = x + Math.round(Math.cos(angle) * 9), hy = y + ACTOR_FOOT - 6 + Math.round(Math.sin(angle) * 4) - bob;
-    ctx.fillStyle = OUTLINE; ctx.fillRect(hx - 3, hy - 3, 6, 6);
-    ctx.fillStyle = ROLE.s.fill; ctx.fillRect(hx - 2, hy - 2, 4, 4);
-  }
+  if (hands && !hands.behind) for (const arm of hands.arms) drawFist(ctx, ...arm);
   if (pose && activity.kind !== 'rest' && activity.kind !== 'kneel')
-    drawActionInteraction(ctx, activity, x, y, clock, reducedMotion);
+    drawActionInteraction(ctx, activity, x, y, clock, reducedMotion, {armDrawn: !!hands});
   if (activity) drawProgress(ctx, x, top - 6, activity.progress / 1000, clock);
   return {left, top, width, height};
 }
 
 /** Visible, cosmetic contact with the actual encounter cell. The simulation owns
  * timing and rewards; these marks only explain what the avatar is doing. */
-function drawActionInteraction(ctx, activity, x, y, clock, reducedMotion) {
+/** Arms of a crouching avatar working at the encounter cell. Shoulders sit at the
+ * torso of the compact sprite (never the head): toward the viewer both hands work
+ * in front of the knees; sideways one arm reaches forward and down; seen from
+ * behind the forearms show above the shoulders and are drawn under the body.
+ * Returns {behind, arms: [[shoulderX, shoulderY, handX, handY], ...]}. */
+export function workingHands(activity, facing, x, y, clock = 0, reducedMotion = false) {
+  let dir = facing;
+  if (activity && Number.isFinite(activity.x) && Number.isFinite(activity.y)) {
+    const dx = (activity.x + .5) * TILE_W - x, dy = (activity.y + .5) * TILE_H - y;
+    if (dx || dy) dir = Math.abs(dy) >= Math.abs(dx) ? (dy > 0 ? 'south' : 'north') : (dx > 0 ? 'east' : 'west');
+  }
+  const beat = reducedMotion ? 0 : Math.round(Math.sin(clock / 145) * 2);
+  const shoulderY = y - 8;   // compact sprite: head y-28..y-14, torso below
+  if (dir === 'south') return {behind: false, arms: [
+    [x - 9, shoulderY, x - 6, y + 6 + beat], [x + 9, shoulderY, x + 6, y + 6 - beat]]};
+  if (dir === 'north') return {behind: true, arms: [
+    [x - 9, shoulderY, x - 11, y - 20 + beat], [x + 9, shoulderY, x + 11, y - 20 - beat]]};
+  const side = dir === 'east' ? 1 : -1;
+  return {behind: false, arms: [[x + side * 7, shoulderY, x + side * (19 + beat), y + 4]]};
+}
+
+function drawActionInteraction(ctx, activity, x, y, clock, reducedMotion, {armDrawn = false} = {}) {
   const colors = {forage:'#e96c75', gather:'#d6ac6a', observe:'#e6d6a2', climb:'#b5d58b',
-    drink:'#a9eaff', meditate:'#c8c5ff', study:'#d3b6ff', pray:'#fff0b4'};
+    drink:'#a9eaff', meditate:'#c8c5ff', study:'#d3b6ff', pray:'#fff0b4',
+    think:'#b6bed1', contemplate:'#c8c5ff'};
   const color = colors[activity.kind];
   if (!color || !Number.isFinite(activity.x) || !Number.isFinite(activity.y)) return;
   const tx = (activity.x + .5) * TILE_W, ty = (activity.y + .5) * TILE_H;
@@ -308,7 +329,7 @@ function drawActionInteraction(ctx, activity, x, y, clock, reducedMotion) {
   const ux = distance ? (tx - x) / distance : 0, uy = distance ? (ty - y) / distance : 1;
   const beat = reducedMotion ? 0 : Math.sin(clock / (activity.kind === 'climb' ? 170 : 145));
   const touch = ['forage','gather','climb','drink','study'].includes(activity.kind);
-  if (touch) {
+  if (touch && !armDrawn) {   // climbing: the standing sprite reaches up from the chest
     const sx = x + ux * 8, sy = y - 24 + uy * 3;
     const reach = 11 + beat * 4;
     drawFist(ctx, sx, sy, sx + ux * reach, sy + uy * reach - (activity.kind === 'climb' ? 8 + beat * 6 : 0));
@@ -317,7 +338,7 @@ function drawActionInteraction(ctx, activity, x, y, clock, reducedMotion) {
   ctx.strokeStyle = color; ctx.fillStyle = color;
   ctx.globalAlpha = reducedMotion ? .65 : .55 + .25 * beat;
   const lift = reducedMotion ? 0 : beat * 4;
-  if (activity.kind === 'meditate' || activity.kind === 'pray') {
+  if (['meditate','pray','think','contemplate'].includes(activity.kind)) {
     ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(x, y + ACTOR_FOOT, 18 + Math.abs(lift), 6, 0, 0, Math.PI * 2); ctx.stroke();
   } else {
     const px = touch ? tx - ux * 7 : tx, py = ty - 10 + lift;
@@ -456,8 +477,6 @@ export const SPOTS = Object.freeze({
   forest_spring: {paint: ['  cccccc  ', ' gaaaaaag ', 'gaaaaaaaag', ' gggggggg '], glyph: ['  .    .  ', ' /~~~~~~\\ ', '|~*~~~~*~|', ' \\______/ ']},
   mossy_stone: {paint: ['   qqq   ', '  qgqgq  ', ' ggggggg ', '  ggggg  '], glyph: ['   .^.   ', '  /:,:\\  ', ' /:___:\\ ', '  \\___/  ']},
   old_carvings: {paint: ['   xxx   ', '  ggggg  ', '  gxgxg  ', '  ggggg  '], glyph: ['   *:*   ', '  /___\\  ', '  |*o*|  ', '  /___\\  ']},
-  wayside_shrine: {paint: ['    y    ', '  ggggg  ', ' ggggggg ', '  gxyxg  ', '  ggggg  ', ' qgggggq '],
-    glyph: ['    +    ', '  /^^^\\  ', ' /_____\\ ', '  |*i*|  ', '  |___|  ', ' ;/___\\; ']},
   abandoned_camp: {paint: ['  rrrrr  ', 'orrrrrro ', ' ooooooo ', ' qooqooq '],
     glyph: ['  /^^^\\  ', ' /_____\\ ', ' |# # #| ', ' /_o_o_\\ ']},
   moonlit_pool: {paint: ['  ccccc  ', ' caaaaac ', 'caaaaaaac', ' gcccccg '],
@@ -594,7 +613,7 @@ export function drawSpotCompletion(ctx, spot, x, y, age, reducedMotion = false) 
   const t = age / 650;
   ctx.save(); ctx.globalAlpha = Math.max(0, 1 - t);
   const color = spot.encounter === 'forest_spring' ? '#a9eaff'
-    : spot.encounter === 'old_carvings' ? '#d3b6ff' : spot.encounter === 'wayside_shrine' ? '#fff6cf' : '#ffe5a0';
+    : spot.encounter === 'old_carvings' ? '#d3b6ff' : '#ffe5a0';
   ctx.strokeStyle = color; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.ellipse(x, y + 4, reducedMotion ? 19 : 6 + t * 23,
     reducedMotion ? 8 : 3 + t * 9, 0, 0, Math.PI * 2); ctx.stroke();

@@ -46,15 +46,15 @@ class WebGame:
         """Advance one slice of offline time; returns milliseconds actually advanced."""
         step = min(int(ms), CATCH_UP_SLICE_MS)
         if step > 0:
-            self.expedition.advance(step)
+            self.expedition.advance(step, allow_prayer=False)
         return step
 
     def input(self, body_text, now):
         frame = self.session.input(json.loads(body_text), float(now))
         return json.dumps(frame, separators=(",", ":"))
 
-    def advance(self, ms, now):
-        self.session.advance_ms(int(ms), float(now))
+    def advance(self, ms, now, active=True):
+        self.session.advance_ms(int(ms), float(now), allow_prayer=bool(active))
 
     def state(self, now):
         return json.dumps(self.session.state(float(now)), separators=(",", ":"))

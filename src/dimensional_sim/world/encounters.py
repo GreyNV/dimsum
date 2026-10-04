@@ -8,9 +8,8 @@ become ordinary runtime Targets at their spot. To change placement rules or a
 pool for existing worlds, add a new versioned pool instead of editing in place.
 
 The first pool is bare-handed: nothing here needs equipment. No providers, wall
-clock, hash() or shared RNG. Food sources, shrines and boars carry a spawn window:
-each life rolls how many may exist at once (enforced by the auto-pilot), so food
-stays scarce; spawn_window() is where action mastery will widen it later.
+clock, hash() or shared RNG. Food sources and rare boars carry a spawn window;
+prayer is a timed auto-pilot action during visible play, never a map spot.
 """
 from collections import deque
 from dataclasses import dataclass
@@ -18,9 +17,9 @@ from dataclasses import dataclass
 from .models import DELTAS, ChunkKey, identifier, integer
 from .seeds import derive_seed
 
-ENCOUNTER_VERSION = "encounters-v4"  # v4: more distinct dark-forest locations
+ENCOUNTER_VERSION = "encounters-v5"  # v5: scarce food and pursuing boars; prayer is no longer a map spot
 ATTRIBUTES = ("strength", "endurance", "agility", "intelligence", "perception", "willpower")
-KINDS = ("forage", "gather", "observe", "climb", "drink", "meditate", "study", "pray", "fight")
+KINDS = ("forage", "gather", "observe", "climb", "drink", "meditate", "study", "fight")
 RARITIES = ("common", "uncommon", "rare")
 NEAR = (None, "T", "^")
 
@@ -123,25 +122,22 @@ class EncounterDef:
 # Dark forest, no equipment: everything here is done with bare hands.
 # XP is regular (current-life) XP; 20% also goes to the persistent dimensional track.
 DARK_FOREST = (
-    EncounterDef("bramble_berries", "Bramble berries", "forage", "perception", 40, 2400, 30, window=(0, 2),
+    EncounterDef("bramble_berries", "Bramble berries", "forage", "perception", 40, 2400, 8, window=(0, 1),
                  log="Picked bramble berries without getting scratched (much).",
-                 loot=(Loot("wild_berries", 2, 4), Loot("bramble_thorn", 1, 1, 30))),
+                 loot=(Loot("wild_berries", 1, 1), Loot("bramble_thorn", 1, 1, 30))),
     EncounterDef("fallen_branches", "Fallen branches", "gather", "strength", 30, 2200, 24,
                  log="Hauled a pile of fallen branches off the trail.", loot=(Loot("stick", 2, 3),)),
     EncounterDef("animal_tracks", "Animal tracks", "observe", "perception", 50, 3000, 20,
                  log="Read fresh tracks in the mud - something heavy passed here."),
     EncounterDef("gnarled_tree", "Gnarled tree", "climb", "agility", 60, 3200, 12, near="T", window=(0, 1),
                  log="Climbed a gnarled tree and scouted the canopy.",
-                 loot=(Loot("bird_egg", 1, 1, 50), Loot("stick", 1, 1, 40))),
+                 loot=(Loot("bird_egg", 1, 1, 15), Loot("stick", 1, 1, 40))),
     EncounterDef("forest_spring", "Forest spring", "drink", "endurance", 40, 2000, 12, heal=10, window=(1, 2),
                  log="Drank from a cold spring and caught your breath."),
     EncounterDef("mossy_stone", "Mossy stone", "meditate", "willpower", 60, 4000, 8, near="^",
                  log="Sat by a mossy stone until the forest went quiet."),
     EncounterDef("old_carvings", "Old carvings", "study", "intelligence", 80, 3600, 5, "uncommon",
                  log="Traced old carvings - the marks look almost like a summoning circle."),
-    EncounterDef("wayside_shrine", "Wayside shrine", "pray", "willpower", 50, 3600, 7, "uncommon",
-                 blessing=1, window=(1, 1),
-                 log="Knelt at a moss-grown shrine and prayed to the gods who spared you."),
     EncounterDef("abandoned_camp", "Abandoned camp", "gather", "strength", 40, 3100, 10, "uncommon",
                  log="Searched an abandoned camp for anything the travellers left behind.",
                  loot=(Loot("stick", 1, 2), Loot("bramble_thorn", 1, 1, 30))),
@@ -151,10 +147,10 @@ DARK_FOREST = (
                  log="Studied the ruins of a watchtower and its faded warning marks."),
     EncounterDef("mushroom_ring", "Mushroom ring", "observe", "perception", 55, 3200, 9,
                  log="Watched the small life stirring inside a ring of pale mushrooms."),
-    # Asset-spawned boars (one per chunk) share this window with boar spots.
-    EncounterDef("bramble_boar", "Bramble boar", "fight", "strength", 100, 1, 14, hp=3, window=(1, 2),
+    # Boars are rare spot rolls that pursue the player; asset-spawned boars are screened out.
+    EncounterDef("bramble_boar", "Bramble boar", "fight", "strength", 100, 1, 4, hp=3, window=(1, 1),
                  log="Drove off a bramble boar with your bare fists.",
-                 loot=(Loot("boar_meat", 1, 2), Loot("boar_hide", 1, 1, 60))),
+                 loot=(Loot("boar_meat", 1, 1), Loot("boar_hide", 1, 1, 60))),
 )
 POOLS = {"dark_forest": DARK_FOREST}
 BY_ID = {entry.id: entry for pool in POOLS.values() for entry in pool}
@@ -269,8 +265,8 @@ def chunk_spots(chunk, pools=POOLS, life=1):
     asset, key = chunk.asset, chunk.key
     seed = derive_seed(chunk.seed, ENCOUNTER_VERSION, life)
     reachable = _reachable(asset)
-    # 0..3 spots; an empty roll is part of the chance, like idle stage buckets.
-    count = (0, 1, 2, 2, 3, 3)[derive_seed(seed, "count") % 6]
+    # 0..2 spots; empty chunks leave room to travel and feel scarce.
+    count = (0, 0, 1, 1, 2, 2)[derive_seed(seed, "count") % 6]
     total = sum(entry.weight for entry in pool)
     spots, used, candidates = [], [], {}
     for index in range(count):

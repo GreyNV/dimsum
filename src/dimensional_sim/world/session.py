@@ -190,7 +190,7 @@ class BrowserSession:
             command = self.command if now - self.input_time <= INPUT_LEASE else InputCommand()
             self.game.advance(TICK_MS, command)
 
-    def advance_ms(self, ms, now):
+    def advance_ms(self, ms, now, *, allow_prayer=True):
         """Advance by real elapsed milliseconds (hosted mode; timers may be throttled).
         The auto-pilot is partition-independent, so one bulk call equals many ticks."""
         integer(ms, "elapsed milliseconds", 0)
@@ -198,7 +198,7 @@ class BrowserSession:
             if self.paused or ms == 0:
                 return
             if self.expedition is not None and (now >= self.manual_until or self.expedition.anchor_ms is not None):
-                self.expedition.advance(ms)
+                self.expedition.advance(ms, allow_prayer=allow_prayer)
                 return
             command = self.command if now - self.input_time <= INPUT_LEASE else InputCommand()
             self.game.advance(ms, command)

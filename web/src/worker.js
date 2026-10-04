@@ -10,7 +10,7 @@
  */
 import {loadPyodide} from '/pyodide/pyodide.mjs';
 
-let py = null, game = null, last = 0, loopTimer = 0;
+let py = null, game = null, last = 0, loopTimer = 0, active = true;
 const MAX_STEP_MS = 60000;
 
 function progress(stage, fraction = null, detail = '') {
@@ -45,7 +45,7 @@ function loop() {
   const ms = Math.min(MAX_STEP_MS, Math.max(0, Math.round(t - last)));
   last = t;
   if (game && ms) {
-    try { game.advance(ms, t / 1000); } catch (error) { postMessage({type: 'fatal', error: String(error)}); return; }
+    try { game.advance(ms, t / 1000, active); } catch (error) { postMessage({type: 'fatal', error: String(error)}); return; }
   }
   loopTimer = setTimeout(loop, 50);
 }
@@ -78,6 +78,7 @@ async function init({save, seed, awayMs}) {
 
 const handlers = {
   init,
+  visibility: ({active: visible}) => { active = visible === true; },
   input: ({body}) => game.input(JSON.stringify(body), now()),
   save: () => game.save(),
 };

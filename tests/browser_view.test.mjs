@@ -262,12 +262,24 @@ test('prologue: dark awakening with memories, eyes open, then the old man speaks
   ELDER.paint.forEach((row,r)=>{assert.equal(row.length,ELDER.paint[0].length);assert.equal(ELDER.glyph[r].length,row.length);});
   for(const role of new Set(ELDER.paint.join('').replaceAll(' ',''))) assert.ok('hrswogb'.includes(role),role);
 });
-test('prayer: shrine art, kneeling pose and blessing rewards',()=>{
-  const shrine=SPOTS.wayside_shrine;
-  shrine.paint.forEach((row,r)=>{assert.equal(row.length,shrine.paint[0].length);assert.equal(shrine.glyph[r].length,row.length);});
+test('timed prayer is visible and its completed blessing has a clear source',()=>{
   assert.equal(POSE.pray,'kneel');
-  const prayer={type:'encounter',xp:50,attribute:'willpower',items:[],text:'Knelt',blessing:1};
-  assert.deepEqual(rewardTexts(prayer).map(r=>r.text),['+50 Willpower','+1 blessing']);
-  assert.deepEqual(rewardTexts({type:'blessing',items:[],text:'The gods answer'}).map(r=>r.text),['The gods answer']);
-  assert.match(activityText({expedition:{control:'auto',activity:{name:'Wayside shrine',kind:'pray',progress:300}}}),/^Praying at wayside shrine - 30%/);
+  assert.equal(POSE.think,'sit'); assert.equal(POSE.contemplate,'sit');
+  const prayer={type:'blessing',items:[],text:'You finished a prayer',blessing:1};
+  assert.deepEqual(rewardTexts(prayer).map(r=>r.text),['+1 blessing','Prayer completed']);
+  assert.equal(activityText({expedition:{control:'auto',activity:{name:'Praying to the gods',kind:'pray',progress:300}}}),
+    'Praying to the gods - 30%');
+});
+
+test('crouching hands start at the torso, never the head, in every direction',async()=>{
+  const {workingHands}=await import('../src/dimensional_sim/world/browser/actors.js');
+  const x=60, y=70, near={south:[2,3],north:[2,1],east:[3,2],west:[1,2]};
+  for(const [dir,[tx,ty]] of Object.entries(near)) {
+    const hands=workingHands({x:tx,y:ty},'south',x,y,300);
+    assert.equal(hands.behind,dir==='north',dir);
+    for(const [sx,sy,hx] of hands.arms) {
+      assert.ok(sy>=y-10,`${dir}: shoulder below the head`);
+      if(dir==='east') assert.ok(hx>x); if(dir==='west') assert.ok(hx<x);
+    }
+  }
 });

@@ -14,7 +14,7 @@ from dimensional_sim.world.models import DELTAS, ChunkKey, DimensionSpec
 from dimensional_sim.world.open_terrain import open_assets
 from dimensional_sim.world.progression import attribute_report, scaled_ms, speed_permille
 from dimensional_sim.world.repository import WorldRepository
-from dimensional_sim.world.runtime import Exploration
+from dimensional_sim.world.runtime import Exploration, Target
 from dimensional_sim.world.seeds import canonical_json
 
 P = ap.POINT
@@ -72,7 +72,7 @@ class CatalogTests(unittest.TestCase):
         for seed in range(200):
             loot = dict(roll_loot(entry, seed))
             self.assertEqual(loot, dict(roll_loot(entry, seed)))
-            self.assertTrue(2 <= loot["wild_berries"] <= 4)
+            self.assertEqual(loot["wild_berries"], 1)
         thorns = sum("bramble_thorn" in dict(roll_loot(entry, s)) for s in range(1000))
         self.assertTrue(200 < thorns < 400)  # 30% chance
 
@@ -129,13 +129,13 @@ class SurvivalTests(unittest.TestCase):
     def test_auto_eat_respects_threshold_fit_and_cooldown(self):
         e = expedition()
         e.inventory = {"wild_berries": 2, "boar_meat": 1}
-        e.hunger, e.health = 61 * P, 50 * P
+        e.hunger, e.health = 41 * P, 50 * P
         e._settle()
         self.assertEqual(e.inventory, {"wild_berries": 2, "boar_meat": 1}, "above the threshold: no eating")
-        e.hunger = 60 * P
+        e.hunger = 40 * P
         e._settle()
         self.assertEqual(e.inventory, {"wild_berries": 2}, "the biggest food that fits")
-        self.assertEqual((e.hunger, e.health, e.food_cooldown_ms), (95 * P, 61 * P, ap.FOOD_COOLDOWN_MS))
+        self.assertEqual((e.hunger, e.health, e.food_cooldown_ms), (75 * P, 61 * P, ap.FOOD_COOLDOWN_MS))
         e.hunger = 10 * P
         e._settle()
         self.assertEqual(e.inventory["wild_berries"], 2, "cooldown blocks the next bite")
@@ -146,11 +146,11 @@ class SurvivalTests(unittest.TestCase):
 
     def test_hunger_drains_and_starvation_hurts_exactly(self):
         e = expedition()
-        e.hunger, e.health = 1000 * 500, 80 * P   # 1 second of hunger left
+        e.hunger, e.health = ap.HUNGER_DRAIN * 1000, 80 * P   # 1 second of hunger left
         e._apply_vitals(1000)
         self.assertEqual(e.hunger, 0)
         e._apply_vitals(2000)
-        self.assertEqual(e.health, 78 * P)
+        self.assertEqual(e.health, 77 * P)
         self.assertEqual(e.cause, "starvation")
         tough = expedition()
         tough.regular["endurance"] = 3000
@@ -234,13 +234,27 @@ class LifeTests(unittest.TestCase):
         e = expedition()
         e.advance(40_000)
         old = json.loads(dump(e))
-        for key in ("dust", "anchor_ms", "anchor_wait"):
+        for key in ("dust", "anchor_ms", "anchor_wait", "monster_ms", "prayers_this_life"):
             del old[key]
         old.update(schema_version=3, encounters="encounters-v3")
         migrated = Expedition.from_dict(old)
         self.assertEqual((migrated.regular, migrated.dimensional), (e.regular, e.dimensional))
         self.assertEqual((migrated.life, migrated.dust), (e.life, 0))
-        self.assertEqual(migrated.to_dict()["encounters"], "encounters-v4")
+        self.assertEqual(migrated.to_dict()["encounters"], "encounters-v5")
+
+    def test_v4_save_keeps_progress_when_shrines_become_active_prayer(self):
+        e = expedition()
+        e.advance(40_000)
+        old = json.loads(dump(e))
+        old.pop("monster_ms")
+        old.pop("prayers_this_life")
+        old.update(schema_version=4, encounters="encounters-v4", task=None, goal=None, blessing=23)
+        old["budget"]["wayside_shrine"] = 1
+        old["spawned"]["wayside_shrine"] = 0
+        migrated = Expedition.from_dict(old)
+        self.assertEqual((migrated.regular, migrated.dimensional, migrated.blessing),
+                         (e.regular, e.dimensional, 23))
+        self.assertEqual(migrated.to_dict()["encounters"], "encounters-v5")
 
     def test_bulk_ticks_slices_and_reload_identical_across_a_death(self):
         T = 360000
@@ -290,7 +304,7 @@ class LifeTests(unittest.TestCase):
         migrated = Expedition.from_dict(json.loads(canonical_json(v1)))
         self.assertEqual(set(migrated.regular.values()), {70})
         self.assertEqual(migrated.life, 1)
-        for mutate in (lambda d: d.update(schema_version=5), lambda d: d.update(encounters="v0"),
+        for mutate in (lambda d: d.update(schema_version=6), lambda d: d.update(encounters="v0"),
                        lambda d: d.update(blessing=-1), lambda d: d.update(dust=-1),
                        lambda d: d.update(anchor_ms=-1), lambda d: d.update(anchor_wait=True),
                        lambda d: d["budget"].pop("bramble_boar"),
@@ -405,7 +419,7 @@ class SpawnWindowTests(unittest.TestCase):
                 self.assertEqual(admitted, active < limit, encounter)
         self.assertGreaterEqual(len(budgets), 2)
         refused = {d[0] for d in decisions if not d[3]}
-        self.assertTrue(refused & {"bramble_berries", "bramble_boar"}, "food is turned away when capped")
+        self.assertTrue(refused & {"bramble_berries", "gnarled_tree"}, "scarce food is turned away when capped")
         respawned = [d for d in decisions if d[3] and d[1] is not None]
         self.assertGreater(len(respawned), sum(budgets[0].values()), "finished spots free their slot")
 
@@ -428,24 +442,41 @@ class SpawnWindowTests(unittest.TestCase):
 
 
 class PrayerTests(unittest.TestCase):
-    def test_shrine_prayer_grants_blessing_and_sometimes_a_boon(self):
-        shrine = BY_ID["wayside_shrine"]
-        self.assertEqual((shrine.kind, shrine.blessing), ("pray", 1))
-        boons = 0
-        for i in range(60):
-            e = expedition()
-            e.health, e.hunger = 50 * P, 50 * P
-            e._reward(f"enc:forest:9:9:{i}", shrine)
-            self.assertEqual(e.blessing, 1)
-            self.assertEqual(e.log[-1 if e.log[-1]["type"] == "encounter" else -2]["blessing"], 1)
-            if e.log[-1]["type"] == "blessing":
-                boons += 1
-                self.assertEqual((e.health, e.hunger), ((50 + ap.BOON) * P, (50 + ap.BOON) * P))
-        self.assertTrue(10 < boons < 40, boons)
+    def test_prayer_is_rare_timed_active_action_not_a_map_spot(self):
+        from types import SimpleNamespace
+        from dimensional_sim.world.seeds import derive_seed
+        self.assertNotIn("wayside_shrine", BY_ID)
+        e = skip_prologue(expedition())
+        spot = next(SimpleNamespace(id=f"enc:forest:9:9:{i}") for i in range(1000)
+                    if derive_seed(e.game.world.world_seed, "after-location-v5", e.life,
+                                   f"enc:forest:9:9:{i}") % 100 < ap.PRAYER_CHANCE)
+        e._after_location(spot, False)
+        self.assertNotEqual(e.task["type"], "pray", "offline actions cannot grant prayer")
+        e._after_location(spot, True)
+        self.assertEqual(e.task["type"], "pray")
+        self.assertEqual(e.blessing, 0, "prayer pays only after its full duration")
+        e.advance(ap.PRAYER_MS - 1)
+        self.assertEqual(e.blessing, 0)
+        e.advance(1)
+        self.assertEqual(e.blessing, 1)
+        self.assertEqual(e.log[-1]["type"], "blessing")
+        e._after_location(spot, True)
+        self.assertNotEqual(e.task["type"], "pray", "one prayer at most per life")
+
+    def test_quiet_actions_are_common_and_grant_nothing(self):
+        from types import SimpleNamespace
+        e = skip_prologue(expedition())
+        before = (dict(e.regular), dict(e.dimensional), e.blessing, dict(e.inventory))
+        quiet = 0
+        for i in range(100):
+            e._after_location(SimpleNamespace(id=f"enc:forest:8:8:{i}"), False)
+            quiet += e.task["type"] in ("think", "contemplate")
+        self.assertGreaterEqual(quiet, 55)
+        self.assertEqual((e.regular, e.dimensional, e.blessing, e.inventory), before)
 
     def test_blessing_persists_across_lives_and_saves(self):
         e = expedition()
-        e._reward("enc:forest:9:9:0", BY_ID["wayside_shrine"])
+        e.blessing = 1
         first_death(e)
         self.assertGreaterEqual(e.blessing, 1)
         self.assertIn(f"Blessing power: {e.blessing}", e.report["lines"])
@@ -457,7 +488,7 @@ class PrayerTests(unittest.TestCase):
         e.advance(60000)
         data = json.loads(dump(e))
         for key in ("blessing", "budget", "spawned", "admitted", "screened_chunks", "screened_targets",
-                    "dust", "anchor_ms", "anchor_wait"):
+                    "dust", "anchor_ms", "anchor_wait", "monster_ms", "prayers_this_life"):
             del data[key]
         for entry in data["log"]:
             del entry["blessing"]
@@ -469,6 +500,26 @@ class PrayerTests(unittest.TestCase):
         self.assertFalse(any(i.startswith("enc:") for i in upgraded.completed))
         upgraded.advance(30000)
         self.assertEqual(Expedition.from_dict(json.loads(dump(upgraded))).to_dict(), upgraded.to_dict())
+
+
+class PursuitTests(unittest.TestCase):
+    def test_rare_boar_interrupts_a_thought_and_survives_reload(self):
+        e = skip_prologue(expedition())
+        px, py = e._player()
+        position = next((px + dx, py + dy) for dx, dy in DELTAS.values()
+                        if e._walkable(e._grid(), px + dx, py + dy))
+        key = e.game.player.chunk
+        w, h = e._dims()
+        ident = "enc:forest:0:0:99"
+        e.game.targets[ident] = Target(ident, key, position[0] % w, position[1] % h, 3)
+        e.admitted[ident] = "bramble_boar"
+        e.task = {"type": "think", "spot": None, "elapsed_ms": 1000, "duration_ms": 3000}
+        e.monster_ms = ap.MONSTER_STEP_MS
+        e._settle()
+        self.assertIsNone(e.task)
+        self.assertEqual(e.goal["id"], ident)
+        self.assertEqual(e.log[-1]["type"], "ambush")
+        self.assertEqual(dump(Expedition.from_dict(json.loads(dump(e)))), dump(e))
 
 
 class AutopilotSessionTests(unittest.TestCase):

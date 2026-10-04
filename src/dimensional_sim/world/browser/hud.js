@@ -5,7 +5,7 @@ export const ATTRIBUTES = Object.freeze([
   ['intelligence', 'Intelligence', 'INT'], ['perception', 'Perception', 'PER'], ['willpower', 'Willpower', 'WIL']]);
 export const LABEL = Object.freeze(Object.fromEntries(ATTRIBUTES.map(([id, name]) => [id, name])));
 const VERB = Object.freeze({forage: 'Foraging', gather: 'Gathering', observe: 'Studying', climb: 'Climbing',
-  drink: 'Drinking at', meditate: 'Meditating by', study: 'Deciphering', pray: 'Praying at'});
+  drink: 'Drinking at', meditate: 'Meditating by', study: 'Deciphering'});
 export const ITEM_COLOR = Object.freeze({wild_berries: '#e0505e', bird_egg: '#efe6cf', boar_meat: '#d9776a',
   stick: '#c39a62', bramble_thorn: '#a9c97a', boar_hide: '#a6845d'});
 
@@ -25,6 +25,9 @@ export function activityText(state, paused = false) {
   if (ex.activity) {
     const pct = Math.floor(ex.activity.progress / 10);
     if (ex.activity.kind === 'rest') return `Resting at the anchor camp - ${pct}%`;
+    if (ex.activity.kind === 'pray') return `Praying to the gods - ${pct}%`;
+    if (ex.activity.kind === 'think') return `Thinking about the road - ${pct}%`;
+    if (ex.activity.kind === 'contemplate') return `Contemplating the forest - ${pct}%`;
     return `${VERB[ex.activity.kind] || 'Investigating'} ${ex.activity.name.toLowerCase()} - ${pct}%`;
   }
   if (ex.mode === 'home') return 'Badly hurt - heading back to the anchor camp';
@@ -41,7 +44,7 @@ export function rewardTexts(entry) {
   const texts = [];
   if (entry.type === 'encounter' && entry.xp) texts.push({text: `+${entry.xp} ${LABEL[entry.attribute]}`, color: '#bfe39a'});
   if (entry.blessing) texts.push({text: `+${entry.blessing} blessing`, color: '#ffe9a8'});
-  if (entry.type === 'blessing') texts.push({text: 'The gods answer', color: '#fff3c4'});
+  if (entry.type === 'blessing') texts.push({text: 'Prayer completed', color: '#fff3c4'});
   for (const [item, count] of entry.items || []) {
     if (count > 0) texts.push({text: `+${count} ${item.replaceAll('_', ' ')}`, color: ITEM_COLOR[item] || '#e7d7b0'});
   }
@@ -202,7 +205,7 @@ export class ExpeditionHud {
       head.textContent = entry.type === 'encounter'
         ? `+${entry.xp} ${LABEL[entry.attribute]}` + (entry.dim_xp ? ` (◆+${entry.dim_xp})` : '')
           + (entry.blessing ? ` ✦+${entry.blessing}` : '')
-        : {eat: 'Ate', rest: 'Rested', life: 'Anchor', blessing: 'Blessed', lore: 'The road', trade: 'Offered'}[entry.type];
+        : {eat: 'Ate', rest: 'Rested', life: 'Anchor', blessing: 'Prayer', lore: 'The road', trade: 'Offered', ambush: 'Ambush'}[entry.type];
       const text = this.doc.createElement('span'); text.textContent = entry.text;
       li.append(head, text);
       return li;

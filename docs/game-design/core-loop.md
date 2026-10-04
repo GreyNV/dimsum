@@ -25,6 +25,17 @@ countdown start it automatically. Unoffered inventory is lost at the transition.
 Dust has no purchase use yet. This adds one optional choice to the otherwise
 automatic life loop; it does not alter the separate idle core's return API.
 
+In the forest expedition, completing a location often leads to a 3-second thought
+or 5-second contemplation with no loot, XP or blessing. A 4% seeded chance during
+visible play instead starts a 12-second prayer, at most once per life. One blessing
+is earned only when that prayer finishes; offline catch-up cannot start it. Prayer
+is not a map location. Rare boars pursue nearby and interrupt the current action
+when they reach the avatar; the auto-pilot then fights. Food locations and drops
+are scarcer, hunger drains at 0.75 points/second and automatic eating waits until
+40/100 hunger. These temporary vitals and inventory reset each life; blessing and
+dimensional XP persist. The balance target is a first life of roughly 3-6 minutes
+at seed 482910 with no passive overnight blessing accumulation.
+
 ## Long-term loop
 
 ```text

@@ -208,3 +208,28 @@ local and hosted play. The measurable target is identical saves for bulk/split
 time across death and countdown; focused tests cover this, trading, retry and
 schema-3 migration. Dust currently accumulates for future anchor progression;
 there is no dust purchase action yet.
+
+## Scarce forest, active prayer and pursuit (encounters-v5)
+The character reference guides a 16x20 pixel browser sprite with four-direction
+views and timed idle/walk frames. The origin remains the caravan ambush site.
+
+The first biome now rolls 0-2 location spots per chunk. Berries appear at weight
+8 (previously 30), give one berry and have a 0-1 resident window. Tree eggs drop
+15% of the time; boars give one meat. Eating waits until hunger <=40, hunger drains
+0.75 points/s, and starvation costs 1.5 health/s. At seed 482910, the first life
+ends at about 287 simulated seconds in the current tuning sample.
+
+The shrine location is removed. After a completed location, a seed and spot ID
+roll a 4% prayer opportunity during visible play, at most once per life. Prayer is
+a visible 12-second kneeling task; only completion grants one persistent blessing
+and a prayer log entry. Offline catch-up passes `allow_prayer=False`; hidden hosted
+tabs also pass false. Otherwise a 70% seeded roll starts a 3-second thought or
+5-second contemplation, both without XP, items or blessing.
+
+Generated asset boars are screened out. Rare bramble-boar spot rolls pursue one
+walkable cell per second within six cells of the avatar, only through initialized
+chunks. Contact interrupts the current task and starts an auto-pilot fight. These
+targets are `enc:` actors, so moved positions save and reload under Exploration's
+custom-target rules. Encounter version v5 and expedition schema 5 migrate v4
+saves by retaining progression/inventory and rerolling current-life spots; the
+old shrine log keeps its earned blessing with no new map shrine.
