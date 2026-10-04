@@ -18,3 +18,10 @@ node_modules/
 .codex/tools/
 .codex/artifacts/
 *.log
+
+# Agent scratch: headless browser profiles hold cookies/login stores; never commit
+.codex/chrome-*/
+.codex/edge-*/
+.codex/*.png
+.codex/*.html
+.codex/*.log

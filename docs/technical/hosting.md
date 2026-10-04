@@ -12,6 +12,8 @@ Supabase stores cloud saves. Python remains the single source of truth.
   the Python package to /py/ with a manifest.
 - web/src/worker.js: boots Pyodide, writes the package into its file system,
   imports dimensional_sim.world.web.WebGame, advances by real elapsed time.
+  The pinned Pyodide 314.0.7 runs in a module Worker: host.js creates it with
+  `{type: 'module'}` and worker.js imports `/pyodide/pyodide.mjs`.
 - web/src/host.js: boot screen, worker RPC, transport for app.js, saves.
 - src/dimensional_sim/world/session.py: frame snapshot, input validation and
   session logic shared with the local HTTP server (browser_server.py).
@@ -37,6 +39,20 @@ node web/build.mjs
 python -m http.server 8000 --directory web/dist
 ```
 Open http://localhost:8000/ (module workers need http, not file://).
+
+## Browser verification (2026-10-04)
+After switching the pinned Pyodide runtime to a module Worker, the built `web/dist`
+was served locally and opened in Chromium with agent-browser. The Python runtime
+booted, the opening report appeared, Continue resumed exploration, attribute XP
+changed, a life report appeared, and the browser reported no page errors. The
+production Vercel deployment still serves the previous classic worker until the
+new build is published.
+The hosted Worker now starts the session paused until the browser's first
+snapshot; the UI resumes automatically when no new report needs reading.
+In the rebuilt hosted browser check, local save time remained at 0 while the
+opening report stayed visible for more than 8 seconds. After Continue, the
+report closed, the pause button returned to its running state, and the saved
+expedition reached 7,728 ms with no page errors.
 
 ## Deploy
 Push to GitHub main: the Vercel project "dimsum" builds from GreyNV/dimsum.

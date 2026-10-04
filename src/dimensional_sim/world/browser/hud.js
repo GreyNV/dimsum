@@ -50,6 +50,9 @@ export function reportIsFresh(ex, windowMs = 20000) {
   return !!ex?.report && ex.total_ms - ex.report.clock_ms < windowMs;
 }
 
+/** A new seeded world gets its own opening even in a browser with an old save. */
+export const reportStorageKey = (worldSeed, report) => `${worldSeed}:${report.life}:${report.seq}`;
+
 export class ExpeditionHud {
   constructor(doc = document) {
     this.doc = doc; this.signature = ''; this.vitalsSignature = '';
@@ -81,8 +84,20 @@ export class ExpeditionHud {
     const ring = this.$('food-ring');
     ring.style.strokeDashoffset = String(50.27 * (cd / v.food_cooldown_total_ms));
     this.$('food-label').textContent = cd ? `Food in ${Math.ceil(cd / 1000)}s` : 'Food ready';
+    this.updateFoodCooldown(ex);
     this.$('life').textContent = `Life ${ex.life}`;
     this.$('depth').textContent = `Ring ${ex.depth} - best ${ex.best_depth}`;
+  }
+  updateFoodCooldown(ex) {
+    const remaining = ex.vitals.food_cooldown_ms;
+    const total = ex.vitals.food_cooldown_total_ms || 1;
+    const ready = Math.max(0, Math.min(1, 1 - remaining / total));
+    for (const slot of this.$('inventory').querySelectorAll('li.food')) {
+      slot.style.setProperty('--food-brightness', (.35 + ready * .65).toFixed(3));
+      slot.style.setProperty('--food-fill', (ready * 100).toFixed(1) + '%');
+      slot.classList.toggle('on-cooldown', remaining > 0);
+      slot.setAttribute('aria-label', `${slot.dataset.name}, ${slot.dataset.count}. ${remaining ? `Food ready in ${Math.ceil(remaining / 1000)} seconds` : 'Food ready'}`);
+    }
   }
   renderAttributes(ex) {
     this.$('attributes').replaceChildren(...ATTRIBUTES.map(([id, name, short]) => {
@@ -109,6 +124,8 @@ export class ExpeditionHud {
       if (!row) { li.className = 'empty'; slots.push(li); continue; }
       li.className = row.kind;
       li.title = `${row.name} x${row.count}` + (row.food ? ` - restores ${row.food} hunger (eaten automatically)` : ' - material');
+      li.dataset.name = row.name;
+      li.dataset.count = String(row.count);
       li.textContent = row.glyph;
       li.style.color = ITEM_COLOR[row.id] || '#e7d7b0';
       const count = this.doc.createElement('small'); count.textContent = String(row.count);
@@ -116,6 +133,7 @@ export class ExpeditionHud {
       slots.push(li);
     }
     this.$('inventory').replaceChildren(...slots);
+    this.updateFoodCooldown(ex);
   }
   renderLog(ex) {
     const entries = [...ex.log].reverse().slice(0, 4);
@@ -138,6 +156,9 @@ export class ExpeditionHud {
       return li;
     }));
     this.$('report').hidden = false;
+    this.$('report').classList.toggle('opening', report.life === 0);
+    this.$('report-close').textContent = report.life === 0 ? 'Begin the next life' : 'Continue';
+    this.$('report-close').focus();
   }
   hideReport() { this.$('report').hidden = true; }
 }

@@ -29,14 +29,13 @@ def new_world(seed):
 
 
 class WebGame:
-    def __init__(self, save_text=None, seed=482910):
+    def __init__(self, save_text=None, seed=482910, start_paused=False):
         if save_text:
             expedition = Expedition.from_dict(json.loads(save_text))
         else:
             expedition = Expedition(Exploration(new_world(int(seed)), "forest"))
         self.expedition = expedition
-        self.session = BrowserSession(expedition.game, expedition)
-        self.session.paused = False
+        self.session = BrowserSession(expedition.game, expedition, start_paused=start_paused)
 
     @staticmethod
     def offline_ms(real_ms):

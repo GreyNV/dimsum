@@ -28,8 +28,8 @@ STATIC = {"/": ("index.html", "text/html"),
 
 class BrowserSession(_BaseSession):
     """HTTP adapter session: the request threads and the tick thread share a lock."""
-    def __init__(self, game, expedition=None):
-        super().__init__(game, expedition)
+    def __init__(self, game, expedition=None, *, start_paused=False):
+        super().__init__(game, expedition, start_paused=start_paused)
         self.lock = threading.RLock()
 
 
@@ -101,7 +101,9 @@ def make_server(session, port=8765):
 
 
 def serve(game, port=8765, expedition=None):
-    session = BrowserSession(game, expedition)
+    # The first browser snapshot decides whether to show an opening report.
+    # Keep the simulation at its saved time until that snapshot is received.
+    session = BrowserSession(game, expedition, start_paused=True)
     server = make_server(session, port)
     stop = threading.Event()
 

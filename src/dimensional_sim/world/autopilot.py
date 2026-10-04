@@ -57,9 +57,16 @@ RESTED_AT = 90 * POINT
 REST_MS = 10_000
 INVENTORY_SLOTS = 12
 STACK_LIMIT = 20
-OPENING_REPORT = ("Strength experience gained: 0", "Endurance experience gained: 0",
-                  "Will experience gained: 0", "Dimensional shards gained: 1",
-                  "Ability unlocked: Dimensional Clone", "Returning to anchor...")
+OPENING_REPORT = (
+    "At the end of a long life, the summoning gift everyone dismissed finally answered.",
+    "A stone anchor caught your soul and returned you to the beginning.",
+    "Your explorer now follows the forest trail automatically. Watch the map and the current task to see where each life goes.",
+    "Forage, study, climb and fight to raise six attributes. Regular experience resets when a life ends; blue dimensional experience stays with you.",
+    "Hunger falls with time. Food found in the forest is eaten automatically when needed; each meal has a short cooldown.",
+    "When health reaches zero, you return to this anchor. The next life starts with fresh supplies and the experience that persisted.",
+    "Opening report: 0 Strength, Endurance and Will experience; 1 dimensional shard; Dimensional Clone awakened.",
+    "The shard and Clone have yet to reveal their purpose. Pause with P; zoom with + and -.",
+)
 LOG_TYPES = ("encounter", "eat", "rest", "life")
 
 

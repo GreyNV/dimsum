@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {visualHash, residentBounds, cameraView, follow, retainResident, tileAt, Controls, TILE_W, TILE_H} from '../src/dimensional_sim/world/browser/view.js';
 import {groundMarks, paintChunk, TREE, terrainColor, OBJECT_PAD, clearStamps, stampCount, TILE_VARIANTS, TREE_VARIANTS, ROCK_VARIANTS} from '../src/dimensional_sim/world/browser/art.js';
-import {playerSprite, ENEMY, ROLE, spriteSize, mirrorSprite, paintSprite, punchReach, hiddenBehind, occludingTreeTiles, SPOTS, POSE, crouchSprite, drawSpot, CAMP} from '../src/dimensional_sim/world/browser/actors.js';
-import {activityText, newRewards, ATTRIBUTES, rewardTexts, reportIsFresh} from '../src/dimensional_sim/world/browser/hud.js';
+import {playerSprite, playerSpriteLayers, PLAYER_SLOTS, ENEMY, ROLE, spriteSize, mirrorSprite, paintSprite, punchReach, hiddenBehind, occludingTreeTiles, SPOTS, POSE, crouchSprite, drawSpot, CAMP} from '../src/dimensional_sim/world/browser/actors.js';
+import {activityText, newRewards, ATTRIBUTES, rewardTexts, reportIsFresh, reportStorageKey, ExpeditionHud} from '../src/dimensional_sim/world/browser/hud.js';
 const pose = (facing, animation='idle', animation_ms=0) => ({facing, animation, animation_ms, active:false});
 const chunk = (x=0,y=0) => ({id:'forest:'+x+':'+y,x,y,width:32,height:16,seed:1234,
   tiles:Array(16).fill('.'.repeat(32)),collision:Array(16).fill('0'.repeat(32))});
@@ -181,6 +181,22 @@ test('encounter spot sprites are well-formed and activity poses crouch the body'
   const calls=[];const ctx=new Proxy({},{get:(_,k)=>k==='save'||k==='restore'||k==='fillRect'||k==='fillText'?(...a)=>calls.push(k):undefined,set:()=>true});
   drawSpot(ctx,{encounter:'unknown',x:0,y:0},0,0); assert.equal(calls.length,0,'unknown spots draw nothing');
 });
+test('equipment layers preserve every base character pixel in each facing and walk pose',()=>{
+  assert.deepEqual(PLAYER_SLOTS,['body','pants','boots','chest','helmet']);
+  for(const facing of ['south','north','east','west']) for(const animation of ['idle','walk','attack']) {
+    const player=pose(facing,animation,130), original=playerSprite(player), layers=playerSpriteLayers(player);
+    for(let r=0;r<original.paint.length;r++)for(let c=0;c<original.paint[r].length;c++) {
+      const occupied=PLAYER_SLOTS.filter(slot=>layers[slot].paint[r][c]!==' ');
+      assert.equal(occupied.length,original.paint[r][c]===' '?0:1,`${facing}/${animation} ${r}:${c}`);
+      if(occupied.length) assert.equal(layers[occupied[0]].paint[r][c],original.paint[r][c]);
+    }
+    const compact=playerSpriteLayers(player,true);
+    assert.equal(compact.boots.paint.length,7,'working pose keeps the equipment anchor at the feet');
+    assert.equal(compact.boots.paint.at(-1),original.paint.at(-1),'boots survive the compact pose');
+  }
+  const front=playerSpriteLayers(pose('south'));
+  assert.ok(front.body.paint[2].includes('s'),'face stays in the body layer under a helmet overlay');
+});
 test('HUD describes the auto-pilot from snapshot fields only',()=>{
   const base={spots:[{x:3,y:4,name:'Bramble berries'}],expedition:{mode:'travel',goal:{x:3,y:4},activity:null,control:'auto',log:[],xp:{},skills:[]}};
   assert.equal(activityText(base),'Heading for bramble berries');
@@ -199,9 +215,29 @@ test('HUD turns log entries into reward popups and shows reports only while fres
   assert.deepEqual(rewardTexts({type:'eat',text:'Ate boar meat (+35 hunger, +11 health).',items:[['boar_meat',-1]]}).map(r=>r.text),['boar meat (+35 hunger, +11 health)']);
   assert.ok(reportIsFresh({total_ms:5000,report:{clock_ms:0}}),'intro on a fresh world');
   assert.ok(!reportIsFresh({total_ms:600000,report:{clock_ms:0}}),'no stale report on reload');
+  assert.notEqual(reportStorageKey('42',{life:0,seq:0}),reportStorageKey('43',{life:0,seq:0}),
+    'a new seeded world must show its own opening');
   const base={expedition:{mode:'home',goal:null,activity:null,control:'auto',depth:2}};
   assert.match(activityText(base),/anchor camp/);
   assert.match(activityText({expedition:{...base.expedition,mode:'rest',activity:{kind:'rest',name:'Resting',progress:500}}}),/Resting at the anchor camp - 50%/);
   for(const [id,s] of Object.entries(CAMP)) s.paint.forEach((row,r)=>{assert.equal(row.length,s.paint[0].length,id);assert.equal(s.glyph[r].length,row.length,id);});
   assert.equal(POSE.rest,'sit');
+});
+test('food slot visibly and accessibly recovers during its shared cooldown',()=>{
+  const values=new Map(), classes=new Map(), attrs=new Map();
+  const slot={dataset:{name:'Wild berries',count:'3'},
+    style:{setProperty:(key,value)=>values.set(key,value)},
+    classList:{toggle:(key,value)=>classes.set(key,value)},
+    setAttribute:(key,value)=>attrs.set(key,value)};
+  const hud=new ExpeditionHud({getElementById:()=>({querySelectorAll:()=>[slot]})});
+  const states=[];
+  for(const ms of [15000,7500,0]) {
+    hud.updateFoodCooldown({vitals:{food_cooldown_ms:ms,food_cooldown_total_ms:15000}});
+    states.push([Number(values.get('--food-brightness')),values.get('--food-fill'),classes.get('on-cooldown'),attrs.get('aria-label')]);
+  }
+  assert.ok(states[0][0]<states[1][0] && states[1][0]<states[2][0]);
+  assert.deepEqual(states.map(row=>row[1]),['0.0%','50.0%','100.0%']);
+  assert.deepEqual(states.map(row=>row[2]),[true,true,false]);
+  assert.match(states[0][3],/15 seconds/);
+  assert.match(states[2][3],/Food ready$/);
 });

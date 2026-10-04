@@ -1,14 +1,14 @@
 /** Browser adapter: snapshots in, character art out. Python owns all game rules. */
 import {TILE_W, TILE_H, ZOOM, clamp, residentBounds, cameraView, follow, retainResident, tileAt, visualHash, Controls} from './view.js';
 import {PALETTE, OBJECT_PAD, paintChunk, drawTree, terrainColor} from './art.js';
-import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawDamage, drawFloat, drawSpot, drawCamp, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
-import {ExpeditionHud, activityText, newRewards, rewardTexts, reportIsFresh} from './hud.js';
+import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawDamage, drawFloat, drawSpot, drawSpotCompletion, drawCamp, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
+import {ExpeditionHud, activityText, newRewards, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('scene'), ctx = canvas.getContext('2d'), mini = $('minimap'), map = mini.getContext('2d');
 const chunks = new Map(), pictures = new Map(), controls = new Controls();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-let state = null, paused = false, zoom = ZOOM.initial, width = 0, height = 0, dpr = 1;
+let state = null, paused = true, zoom = ZOOM.initial, width = 0, height = 0, dpr = 1;
 let camera = null, actor = null, lastFrame = 0, connection = 'connecting';
 let mapDirty = true, polling = false, stopped = false;
 /* Cosmetic combat feedback derived from consecutive snapshots. Client clocks only
@@ -20,7 +20,7 @@ const hud = new ExpeditionHud(), rewards = [], fadingSpots = new Map();
 let lastRewardSeq = null, spotsSeen = new Map(), reportSeen = null, reportTimer = 0;
 const SEEN_REPORT_KEY = 'dimsum.report.seen';
 const seenReport = () => { try { return localStorage.getItem(SEEN_REPORT_KEY); } catch { return null; } };
-const markReport = report => { try { localStorage.setItem(SEEN_REPORT_KEY, `${report.life}:${report.seq}`); } catch { /* optional */ } };
+const markReport = (worldSeed, report) => { try { localStorage.setItem(SEEN_REPORT_KEY, reportStorageKey(worldSeed, report)); } catch { /* optional */ } };
 const manualAllowed = () => !state?.expedition || state.expedition.skills.includes('take_control');
 
 function status(message) { if ($('status').textContent !== message) $('status').textContent = message; }
@@ -52,6 +52,7 @@ function changeZoom(delta) {
   zoom = clamp(Math.round((zoom + delta) * 10) / 10, ZOOM.min, ZOOM.max);
 }
 function adopt(next) {
+  const firstSnapshot = state === null;
   for (const chunk of next.chunks) {
     chunks.set(chunk.id, chunk);
     pictures.delete(chunk.id);   // painted lazily: visible now, others one per frame
@@ -60,6 +61,7 @@ function adopt(next) {
   observeCombat(next);
   observeExpedition(next);
   state = next; mapDirty = true;
+  if (firstSnapshot && $('report').hidden) setPause(false);
   hud.update(next);
   const position = {x:(next.player.x + .5) * TILE_W, y:(next.player.y + .5) * TILE_H};
   if (!actor || Math.abs(actor.x - position.x) + Math.abs(actor.y - position.y) > TILE_W * 5) {
@@ -97,12 +99,13 @@ function observeExpedition(next) {
   lastRewardSeq = Math.max(lastRewardSeq ?? 0, seq);
   const report = next.expedition.report;
   if (report && report.seq !== reportSeen) {
-    const already = seenReport() === `${report.life}:${report.seq}`;
-    if (!already && (reportSeen !== null || reportIsFresh(next.expedition))) {
-      markReport(report);
+    const already = seenReport() === reportStorageKey(next.world_seed, report);
+    if (!already && (report.life === 0 || reportSeen !== null || reportIsFresh(next.expedition))) {
+      markReport(next.world_seed, report);
+      setPause(true);
       hud.showReport(report);
+      $('pause-overlay').hidden = true;
       clearTimeout(reportTimer);
-      reportTimer = setTimeout(() => hud.hideReport(), 9000 + report.lines.length * 180);
     }
     reportSeen = report.seq;
   }
@@ -110,7 +113,11 @@ function observeExpedition(next) {
     actor = null; hits.clear(); deaths.clear(); hpSeen.clear(); rewards.length = 0; fadingSpots.clear();
   }
   const current = new Map((next.spots || []).map(s => [s.id, s]));
-  for (const [id, spot] of spotsSeen) if (!current.has(id) && next.resident.length) fadingSpots.set(id, {at: now, spot});
+  for (const [id, spot] of spotsSeen) {
+    const coordinates = `:${Math.floor(spot.x / next.chunk_width)}:${Math.floor(spot.y / next.chunk_height)}`;
+    if (!current.has(id) && next.expedition.life === state?.expedition?.life && next.resident.some(chunk => chunk.endsWith(coordinates)))
+      fadingSpots.set(id, {at: now, spot});
+  }
   spotsSeen = current;
 }
 function attackPhase(player) {
@@ -236,6 +243,7 @@ function render(now) {
       const age = now - f.at;
       if (age > 500) { fadingSpots.delete(id); continue; }
       drawSpot(ctx, f.spot, (f.spot.x+.5)*TILE_W, (f.spot.y+.5)*TILE_H, {fade: age / 500});
+      drawSpotCompletion(ctx, f.spot, (f.spot.x+.5)*TILE_W, (f.spot.y+.5)*TILE_H, age, reducedMotion);
     }
     // Actors are depth-sorted by feet row; canopies south of each actor are repainted over it.
     const actors=state.targets.filter(t=>t.hp>0 || (deaths.has(t.id) && now-deaths.get(t.id).at<600))
@@ -285,6 +293,7 @@ function render(now) {
 }
 const directions={KeyW:'north',ArrowUp:'north',KeyD:'east',ArrowRight:'east',KeyS:'south',ArrowDown:'south',KeyA:'west',ArrowLeft:'west'};
 addEventListener('keydown', event=>{
+  if (!$('report').hidden) return;
   if(event.ctrlKey || event.metaKey || event.altKey) return;
   if(event.target instanceof HTMLButtonElement && (event.code==='Space' || event.code==='Enter')) return;
   if(directions[event.code]) { event.preventDefault(); if(!paused && manualAllowed()) controls.press(event.code,directions[event.code]); }
@@ -309,7 +318,9 @@ addEventListener('pagehide',()=>{
 });
 canvas.addEventListener('pointerdown',()=>canvas.focus());
 $('pause').addEventListener('click',()=>setPause(!paused));
-$('report-close').addEventListener('click',()=>{hud.hideReport();canvas.focus();});
+// Some mobile browsers still zoom on a double tap over HUD text; touch-action covers the rest.
+document.addEventListener('dblclick',event=>event.preventDefault());
+$('report-close').addEventListener('click',()=>{hud.hideReport();setPause(false);canvas.focus();});
 $('resume').addEventListener('click',()=>{setPause(false);canvas.focus();});
 $('zoom-in').addEventListener('click',()=>changeZoom(.1));
 $('zoom-out').addEventListener('click',()=>changeZoom(-.1));

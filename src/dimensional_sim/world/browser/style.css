@@ -26,3 +26,16 @@
 @keyframes reveal{to{opacity:1}}
 @media(max-width:720px){.vitals{top:auto;bottom:178px;left:12px;right:12px;transform:none;flex-wrap:wrap;gap:6px 12px;padding:7px 10px}.vital .bar{width:82px}.cooldown{min-width:0}.life-line{flex-direction:row;gap:8px;border:0;padding:0}.inventory{top:160px;right:12px;width:142px;padding:8px}.slots{grid-template-columns:repeat(4,1fr)}.slots li{font-size:11px}}
 @media(prefers-reduced-motion:reduce){.report li{animation:none;opacity:1}.vital .bar i{transition:none}}
+
+/* Food fills back to its normal color as the authoritative cooldown runs down. */
+.slots li.food{filter:brightness(var(--food-brightness,1));transition:filter .25s linear}
+.slots li.food::after{content:"";position:absolute;inset:0 auto 0 0;width:var(--food-fill,100%);border-bottom:2px solid #f2ce83;pointer-events:none}
+.slots li.food.on-cooldown{border-color:rgba(139,117,72,.6)}
+.report{z-index:5;max-height:min(82vh,680px);overflow-y:auto;background:rgba(8,12,8,.94);box-shadow:0 24px 90px #000c}
+.report.opening{width:min(540px,92vw);max-width:none}
+.report.opening li{margin-bottom:8px;opacity:1;animation:none}
+.report button{position:sticky;bottom:0;background:#232a1d}
+@media(prefers-reduced-motion:reduce){.slots li.food{transition:none}}
+/* Touch: no double-tap zoom, text selection or long-press callout while playing.
+   Pinch-zoom stays available for accessibility; the canvas already has touch-action:none. */
+html,body{touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}button{touch-action:manipulation}input,textarea{-webkit-user-select:text;user-select:text}

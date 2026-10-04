@@ -27,7 +27,7 @@ function bootProgress({stage, fraction, detail}) {
 }
 
 // ---------- worker RPC ----------
-const worker = new Worker('/worker.js');
+const worker = new Worker('/worker.js', {type: 'module'});
 let nextId = 1;
 const pending = new Map();
 worker.onmessage = ({data}) => {
