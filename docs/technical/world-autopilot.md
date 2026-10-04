@@ -185,3 +185,26 @@ The pop-up opening report is gone; the first life opens with a playable scene.
   windows are rolled on load.
 - The bandit-ambush memories were written fresh for this build; the original
   ambush text from the earlier game was not available here.
+
+## Ambush site and the space between lives (encounters-v4, 2026-10-05)
+The origin of the dark forest is visibly the caravan ambush site: two ruined
+wagons, torn canopy, broken wheels, crates, planks and arrows surround the anchor.
+This art is drawn below actors without changing collision or exit geometry. Four
+more distinct encounter locations can appear across the forest: an abandoned camp,
+moonlit pool, fallen watchtower and mushroom ring. They have their own art, logs,
+activities and balanced rewards. Encounter version v4 rerolls current-life spots
+when loading a v3 save; earned XP, inventory, blessing and world discovery remain.
+
+Death now enters an anchor space before the next life. The map and encounters are
+hidden; only the anchor, avatar, and trade panel appear. A 30-second simulation
+countdown starts immediately. With no action, the next life begins automatically.
+Offering a whole inventory stack stops the countdown; the player may offer more
+stacks and presses Begin next life when ready. All unoffered inventory disappears
+at the next life. Dust rates per item: berries/stick 1, egg/thorn 2, meat 3,
+hide 4. Dust and dimensional XP persist; regular XP and vitals reset. Each stack
+can be offered once, so a retried request cannot award duplicate dust. The
+countdown and choice are saved and use the same deterministic advance path in
+local and hosted play. The measurable target is identical saves for bulk/split
+time across death and countdown; focused tests cover this, trading, retry and
+schema-3 migration. Dust currently accumulates for future anchor progression;
+there is no dust purchase action yet.

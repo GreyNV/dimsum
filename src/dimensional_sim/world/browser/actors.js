@@ -187,7 +187,7 @@ export function crouchSprite(sprite) {
 
 /** (x, y) is the tile-center position of the player in world pixels. `activity` is
  * the server's current encounter activity (or null); `clock` animates its pose. */
-export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null, clock = 0, equipment = {}} = {}) {
+export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null, clock = 0, equipment = {}, reducedMotion = false} = {}) {
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
   const pose = activity && player.animation !== 'attack' ? POSE[activity.kind] : null;
@@ -237,8 +237,48 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
     ctx.fillStyle = OUTLINE; ctx.fillRect(hx - 3, hy - 3, 6, 6);
     ctx.fillStyle = ROLE.s.fill; ctx.fillRect(hx - 2, hy - 2, 4, 4);
   }
+  if (pose && activity.kind !== 'rest' && activity.kind !== 'kneel')
+    drawActionInteraction(ctx, activity, x, y, clock, reducedMotion);
   if (activity) drawProgress(ctx, x, top - 6, activity.progress / 1000, clock);
   return {left, top, width, height};
+}
+
+/** Visible, cosmetic contact with the actual encounter cell. The simulation owns
+ * timing and rewards; these marks only explain what the avatar is doing. */
+function drawActionInteraction(ctx, activity, x, y, clock, reducedMotion) {
+  const colors = {forage:'#e96c75', gather:'#d6ac6a', observe:'#e6d6a2', climb:'#b5d58b',
+    drink:'#a9eaff', meditate:'#c8c5ff', study:'#d3b6ff', pray:'#fff0b4'};
+  const color = colors[activity.kind];
+  if (!color || !Number.isFinite(activity.x) || !Number.isFinite(activity.y)) return;
+  const tx = (activity.x + .5) * TILE_W, ty = (activity.y + .5) * TILE_H;
+  const distance = Math.hypot(tx - x, ty - y);
+  if (distance > TILE_W * 1.6) return;
+  const ux = distance ? (tx - x) / distance : 0, uy = distance ? (ty - y) / distance : 1;
+  const beat = reducedMotion ? 0 : Math.sin(clock / (activity.kind === 'climb' ? 170 : 145));
+  const touch = ['forage','gather','climb','drink','study'].includes(activity.kind);
+  if (touch) {
+    const sx = x + ux * 8, sy = y - 24 + uy * 3;
+    const reach = 11 + beat * 4;
+    drawFist(ctx, sx, sy, sx + ux * reach, sy + uy * reach - (activity.kind === 'climb' ? 8 + beat * 6 : 0));
+  }
+  ctx.save();
+  ctx.strokeStyle = color; ctx.fillStyle = color;
+  ctx.globalAlpha = reducedMotion ? .65 : .55 + .25 * beat;
+  const lift = reducedMotion ? 0 : beat * 4;
+  if (activity.kind === 'meditate' || activity.kind === 'pray') {
+    ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(x, y + ACTOR_FOOT, 18 + Math.abs(lift), 6, 0, 0, Math.PI * 2); ctx.stroke();
+  } else {
+    const px = touch ? tx - ux * 7 : tx, py = ty - 10 + lift;
+    ctx.fillRect(Math.round(px) - 2, Math.round(py) - 2, 4, 4);
+    if (activity.kind === 'observe' || activity.kind === 'study') {
+      ctx.lineWidth = 1; ctx.strokeRect(Math.round(px) - 8, Math.round(py) - 8, 16, 16);
+    }
+    if (activity.kind === 'drink') {
+      ctx.beginPath(); ctx.moveTo(x + ux * 5, y - 28); ctx.lineTo(x + ux * 5 - 3, y - 22);
+      ctx.lineTo(x + ux * 5 + 3, y - 22); ctx.closePath(); ctx.fill();
+    }
+  }
+  ctx.restore();
 }
 
 export function drawProgress(ctx, cx, y, fraction, clock = 0) {
@@ -365,19 +405,23 @@ export const SPOTS = Object.freeze({
   mossy_stone: {paint: ['   qqq   ', '  qgqgq  ', ' ggggggg ', '  ggggg  '], glyph: ['   .^.   ', '  /:,:\\  ', ' /:___:\\ ', '  \\___/  ']},
   old_carvings: {paint: ['   xxx   ', '  ggggg  ', '  gxgxg  ', '  ggggg  '], glyph: ['   *:*   ', '  /___\\  ', '  |*o*|  ', '  /___\\  ']},
   wayside_shrine: {paint: ['    y    ', '  ggggg  ', ' ggggggg ', '  gxyxg  ', '  ggggg  ', ' qgggggq '],
-    glyph: ['    +    ', '  /^^^\\  ', ' /_____\\ ', '  |*i*|  ', '  |___|  ', ' ;/___\\; ']}
+    glyph: ['    +    ', '  /^^^\\  ', ' /_____\\ ', '  |*i*|  ', '  |___|  ', ' ;/___\\; ']},
+  abandoned_camp: {paint: ['  rrrrr  ', 'orrrrrro ', ' ooooooo ', ' qooqooq '],
+    glyph: ['  /^^^\\  ', ' /_____\\ ', ' |# # #| ', ' /_o_o_\\ ']},
+  moonlit_pool: {paint: ['  ccccc  ', ' caaaaac ', 'caaaaaaac', ' gcccccg '],
+    glyph: ['  .***.  ', ' /~~~~~\\ ', '|~*~~~*~|', ' \\_____/ ']},
+  fallen_watchtower: {paint: ['  qxxq   ', '  qxxq   ', ' qxxxxq  ', ' qgxxgq  ', ' qgggggq '],
+    glyph: ['  /++\\   ', '  |::|   ', ' /|::|\\  ', ' |/__\\|  ', ' /_//_\\  ']},
+  mushroom_ring: {paint: [' r r r r ', 'rggrggrgr', ' gg gg gg', 'rgggggggr'],
+    glyph: [' ^ ^ ^ ^ ', '/o\\/o\\/o\\', ' .. .. ..', '^.......^']}
 });
 
-/** The anchor camp at the anchor cell: anchor stone, bedroll, fire pit. Ground
- * decoration only (non-blocking); future crafting and binding will happen here. */
+/** The anchor stone at the anchor cell. Ground decoration only (non-blocking). */
 const CAMP_ROLES = Object.freeze({g: {fill: '#5d6470', ink: '#9fd0ff'}, v: {fill: '#2b3140', ink: '#cfe6ff'},
-  r: {fill: '#7b3b2e', ink: '#d9a06a'}, o: {fill: '#6a4a2c', ink: '#b88c58'}, f: {fill: '#d8762e', ink: '#ffe08a'},
   a: {fill: '#a9bed4', ink: '#f1faff'}, c: {fill: '#294661', ink: '#99daff'}});
 export const CAMP = Object.freeze({
   stone: {paint: ['   aaa   ', '  agvga  ', '  gcvgg  ', '  gvcvg  ', '  gcvgg  ', '  ggvgg  ', ' ggggggg '],
-    glyph: ['   /\\    ', '  /<>\\   ', '  |*|:|  ', '  |:O:|  ', '  |:|*|  ', '  \\:::/  ', ' /_____\\ ']},
-  bedroll: {paint: [' rrrrrrr ', 'rrrrrrrrr', ' ooooooo '], glyph: [' /======\\', '|========', ' \\______/']},
-  fire: {paint: ['  f f  ', ' ffff  ', 'offffo ', ' ooooo '], glyph: ['  ^ ^  ', ' /^^\\  ', '>/\\/\\< ', ' \\____/']}
+    glyph: ['   /\\    ', '  /<>\\   ', '  |*|:|  ', '  |:O:|  ', '  |:|*|  ', '  \\:::/  ', ' /_____\\ ']}
 });
 function paintParts(ctx, sprite, roles, left, top, alpha = 1) {
   ctx.globalAlpha = alpha;
@@ -429,15 +473,38 @@ export function drawCamp(ctx, x, y, {clock = 0, reducedMotion = false} = {}) {
     ctx.fillStyle = '#f3fcff'; ctx.fillRect(Math.round(sx), Math.round(sy) - 2, 1, 3);
     ctx.restore();
   }
-  paintParts(ctx, CAMP.bedroll, CAMP_ROLES, x + 11, y + 2);
-  const flicker = reducedMotion ? 0 : Math.floor(clock / 140) % 2;
-  paintParts(ctx, CAMP.fire, CAMP_ROLES, x - 8, y + 10 - flicker);
-  if (!reducedMotion) for (let i = 0; i < 3; i++) {
-    const rise = (clock / 65 + i * 8) % 25;
-    ctx.globalAlpha = (1 - rise / 25) * .8; ctx.fillStyle = i ? '#ffb651' : '#fff1ba';
-    ctx.fillRect(x - 2 + i * 5 - Math.floor(rise / 5), y + 8 - rise, 2, 2);
-  }
   ctx.globalAlpha = 1;
+}
+
+/** The origin is the road ambush: two broken wagons and scattered supplies.
+ * This is scenery only, behind actors and independent of collision. */
+export function drawAmbushSite(ctx, x, y) {
+  ctx.save();
+  ctx.translate(Math.round(x), Math.round(y));
+  ctx.lineJoin='round';
+  // Snapped cart, tilted canopy and axle to the west of the anchor.
+  ctx.fillStyle='#38291d';ctx.fillRect(-146,-23,88,23);
+  ctx.fillStyle='#80603c';ctx.fillRect(-140,-29,70,13);
+  ctx.fillStyle='#b89465';ctx.fillRect(-138,-28,51,4);
+  ctx.fillStyle='#563a2a';ctx.beginPath();ctx.moveTo(-139,-30);ctx.lineTo(-126,-59);ctx.lineTo(-78,-51);ctx.lineTo(-67,-29);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#b6a17a';ctx.beginPath();ctx.moveTo(-131,-51);ctx.lineTo(-112,-59);ctx.lineTo(-94,-51);ctx.lineTo(-81,-54);ctx.lineTo(-75,-38);ctx.lineTo(-99,-43);ctx.closePath();ctx.fill();
+  ctx.strokeStyle='#55402f';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(-137,-28);ctx.lineTo(-69,-28);ctx.moveTo(-111,-54);ctx.lineTo(-96,-34);ctx.stroke();
+  const wheel=(wx,wy)=>{ctx.fillStyle='#201c1a';ctx.beginPath();ctx.arc(wx,wy,18,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#ad8554';ctx.lineWidth=5;ctx.beginPath();ctx.arc(wx,wy,14,0,Math.PI*2);ctx.stroke();
+    ctx.lineWidth=2;for(let i=0;i<6;i++){let a=i*Math.PI/3;ctx.beginPath();ctx.moveTo(wx,wy);ctx.lineTo(wx+Math.cos(a)*12,wy+Math.sin(a)*12);ctx.stroke();}
+    ctx.fillStyle='#d1ab6e';ctx.fillRect(wx-3,wy-3,6,6);};
+  wheel(-121,0);wheel(-69,0);
+  // Second wagon lies on its side; torn crimson cover recalls the raid.
+  ctx.fillStyle='#35291e';ctx.beginPath();ctx.moveTo(74,-8);ctx.lineTo(129,-35);ctx.lineTo(150,-19);ctx.lineTo(96,12);ctx.closePath();ctx.fill();
+  ctx.strokeStyle='#a98150';ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(72,-7);ctx.lineTo(130,-36);ctx.moveTo(93,13);ctx.lineTo(150,-19);ctx.stroke();
+  ctx.fillStyle='#7c3d39';ctx.beginPath();ctx.moveTo(84,-40);ctx.lineTo(111,-52);ctx.lineTo(135,-34);ctx.lineTo(101,-19);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#ad6355';ctx.beginPath();ctx.moveTo(87,-39);ctx.lineTo(108,-49);ctx.lineTo(119,-40);ctx.lineTo(95,-29);ctx.closePath();ctx.fill();
+  wheel(143,7);
+  // Crates, loose planks and arrows on both sides of the road.
+  for(const [px,py] of [[-42,17],[-25,28],[43,22],[60,37]]){ctx.fillStyle='#654529';ctx.fillRect(px,py,18,13);ctx.strokeStyle='#ad8653';ctx.lineWidth=2;ctx.strokeRect(px+1,py+1,16,11);ctx.beginPath();ctx.moveTo(px+2,py+2);ctx.lineTo(px+16,py+11);ctx.stroke();}
+  ctx.strokeStyle='#96744c';ctx.lineWidth=3;for(const [ax,ay] of [[-152,28],[-12,38],[32,-31],[153,34]]){ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(ax+25,ay-9);ctx.stroke();}
+  ctx.strokeStyle='#b7a67c';ctx.lineWidth=2;for(const [ax,ay] of [[-32,-18],[47,-11],[79,30]]){ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(ax+17,ay+8);ctx.stroke();ctx.beginPath();ctx.moveTo(ax+1,ay-3);ctx.lineTo(ax+1,ay+3);ctx.stroke();}
+  ctx.restore();
 }
 
 /** Spot at tile center (x, y); a sparkle marks it, brighter when it is the goal. */

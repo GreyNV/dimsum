@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from .models import DELTAS, ChunkKey, identifier, integer
 from .seeds import derive_seed
 
-ENCOUNTER_VERSION = "encounters-v3"  # v3: shrines (prayer) and per-life spawn windows
+ENCOUNTER_VERSION = "encounters-v4"  # v4: more distinct dark-forest locations
 ATTRIBUTES = ("strength", "endurance", "agility", "intelligence", "perception", "willpower")
 KINDS = ("forage", "gather", "observe", "climb", "drink", "meditate", "study", "pray", "fight")
 RARITIES = ("common", "uncommon", "rare")
@@ -142,6 +142,15 @@ DARK_FOREST = (
     EncounterDef("wayside_shrine", "Wayside shrine", "pray", "willpower", 50, 3600, 7, "uncommon",
                  blessing=1, window=(1, 1),
                  log="Knelt at a moss-grown shrine and prayed to the gods who spared you."),
+    EncounterDef("abandoned_camp", "Abandoned camp", "gather", "strength", 40, 3100, 10, "uncommon",
+                 log="Searched an abandoned camp for anything the travellers left behind.",
+                 loot=(Loot("stick", 1, 2), Loot("bramble_thorn", 1, 1, 30))),
+    EncounterDef("moonlit_pool", "Moonlit pool", "drink", "endurance", 45, 2600, 7, "uncommon",
+                 heal=8, window=(0, 1), log="Drank from a still pool beneath the branches."),
+    EncounterDef("fallen_watchtower", "Fallen watchtower", "study", "intelligence", 75, 4200, 6, "uncommon",
+                 log="Studied the ruins of a watchtower and its faded warning marks."),
+    EncounterDef("mushroom_ring", "Mushroom ring", "observe", "perception", 55, 3200, 9,
+                 log="Watched the small life stirring inside a ring of pale mushrooms."),
     # Asset-spawned boars (one per chunk) share this window with boar spots.
     EncounterDef("bramble_boar", "Bramble boar", "fight", "strength", 100, 1, 14, hp=3, window=(1, 2),
                  log="Drove off a bramble boar with your bare fists.",

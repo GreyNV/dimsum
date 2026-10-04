@@ -47,7 +47,8 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual")
                 "tiles": ["".join((obj or env).glyph for obj, env in zip(orow, erow))
                           for orow, erow in zip(a.objects, a.environment)],
                 "collision": ["".join("1" if c else "0" for c in row) for row in a.collision]})
-    targets = [{"id": t.id, "x": t.chunk.x * w + t.x, "y": t.chunk.y * h + t.y, "hp": t.hp}
+    in_anchor = expedition is not None and expedition.anchor_ms is not None
+    targets = [] if in_anchor else [{"id": t.id, "x": t.chunk.x * w + t.x, "y": t.chunk.y * h + t.y, "hp": t.hp}
                for t in game.targets.values() if chunk_id(t.chunk) in resident]
     p = game.player
     rate = game.attack_rate_percent if p.animation == "attack" else game.animation_rate_percent
@@ -60,7 +61,7 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual")
     frame_extra = {}
     if expedition is not None:
         kinds = expedition.target_kinds()
-        frame_extra = {"spots": expedition.visible_spots(), "target_kinds": {
+        frame_extra = {"spots": [] if in_anchor else expedition.visible_spots(), "target_kinds": {
             t["id"]: kinds.get(t["id"], "bramble_boar") for t in targets},
             "expedition": {"mode": expedition.mode(), "activity": expedition.activity(),
                 "goal": None if expedition.goal is None else {
@@ -70,6 +71,9 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual")
                 "vitals": expedition.vitals(), "inventory": expedition.inventory_rows(),
                 "inventory_slots": INVENTORY_SLOTS, "life": expedition.life, "total_ms": expedition.total_ms,
                 "depth": expedition.depth, "best_depth": expedition.best_depth,
+                "dust": expedition.dust,
+                "anchor_space": None if not in_anchor else {"remaining_ms": expedition.anchor_ms,
+                    "waiting": expedition.anchor_wait},
                 "punch_damage": expedition.punch_damage(), "report": expedition.report,
                 "anchor": {"x": expedition.anchor[0], "y": expedition.anchor[1]},
                 "skills": sorted(expedition.skills), "control": control,
@@ -87,7 +91,13 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual")
 
 
 def validate_input(data):
-    fields(data, ("move", "attack", "paused", "known"))
+    if type(data) is not dict or set(data) not in (
+            {"move", "attack", "paused", "known"}, {"move", "attack", "paused", "known", "action"}):
+        raise ValueError("invalid input fields")
+    if "action" in data:
+        action = data["action"]
+        if type(action) is not dict or action.get("type") not in ("trade", "begin_life"):
+            raise ValueError("invalid anchor action")
     command = InputCommand(data["move"], data["attack"])
     if type(data["paused"]) is not bool:
         raise ValueError("paused must be boolean")
@@ -151,8 +161,14 @@ class BrowserSession:
     def input(self, data, now):
         command, paused, known = validate_input(data)
         with self.lock:
+            if "action" in data:
+                if self.expedition is None:
+                    raise ValueError("anchor action requires an expedition")
+                self.expedition.anchor_action(data["action"])
             if not self._manual_allowed():
                 command = InputCommand()  # locked skill: the auto-pilot steers
+            if self.expedition is not None and self.expedition.anchor_ms is not None:
+                command = InputCommand()
             self.command = InputCommand() if paused else command
             self.paused, self.input_time = paused, now
             if self.command.move or self.command.attack:
@@ -168,7 +184,7 @@ class BrowserSession:
         with self.lock:
             if self.paused:
                 return
-            if self.expedition is not None and now >= self.manual_until:
+            if self.expedition is not None and (now >= self.manual_until or self.expedition.anchor_ms is not None):
                 self.expedition.advance(TICK_MS)
                 return
             command = self.command if now - self.input_time <= INPUT_LEASE else InputCommand()
@@ -181,7 +197,7 @@ class BrowserSession:
         with self.lock:
             if self.paused or ms == 0:
                 return
-            if self.expedition is not None and now >= self.manual_until:
+            if self.expedition is not None and (now >= self.manual_until or self.expedition.anchor_ms is not None):
                 self.expedition.advance(ms)
                 return
             command = self.command if now - self.input_time <= INPUT_LEASE else InputCommand()

@@ -41,6 +41,15 @@ def first_death(e, step=1000):
 
 
 class CatalogTests(unittest.TestCase):
+    def test_first_biome_has_distinct_location_set(self):
+        locations = {"abandoned_camp", "moonlit_pool", "fallen_watchtower", "mushroom_ring"}
+        self.assertTrue(locations <= set(BY_ID))
+        self.assertEqual(len({BY_ID[i].name for i in locations}), len(locations))
+        w = world()
+        rolled = {spot.encounter for y in range(-5, 6) for x in range(-5, 6)
+                  for spot in chunk_spots(w.get(ChunkKey("forest", x, y)))}
+        self.assertTrue(locations <= rolled)
+
     def test_pool_items_and_loot_validate(self):
         validate_pools()
         self.assertEqual(len(BY_ID), len(DARK_FOREST))
@@ -162,6 +171,77 @@ class SurvivalTests(unittest.TestCase):
 
 
 class LifeTests(unittest.TestCase):
+    def test_anchor_countdown_trade_and_explicit_next_life(self):
+        e = expedition()
+        e.inventory = {"stick": 3, "boar_hide": 1}
+        e.regular["strength"] = 70
+        e.dimensional["strength"] = 14
+        e.health = 0
+        e.cause = "boar"
+        e.advance(0)
+        self.assertEqual(e.mode(), "anchor")
+        self.assertEqual(e.life, 1)
+        self.assertEqual(e.anchor_ms, ap.ANCHOR_COUNTDOWN_MS)
+        self.assertEqual(e._player(), e.anchor)
+        with self.assertRaises(ValueError):
+            e.anchor_action({"type": "trade", "item": "gold"})
+        e.advance(9000)
+        self.assertEqual(e.anchor_ms, ap.ANCHOR_COUNTDOWN_MS - 9000)
+        e.anchor_action({"type": "trade", "item": "stick"})
+        self.assertEqual((e.dust, e.inventory), (3, {"boar_hide": 1}))
+        self.assertTrue(e.anchor_wait)
+        restored = Expedition.from_dict(json.loads(dump(e)))
+        self.assertEqual(dump(restored), dump(e))
+        restored.advance(90_000)
+        self.assertEqual(restored.life, 1)
+        self.assertEqual(restored.anchor_ms, e.anchor_ms)
+        restored.anchor_action({"type": "trade", "item": "boar_hide"})
+        self.assertEqual(restored.dust, 7)
+        restored.anchor_action({"type": "begin_life"})
+        self.assertEqual((restored.life, restored.dust, restored.inventory), (2, 7, {}))
+        self.assertEqual(restored.regular["strength"], 0)
+        self.assertEqual(restored.dimensional["strength"], 14)
+
+    def test_anchor_auto_begins_and_splits_match(self):
+        a, b = expedition(), expedition()
+        for e in (a, b):
+            e.health = 0
+            e.advance(0)
+        a.advance(ap.ANCHOR_COUNTDOWN_MS + 1000)
+        for _ in range((ap.ANCHOR_COUNTDOWN_MS + 1000) // 100):
+            b.advance(100)
+        self.assertEqual(dump(a), dump(b))
+        self.assertEqual(a.life, 2)
+
+    def test_anchor_session_snapshot_and_trade_input(self):
+        e = expedition()
+        e.inventory = {"stick": 2}
+        e.health = 0
+        e.advance(0)
+        session = BrowserSession(e.game, e)
+        frame = session.state(now=1)
+        self.assertEqual(frame["expedition"]["anchor_space"]["remaining_ms"], ap.ANCHOR_COUNTDOWN_MS)
+        self.assertEqual((frame["spots"], frame["targets"]), ([], []))
+        body = {"move": None, "attack": False, "paused": False, "known": [],
+                "action": {"type": "trade", "item": "stick"}}
+        frame = session.input(body, now=1)
+        self.assertEqual(frame["expedition"]["dust"], 2)
+        self.assertTrue(frame["expedition"]["anchor_space"]["waiting"])
+        session.input(body, now=2)  # a retried whole-stack offer cannot duplicate dust
+        self.assertEqual(e.dust, 2)
+
+    def test_v3_save_migrates_to_new_location_pool(self):
+        e = expedition()
+        e.advance(40_000)
+        old = json.loads(dump(e))
+        for key in ("dust", "anchor_ms", "anchor_wait"):
+            del old[key]
+        old.update(schema_version=3, encounters="encounters-v3")
+        migrated = Expedition.from_dict(old)
+        self.assertEqual((migrated.regular, migrated.dimensional), (e.regular, e.dimensional))
+        self.assertEqual((migrated.life, migrated.dust), (e.life, 0))
+        self.assertEqual(migrated.to_dict()["encounters"], "encounters-v4")
+
     def test_bulk_ticks_slices_and_reload_identical_across_a_death(self):
         T = 360000
         bulk, ticks, odd = expedition(), expedition(), expedition()
@@ -210,8 +290,10 @@ class LifeTests(unittest.TestCase):
         migrated = Expedition.from_dict(json.loads(canonical_json(v1)))
         self.assertEqual(set(migrated.regular.values()), {70})
         self.assertEqual(migrated.life, 1)
-        for mutate in (lambda d: d.update(schema_version=4), lambda d: d.update(encounters="v0"),
-                       lambda d: d.update(blessing=-1), lambda d: d["budget"].pop("bramble_boar"),
+        for mutate in (lambda d: d.update(schema_version=5), lambda d: d.update(encounters="v0"),
+                       lambda d: d.update(blessing=-1), lambda d: d.update(dust=-1),
+                       lambda d: d.update(anchor_ms=-1), lambda d: d.update(anchor_wait=True),
+                       lambda d: d["budget"].pop("bramble_boar"),
                        lambda d: d.update(admitted=[["enc:x", "dragon"]]),
                        lambda d: d.update(screened_chunks=[1]),
                        lambda d: d["regular"].update(charisma=1), lambda d: d.update(skills=["fly"]),
@@ -374,7 +456,8 @@ class PrayerTests(unittest.TestCase):
         e = skip_prologue(expedition())
         e.advance(60000)
         data = json.loads(dump(e))
-        for key in ("blessing", "budget", "spawned", "admitted", "screened_chunks", "screened_targets"):
+        for key in ("blessing", "budget", "spawned", "admitted", "screened_chunks", "screened_targets",
+                    "dust", "anchor_ms", "anchor_wait"):
             del data[key]
         for entry in data["log"]:
             del entry["blessing"]

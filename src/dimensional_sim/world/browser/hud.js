@@ -14,6 +14,8 @@ export function activityText(state, paused = false) {
   if (paused) return 'Paused - the forest can wait';
   const ex = state.expedition;
   if (!ex) return null;
+  if (ex.anchor_space) return ex.anchor_space.waiting ? 'The anchor waits for your choice'
+    : `A new life begins in ${Math.ceil(ex.anchor_space.remaining_ms / 1000)}s`;
   if (ex.control === 'manual') return 'You have taken control';
   if (ex.prologue) {
     const p = ex.prologue;
@@ -200,7 +202,7 @@ export class ExpeditionHud {
       head.textContent = entry.type === 'encounter'
         ? `+${entry.xp} ${LABEL[entry.attribute]}` + (entry.dim_xp ? ` (◆+${entry.dim_xp})` : '')
           + (entry.blessing ? ` ✦+${entry.blessing}` : '')
-        : {eat: 'Ate', rest: 'Rested', life: 'Anchor', blessing: 'Blessed', lore: 'The road'}[entry.type];
+        : {eat: 'Ate', rest: 'Rested', life: 'Anchor', blessing: 'Blessed', lore: 'The road', trade: 'Offered'}[entry.type];
       const text = this.doc.createElement('span'); text.textContent = entry.text;
       li.append(head, text);
       return li;
