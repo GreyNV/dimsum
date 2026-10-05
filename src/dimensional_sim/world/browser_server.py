@@ -64,7 +64,7 @@ def make_server(session, port=8765):
                 return self._send(204, b"", "image/x-icon")
             if self.path == "/api/state":
                 return self._send(200, session.state())
-            entry = STATIC.get(self.path)
+            entry = STATIC.get(self.path.split("?", 1)[0])   # e.g. /?debug opens the overlay
             if entry is None:
                 return self._send(404, {"error": "not found"})
             name, content_type = entry

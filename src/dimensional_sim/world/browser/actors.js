@@ -166,74 +166,148 @@ export function punchReach(player, phase) {
 /** Shoulder of the punching arm, relative to the feet anchor. */
 const SHOULDER = {south: [9, -33], north: [-9, -33], east: [5, -33], west: [-5, -33]};
 
+/** Snap to the 3px pixel-player art grid so arms step in whole art pixels. */
+const snap = v => Math.round(v / PIXEL) * PIXEL;
 function drawFist(ctx, sx, sy, fx, fy) {
-  const len = Math.hypot(fx - sx, fy - sy), steps = Math.max(1, Math.ceil(len / 2));
+  sx = snap(sx); sy = snap(sy); fx = snap(fx); fy = snap(fy);
+  // One 3x3 sleeve cell per grid step: a staircase of whole cells, never a 1px diagonal.
+  const steps = Math.max(1, Math.abs(fx - sx) / PIXEL, Math.abs(fy - sy) / PIXEL);
+  const cells = [];
+  for (let i = 0; i <= steps; i++) cells.push([snap(sx + (fx - sx) * i / steps), snap(sy + (fy - sy) * i / steps)]);
   ctx.fillStyle = OUTLINE;
-  for (let i = 0; i <= steps; i++) ctx.fillRect(Math.round(sx + (fx - sx) * i / steps) - 2, Math.round(sy + (fy - sy) * i / steps) - 2, 5, 5);
-  ctx.fillRect(Math.round(fx) - 4, Math.round(fy) - 4, 8, 8);
+  for (const [cx, cy] of cells) ctx.fillRect(cx - 1, cy - 1, PIXEL + 2, PIXEL + 2);
+  ctx.fillRect(fx - PIXEL - 1, fy - PIXEL - 1, PIXEL * 2 + 2, PIXEL * 2 + 2);
   ctx.fillStyle = ROLE.c.fill; // sleeve
-  for (let i = 0; i <= steps; i++) ctx.fillRect(Math.round(sx + (fx - sx) * i / steps) - 1, Math.round(sy + (fy - sy) * i / steps) - 1, 3, 3);
-  ctx.fillStyle = ROLE.s.fill; ctx.fillRect(Math.round(fx) - 3, Math.round(fy) - 3, 6, 6);
-  ctx.fillStyle = ROLE.s.ink; ctx.fillRect(Math.round(fx) - 3, Math.round(fy) + 1, 6, 1); // knuckles
+  for (const [cx, cy] of cells) ctx.fillRect(cx, cy, PIXEL, PIXEL);
+  ctx.fillStyle = ROLE.s.fill; ctx.fillRect(fx - PIXEL, fy - PIXEL, PIXEL * 2, PIXEL * 2);
+  ctx.fillStyle = ROLE.s.ink; ctx.fillRect(fx - PIXEL, fy + 1, PIXEL * 2, 1); // knuckles
 }
 
 /** Activity poses (presentation only) for encounter kinds performed in place. */
 export const POSE = Object.freeze({forage: 'crouch', gather: 'crouch', observe: 'crouch',
   drink: 'crouch', study: 'crouch', meditate: 'sit', climb: 'climb', rest: 'sit',
-  think: 'sit', contemplate: 'sit', pray: 'kneel', kneel: 'kneel'});
+  think: 'sit', contemplate: 'sit', pray: 'kneel', kneel: 'kneel', scavenge: 'crouch', craft: 'crouch'});
 export function crouchSprite(sprite) {
   // Drop the lower cloak and legs; boots stay under the body.
   return {paint: [...sprite.paint.slice(0, 6), sprite.paint[8]], glyph: [...sprite.glyph.slice(0, 6), sprite.glyph[8]]};
 }
 
-/** A clean pixel character drawn from the uploaded four-direction reference.
- * Logical art is 16x20 pixels, enlarged with hard-edged rectangles at runtime.
- * Four timed frames are derived for idle, walk and a future run animation. */
-function paintPixelPlayer(ctx, player, left, top, {compact = false, reducedMotion = false} = {}) {
-  const P = {edge:'#241c1b', hair:'#3c2a27', hairLight:'#60423a', skin:'#f0bc89',
-    skinLight:'#ffd0a0', scarf:'#944a3d', scarfLight:'#bd6c4e', tunic:'#484936',
-    tunicLight:'#69654a', belt:'#ae8355', pants:'#25332e', pantsLight:'#3a4a3c',
-    boot:'#5a4736', bootLight:'#9d8060', eye:'#30231e'};
+/** Pure: everything that selects a pixel-player frame. Equal poses paint identical pixels. */
+export function pixelPlayerPose(player, reducedMotion = false) {
   const facing = ['north','south','east','west'].includes(player.facing) ? player.facing : 'south';
   const moving = player.animation === 'walk' || player.animation === 'run';
   const frame = reducedMotion ? 0 : Math.floor(player.animation_ms / (player.animation === 'run' ? 90 : 130)) % 4;
   const stride = moving ? [0, 1, 0, -1][frame] : 0;
   const breathe = !moving && !reducedMotion && Math.floor(player.animation_ms / 450) % 4 === 2 ? 1 : 0;
+  return {facing, moving, stride, breathe};
+}
+
+/** Pixel-player art unit: one logical art pixel is 3x3 world px. */
+export const PIXEL = 3;
+const PIXEL_COLORS = Object.freeze({edge: OUTLINE, hair:'#3c2a27', hairLight:'#60423a', skin:'#f0bc89',
+  skinLight:'#ffd0a0', scarf:'#944a3d', scarfLight:'#bd6c4e', tunic:'#484936',
+  tunicLight:'#69654a', belt:'#ae8355', pants:'#25332e', pantsLight:'#3a4a3c',
+  boot:'#5a4736', bootLight:'#9d8060', eye:'#30231e'});
+
+/** Pure pixel-player frame: logical art 16 wide x 20 tall (standing) or 13 tall
+ * (crouch), as ordered rectangles [color, x, y, w, h] in art pixels, already
+ * mirrored for west. Later rectangles paint over earlier ones. */
+export function pixelPlayerArt(player, {compact = false, reducedMotion = false} = {}) {
+  const {facing, moving, stride, breathe} = pixelPlayerPose(player, reducedMotion);
   const side = facing === 'east' || facing === 'west';
-  ctx.save(); ctx.translate(left, top); ctx.scale(3, compact ? 2 : 3);
-  if (facing === 'west') { ctx.translate(16, 0); ctx.scale(-1, 1); }
-  const box = (color, x, y, w, h) => { ctx.fillStyle = P[color]; ctx.fillRect(x, y, w, h); };
-  // Boots and trouser legs change independently, so movement reads at game scale.
-  const legA = side ? 5 + stride : 5 - stride, legB = side ? 9 - stride : 9 + stride;
-  box('edge',legA-1,14,4,5); box('pants',legA,14,2,4);
-  box('edge',legB-1,14,4,5); box('pantsLight',legB,14,2,4);
-  box('edge',legA-2,18,5,2); box('boot',legA-1,18,4,1); box('bootLight',legA-1,19,3,1);
-  box('edge',legB-2,18,5,2); box('boot',legB-1,18,4,1); box('bootLight',legB-1,19,3,1);
-  // Rust scarf, muted green tunic, short travelling cloak and brass belt.
-  if (side) { box('edge',1,8,8,7); box('scarf',1,9,5,6); box('scarfLight',2,10,3,1); }
-  box('edge',3,8+breathe,10,8); box('tunic',4,9+breathe,8,6);
-  box('tunicLight',5,10+breathe,5,2); box('belt',4,14+breathe,8,1);
-  box('edge',2,9+breathe,3,6); box('scarf',3,9+breathe,2,4);
-  box('edge',11,9+breathe,3,6); box('scarf',11,9+breathe,2,4);
-  const swing = moving ? stride : 0;
-  box('skin',3,14+breathe+swing,2,2); box('skinLight',11,14+breathe-swing,2,2);
+  const rects = [];
+  const box = (color, x, y, w, h) => rects.push([PIXEL_COLORS[color], facing === 'west' ? 16 - x - w : x, y, w, h]);
   // Tousled dark hair is the strongest silhouette from the reference.
-  box('edge',4,1,9,8); box('hair',5,1,7,7); box('hair',3,3,10,4);
-  box('hairLight',5,2,4,1); box('hairLight',10,3,2,1);
-  box('edge',11,0,2,2); box('hair',12,1,2,2);
-  if (facing === 'north') {
-    box('hair',5,5,7,4); box('hairLight',6,6,4,1);
-    box('scarf',4,8,9,2); box('scarfLight',5,8,5,1);
-  } else if (side) {
-    box('edge',8,4,4,5); box('skin',9,5,3,3); box('skinLight',11,5,1,2);
-    box('eye',11,6,1,1); box('hair',8,3,4,2); box('scarf',5,8,8,2);
-    box('scarfLight',9,8,3,1);
-  } else {
-    box('edge',5,4,7,5); box('skin',6,4,5,4); box('skinLight',7,5,3,2);
-    box('eye',6,6,1,1); box('eye',10,6,1,1); box('hair',5,3,7,2);
-    box('scarf',4,8,9,2); box('scarfLight',5,8,6,1);
+  const head = () => {
+    box('edge',2,2,12,6); box('edge',4,0,9,9); box('edge',11,0,4,4);   // outline encloses every hair cell
+    box('hair',5,1,7,7); box('hair',3,3,10,4);
+    box('hairLight',5,2,4,1); box('hairLight',10,3,2,1); box('hair',12,1,2,2);
+    if (facing === 'north') {
+      box('hair',5,5,7,4); box('hairLight',6,6,4,1);
+      box('scarf',4,8,8,2); box('scarfLight',5,8,5,1);
+    } else if (side) {
+      box('edge',8,4,4,5); box('skin',9,5,3,3); box('skinLight',11,5,1,2);
+      box('eye',11,6,1,1); box('hair',8,3,4,2); box('scarf',5,8,7,2);
+      box('scarfLight',9,8,3,1);
+    } else {
+      box('edge',5,4,7,5); box('skin',6,4,5,4); box('skinLight',7,5,3,2);
+      box('eye',6,6,1,1); box('eye',10,6,1,1); box('hair',5,3,7,2);
+      box('scarf',4,8,8,2); box('scarfLight',5,8,6,1);
+    }
+  };
+  if (compact) {
+    // Crouch: same head, torso shortened to belt height, knees bent. 16x13 art px.
+    if (side) {
+      // Hips back over the folded back leg, front knee forward and up, cloak hanging behind.
+      box('edge',3,8,10,4); box('edge',0,8,5,5); box('edge',7,9,9,4);
+      box('pants',4,11,4,1); box('boot',4,12,4,1);                 // back leg folded under
+      box('tunic',4,10,4,1);
+      box('pantsLight',8,10,7,1); box('pantsLight',12,11,3,1); box('boot',11,12,4,1); box('bootLight',12,12,2,1);
+      box('scarf',1,9,3,3); box('scarfLight',2,10,1,1);             // cloak falls behind
+    } else {
+      // Knees splay up on both sides of the lowered hips; boots stay under them.
+      box('edge',3,8,10,4); box('edge',0,9,16,4);
+      box('pants',1,10,4,2); box('pantsLight',11,10,4,2);
+      box('boot',1,12,5,1); box('bootLight',2,12,3,1); box('boot',10,12,5,1); box('bootLight',11,12,3,1);
+      box('tunic',5,10,6,1); box('tunicLight',6,10,3,1); box('belt',5,11,6,1);
+    }
+    head();
+    return {width: 16, height: 13, rects};
   }
-  ctx.restore();
+  // Boots and trouser legs change independently, so movement reads at game scale.
+  // Profile: legs scissor (wide / passing / wide) and fully coincide when passing, so the
+  // far boot is never clipped to a 1px sliver. Front/back: legs keep their columns and lift.
+  const leg = (x, dy, pants) => { box('edge',x-1,14,4,5+dy); box(pants,x,14,2,4+dy);
+    box('edge',x-2,18+dy,6,2-dy); box('boot',x-1,18+dy,4,1); box('bootLight',x-1,19+dy,3,1); };
+  if (side) { const a = stride > 0 ? 7 : 5 + stride, b = stride > 0 ? 7 : 9 - stride;
+    leg(a, 0, 'pants'); leg(b, 0, 'pantsLight'); }
+  else { leg(5, stride > 0 ? -1 : 0, 'pants'); leg(9, stride < 0 ? -1 : 0, 'pantsLight'); }
+  // Rust scarf, muted green tunic, short travelling cloak and brass belt.
+  // Each arm (outline, sleeve, hand) moves as ONE unit so no fill cell ever leaves its outline.
+  const swing = moving ? stride : 0, armL = breathe + swing, armR = breathe - swing;
+  box('edge',3,8,10,8+breathe); box('tunic',4,9+breathe,8,6);
+  box('tunicLight',5,10+breathe,5,2); box('belt',4,14+breathe,8,1);
+  if (side) { box('edge',0,8,4,8+breathe); box('scarf',1,9,3,6+breathe); box('scarfLight',2,10,2,1); }  // back cloak joins the torso outline
+  if (!side) { box('edge',2,9+armL,3,8); box('scarf',3,9+armL,2,4); box('skin',3,14+armL,2,2); }  // far arm hidden by cape in profile
+  box('edge',11,9+armR,3,8); box('scarf',11,9+armR,2,4); box('skinLight',11,14+armR,2,2);
+  head();
+  return {width: 16, height: 20, rects};
+}
+
+/** Frame size in world px; the art sits on the bottom edge so feet share one row. */
+export const pixelPlayerFrame = compact => ({width: 48, height: compact ? 40 : 60});
+
+/** A clean pixel character drawn from the uploaded four-direction reference, at
+ * whole world pixels with (left, top) the frame's top-left. */
+export function paintPixelPlayer(ctx, player, left, top, {compact = false, reducedMotion = false} = {}) {
+  const art = pixelPlayerArt(player, {compact, reducedMotion});
+  const oy = top + pixelPlayerFrame(compact).height - art.height * PIXEL;
+  for (const [color, x, y, w, h] of art.rects) {
+    ctx.fillStyle = color; ctx.fillRect(left + x * PIXEL, oy + y * PIXEL, w * PIXEL, h * PIXEL);
+  }
+}
+
+/** Each pose is painted once at integer pixels and blitted nearest-neighbour, like the
+ * terrain stamps; fillRect under the fractional zoom*dpr camera transform antialiases.
+ * Without a DOM canvas (node tests) the frame is painted directly instead. */
+const PIXEL_STAMPS = new Map();
+function newCanvas(width, height) {
+  if (typeof document !== 'undefined' && document.createElement) {
+    const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height; return canvas;
+  }
+  if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(width, height);
+  return null;
+}
+export function pixelPlayerStamp(player, compact = false, reducedMotion = false) {
+  const pose = pixelPlayerPose(player, reducedMotion);
+  const key = compact ? `${pose.facing}|crouch` : `${pose.facing}|${pose.stride}|${pose.breathe}`;
+  if (PIXEL_STAMPS.has(key)) return PIXEL_STAMPS.get(key);
+  const {width, height} = pixelPlayerFrame(compact);
+  const canvas = newCanvas(width, height);
+  if (!canvas) return null;
+  paintPixelPlayer(canvas.getContext('2d'), player, 0, 0, {compact, reducedMotion});
+  PIXEL_STAMPS.set(key, canvas);
+  return canvas;
 }
 
 /** (x, y) is the tile-center position of the player in world pixels. `activity` is
@@ -246,10 +320,12 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
   const compact = pose === 'crouch' || pose === 'sit' || pose === 'kneel';
   if (compact) sprite = crouchSprite(sprite);
   const usingLegacyEquipment = Object.keys(equipment).length > 0;
-  const {width, height} = usingLegacyEquipment ? spriteSize(sprite) : {width: 48, height: compact ? 40 : 60};
-  let bob = player.animation === 'idle' ? Math.floor(player.animation_ms / 600) % 2
+  const {width, height} = usingLegacyEquipment ? spriteSize(sprite) : pixelPlayerFrame(compact);
+  // Whole-body bob is legacy-sprite only: 1 world px is 1/3 of a pixel-player art pixel
+  // and its 120/600 ms clocks are unrelated to the 130 ms walk frames.
+  let bob = !usingLegacyEquipment ? 0 : player.animation === 'idle' ? Math.floor(player.animation_ms / 600) % 2
     : player.animation === 'walk' ? Math.floor(player.animation_ms / 120) % 2 : 0;
-  if (pose === 'crouch') bob = Math.floor(clock / 300) % 2;          // working hands
+  if (pose === 'crouch') bob = usingLegacyEquipment ? Math.floor(clock / 300) % 2 : 0;   // working hands (legacy only)
   if (pose === 'sit' || pose === 'kneel') bob = 0;
   if (pose === 'climb') bob = -Math.round(Math.abs(Math.sin(clock / 260)) * 6);
   const reach = punchReach(player, phase);
@@ -280,7 +356,11 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
   const hands = pose === 'crouch' ? workingHands(activity, player.facing, x, y, clock, reducedMotion) : null;
   if (hands?.behind) for (const arm of hands.arms) drawFist(ctx, ...arm);   // seen from behind
   if (usingLegacyEquipment) paintPlayerLayers(ctx, player, left, top, equipment, compact);
-  else paintPixelPlayer(ctx, player, left, top, {compact, reducedMotion});
+  else {
+    const stamp = pixelPlayerStamp(player, compact, reducedMotion);
+    if (stamp) { ctx.imageSmoothingEnabled = false; ctx.drawImage(stamp, left, top); }
+    else paintPixelPlayer(ctx, player, left, top, {compact, reducedMotion});
+  }
   // Small brass clasp and collar glint keep the body readable over dark terrain.
   if (usingLegacyEquipment && !compact && !equipment.chest) {
     ctx.fillStyle = '#ffe6a4'; ctx.fillRect(Math.round(x) - 2 + lx, top + 25, 4, 2);
@@ -308,7 +388,7 @@ export function workingHands(activity, facing, x, y, clock = 0, reducedMotion = 
     if (dx || dy) dir = Math.abs(dy) >= Math.abs(dx) ? (dy > 0 ? 'south' : 'north') : (dx > 0 ? 'east' : 'west');
   }
   const beat = reducedMotion ? 0 : Math.round(Math.sin(clock / 145) * 2);
-  const shoulderY = y - 8;   // compact sprite: head y-28..y-14, torso below
+  const shoulderY = y - 3;   // crouch frame: head y-27..y-4, scarf/shoulders y-3..y+2, knees y+6
   if (dir === 'south') return {behind: false, arms: [
     [x - 9, shoulderY, x - 6, y + 6 + beat], [x + 9, shoulderY, x + 6, y + 6 - beat]]};
   if (dir === 'north') return {behind: true, arms: [
@@ -484,7 +564,9 @@ export const SPOTS = Object.freeze({
   fallen_watchtower: {paint: ['  qxxq   ', '  qxxq   ', ' qxxxxq  ', ' qgxxgq  ', ' qgggggq '],
     glyph: ['  /++\\   ', '  |::|   ', ' /|::|\\  ', ' |/__\\|  ', ' /_//_\\  ']},
   mushroom_ring: {paint: [' r r r r ', 'rggrggrgr', ' gg gg gg', 'rgggggggr'],
-    glyph: [' ^ ^ ^ ^ ', '/o\\/o\\/o\\', ' .. .. ..', '^.......^']}
+    glyph: [' ^ ^ ^ ^ ', '/o\\/o\\/o\\', ' .. .. ..', '^.......^']},
+  wayside_shrine: {paint: ['    y    ', '  ggggg  ', ' ggggggg ', '  gxyxg  ', '  ggggg  ', ' qgggggq '],
+    glyph: ['    +    ', '  /^^^\\  ', ' /_____\\ ', '  |*i*|  ', '  |___|  ', ' ;/___\\; ']}
 });
 
 /** The anchor stone at the anchor cell. Ground decoration only (non-blocking). */
@@ -548,34 +630,66 @@ export function drawCamp(ctx, x, y, {clock = 0, reducedMotion = false} = {}) {
 }
 
 /** The origin is the road ambush: two broken wagons and scattered supplies.
- * This is scenery only, behind actors and independent of collision. */
+ * Scenery only, behind actors and independent of collision. Every piece is an
+ * outlined 4x7 cell sprite like SPOTS and CAMP (wood family + one red canopy). */
+const AMBUSH_ROLES = Object.freeze({
+  w: {fill: '#7a5532', ink: '#3b2a1c'}, u: {fill: '#3b2a1c', ink: '#9b7944'},
+  l: {fill: '#9b7944', ink: '#3b2a1c'}, b: {fill: '#b59050', ink: '#7a5532'},
+  r: {fill: '#b8323f', ink: '#ffb0a0'}});
+export const AMBUSH = Object.freeze({
+  // Side view; the front wheel is gone, so the bed's front end has dropped to the ground.
+  wagon: {paint: [
+    '  u    u    u         ',
+    ' bbbbbbbbbbbbbbu      ',
+    ' wwwwwwwwwwwwwwbbbbb  ',
+    ' wwwwwwwwwwwwwwwwwwwbb',
+    ' uulllu' + 'uuuuuuuuwwwwwww',
+    '  lllll       uuuuuuuu',
+    '   lll          uuuuu '], glyph: [
+    '  |    |    /         ',
+    ' =-==-==-==-==-|      ',
+    ' |::|::|::|::|=-==-=  ',
+    ' |::|::|::|::|::|::\\=\\',
+    ' __/|\\_________|::|::|',
+    '  (-o-)       \\_____/_',
+    '   \\|/          ____/ ']},
+  // Tipped on its side: underside and both wheels face us, torn canopy spills out.
+  tipped: {paint: [
+    '   lll      lll     ',
+    ' uuuuuuuuuuuuuuuuu  ',
+    ' wwwwwwwwwwwwwwwwwr ',
+    ' wwwwwwwwwwwwwwwwwrr',
+    ' bbbbbbbbbbbbbbbbrrr',
+    '  rrrrrrrrrrrrrrrrr ',
+    '    rr rrrrr  rrr   '], glyph: [
+    '   /o\\      /o\\     ',
+    ' =|=========|====   ',
+    ' |:|:|:|:|:|:|:|:|\\ ',
+    ' |:|:|:|:|:|:|:|:|~\\',
+    ' =-==-==-==-==-==/~~',
+    '  ~/~~\\~~/~~\\~~/~~\\ ',
+    '    \\/ \\~/~/  \\~/   ']},
+  wheel: {paint: ['lllll'], glyph: ['(=o=)']},
+  crate: {paint: ['llll', 'llll'], glyph: ['[==]', '|\\/|']},
+  crateDark: {paint: ['wwww', 'wwww'], glyph: ['[==]', '|/\\|']},
+  plank: {paint: ['bbbbb'], glyph: ['=-==-']},
+  plankShort: {paint: ['bbb'], glyph: ['==-']},
+  plankTilted: {paint: ['   bb', ' bb  ', 'b    '], glyph: ['   /=', ' /=  ', '/    ']},
+  spoke: {paint: ['uu'], glyph: ['-o']}
+});
 export function drawAmbushSite(ctx, x, y) {
-  ctx.save();
-  ctx.translate(Math.round(x), Math.round(y));
-  ctx.lineJoin='round';
-  // Snapped cart, tilted canopy and axle to the west of the anchor.
-  ctx.fillStyle='#38291d';ctx.fillRect(-146,-23,88,23);
-  ctx.fillStyle='#80603c';ctx.fillRect(-140,-29,70,13);
-  ctx.fillStyle='#b89465';ctx.fillRect(-138,-28,51,4);
-  ctx.fillStyle='#563a2a';ctx.beginPath();ctx.moveTo(-139,-30);ctx.lineTo(-126,-59);ctx.lineTo(-78,-51);ctx.lineTo(-67,-29);ctx.closePath();ctx.fill();
-  ctx.fillStyle='#b6a17a';ctx.beginPath();ctx.moveTo(-131,-51);ctx.lineTo(-112,-59);ctx.lineTo(-94,-51);ctx.lineTo(-81,-54);ctx.lineTo(-75,-38);ctx.lineTo(-99,-43);ctx.closePath();ctx.fill();
-  ctx.strokeStyle='#55402f';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(-137,-28);ctx.lineTo(-69,-28);ctx.moveTo(-111,-54);ctx.lineTo(-96,-34);ctx.stroke();
-  const wheel=(wx,wy)=>{ctx.fillStyle='#201c1a';ctx.beginPath();ctx.arc(wx,wy,18,0,Math.PI*2);ctx.fill();
-    ctx.strokeStyle='#ad8554';ctx.lineWidth=5;ctx.beginPath();ctx.arc(wx,wy,14,0,Math.PI*2);ctx.stroke();
-    ctx.lineWidth=2;for(let i=0;i<6;i++){let a=i*Math.PI/3;ctx.beginPath();ctx.moveTo(wx,wy);ctx.lineTo(wx+Math.cos(a)*12,wy+Math.sin(a)*12);ctx.stroke();}
-    ctx.fillStyle='#d1ab6e';ctx.fillRect(wx-3,wy-3,6,6);};
-  wheel(-121,0);wheel(-69,0);
-  // Second wagon lies on its side; torn crimson cover recalls the raid.
-  ctx.fillStyle='#35291e';ctx.beginPath();ctx.moveTo(74,-8);ctx.lineTo(129,-35);ctx.lineTo(150,-19);ctx.lineTo(96,12);ctx.closePath();ctx.fill();
-  ctx.strokeStyle='#a98150';ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(72,-7);ctx.lineTo(130,-36);ctx.moveTo(93,13);ctx.lineTo(150,-19);ctx.stroke();
-  ctx.fillStyle='#7c3d39';ctx.beginPath();ctx.moveTo(84,-40);ctx.lineTo(111,-52);ctx.lineTo(135,-34);ctx.lineTo(101,-19);ctx.closePath();ctx.fill();
-  ctx.fillStyle='#ad6355';ctx.beginPath();ctx.moveTo(87,-39);ctx.lineTo(108,-49);ctx.lineTo(119,-40);ctx.lineTo(95,-29);ctx.closePath();ctx.fill();
-  wheel(143,7);
-  // Crates, loose planks and arrows on both sides of the road.
-  for(const [px,py] of [[-42,17],[-25,28],[43,22],[60,37]]){ctx.fillStyle='#654529';ctx.fillRect(px,py,18,13);ctx.strokeStyle='#ad8653';ctx.lineWidth=2;ctx.strokeRect(px+1,py+1,16,11);ctx.beginPath();ctx.moveTo(px+2,py+2);ctx.lineTo(px+16,py+11);ctx.stroke();}
-  ctx.strokeStyle='#96744c';ctx.lineWidth=3;for(const [ax,ay] of [[-152,28],[-12,38],[32,-31],[153,34]]){ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(ax+25,ay-9);ctx.stroke();}
-  ctx.strokeStyle='#b7a67c';ctx.lineWidth=2;for(const [ax,ay] of [[-32,-18],[47,-11],[79,30]]){ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(ax+17,ay+8);ctx.stroke();ctx.beginPath();ctx.moveTo(ax+1,ay-3);ctx.lineTo(ax+1,ay+3);ctx.stroke();}
-  ctx.restore();
+  setupText(ctx);
+  x = Math.round(x); y = Math.round(y);
+  const part = (name, dx, dy) => paintParts(ctx, AMBUSH[name], AMBUSH_ROLES, x + dx, y + dy);
+  // Broken wagon to the west of the anchor, its lost wheel lying beside it.
+  part('wagon', -148, -35);
+  part('wheel', -52, 18);
+  // Second wagon on its side to the east; torn crimson cover recalls the raid.
+  part('tipped', 72, -35);
+  // Crates and loose planks on both sides of the road.
+  part('crate', -44, 17); part('crateDark', -24, 30); part('crate', 44, 22); part('crateDark', 62, 38);
+  part('plank', -152, 28); part('plankShort', -12, 40); part('plankTilted', 30, -38);
+  part('plank', 150, 32); part('spoke', 92, 28); part('plankShort', -96, 30);
 }
 
 /** Spot at tile center (x, y); a sparkle marks it, brighter when it is the goal. */

@@ -1,169 +1,42 @@
-"""Biome encounter pools and deterministic per-chunk encounter spots.
+"""Deterministic per-chunk encounter spots (points of interest) from the action bucket.
 
-Each chunk rolls a few encounter spots from its biome's weighted pool, seeded only
-by the canonical chunk seed and ENCOUNTER_VERSION: the same world always offers
-the same spots, regardless of visit order, cache eviction or save/reload. Spots
-sit on reachable walkable cells; collision stays authoritative. Fight entries
-become ordinary runtime Targets at their spot. To change placement rules or a
-pool for existing worlds, add a new versioned pool instead of editing in place.
+Each chunk rolls 0..3 spots. The spot bucket (actions.bucket) holds every known
+spot action eligible for the chunk's biome and region, weighted by base weight x
+region multiplier. Rolls are seeded by the canonical chunk seed, ENCOUNTER_VERSION
+and the life number; the unlocked set and region select the bucket, so the same
+world, life and unlocks always offer the same spots, regardless of visit order,
+cache eviction or save/reload. Spots sit on reachable walkable cells; collision
+stays authoritative. Fight spots become runtime Targets at their spot.
 
-The first pool is bare-handed: nothing here needs equipment. No providers, wall
-clock, hash() or shared RNG. Food sources and rare boars carry a spawn window;
-prayer is a timed auto-pilot action during visible play, never a map spot.
+Content (items, actions, regions) lives in catalog.py; this module only places it.
+Spawn windows and pity are applied later by the auto-pilot's screening. No
+providers, wall clock, hash() or shared RNG.
 """
 from collections import deque
 from dataclasses import dataclass
 
-from .models import DELTAS, ChunkKey, identifier, integer
+from .actions import Context, bucket
+from .catalog import ACTIONS, ATTRIBUTES, BY_ID, ITEMS, ITEM_KINDS, ActionDef, ItemDef, Loot  # noqa: F401 (re-exports)
+from .models import DELTAS, ChunkKey, integer
 from .seeds import derive_seed
+from .tuning import SPOTS_PER_CHUNK
 
-ENCOUNTER_VERSION = "encounters-v5"  # v5: scarce food and pursuing boars; prayer is no longer a map spot
-ATTRIBUTES = ("strength", "endurance", "agility", "intelligence", "perception", "willpower")
-KINDS = ("forage", "gather", "observe", "climb", "drink", "meditate", "study", "fight")
-RARITIES = ("common", "uncommon", "rare")
+ENCOUNTER_VERSION = "encounters-v6"  # v6: action registry buckets, regions, unlocks, pity
+EncounterDef = ActionDef            # compatibility name
+KINDS = tuple(sorted({a.category for a in ACTIONS}))
 NEAR = (None, "T", "^")
-
-
-ITEM_KINDS = ("food", "material")
-
-
-@dataclass(frozen=True)
-class ItemDef:
-    """Gathered item (current-life inventory). Soulbound equipment is summon-only."""
-    id: str
-    name: str
-    kind: str
-    food: int = 0       # hunger points restored when eaten
-    glyph: str = "*"
-
-    def __post_init__(self):
-        identifier(self.id, "item ID")
-        if self.kind not in ITEM_KINDS or not isinstance(self.name, str) or not 1 <= len(self.name) <= 40:
-            raise ValueError("invalid item kind/name")
-        integer(self.food, "food value", 0, 100)
-        if (self.kind == "food") != (self.food > 0):
-            raise ValueError("food, and only food, restores hunger")
-        if not isinstance(self.glyph, str) or len(self.glyph) != 1 or not 33 <= ord(self.glyph) <= 126:
-            raise ValueError("item glyph must be one printable ASCII character")
-
-
-ITEMS = {item.id: item for item in (
-    ItemDef("wild_berries", "Wild berries", "food", 12, "o"),
-    ItemDef("bird_egg", "Bird egg", "food", 20, "0"),
-    ItemDef("boar_meat", "Boar meat", "food", 35, "%"),
-    ItemDef("stick", "Stick", "material", glyph="/"),
-    ItemDef("bramble_thorn", "Bramble thorn", "material", glyph="^"),
-    ItemDef("boar_hide", "Boar hide", "material", glyph="#"),
-)}
-
-
-@dataclass(frozen=True)
-class Loot:
-    item: str
-    low: int
-    high: int
-    chance: int = 100   # percent
-
-    def __post_init__(self):
-        if self.item not in ITEMS:
-            raise ValueError("unknown loot item")
-        integer(self.low, "loot minimum", 1, 20)
-        integer(self.high, "loot maximum", self.low, 20)
-        integer(self.chance, "loot chance", 1, 100)
-
-
-@dataclass(frozen=True)
-class EncounterDef:
-    id: str
-    name: str
-    kind: str
-    attribute: str
-    xp: int
-    duration_ms: int
-    weight: int
-    rarity: str = "common"
-    near: str | None = None
-    log: str = ""
-    hp: int = 0
-    loot: tuple = ()
-    heal: int = 0       # health points restored on completion
-    blessing: int = 0   # blessing power granted (prayer); persists across lives
-    window: tuple | None = None  # (low, high) cap on how many exist at once; rolled per life; None = unlimited
-
-    def __post_init__(self):
-        identifier(self.id, "encounter ID")
-        if not isinstance(self.name, str) or not 1 <= len(self.name) <= 60:
-            raise ValueError("invalid encounter name")
-        if self.kind not in KINDS or self.attribute not in ATTRIBUTES or self.rarity not in RARITIES:
-            raise ValueError("invalid encounter kind/attribute/rarity")
-        if self.near not in NEAR:
-            raise ValueError("invalid encounter placement")
-        integer(self.xp, "encounter XP", 1, 10000)
-        integer(self.duration_ms, "encounter duration", 1, 600000)
-        integer(self.weight, "encounter weight", 1, 10000)
-        if not isinstance(self.log, str) or not 1 <= len(self.log) <= 120:
-            raise ValueError("invalid encounter log text")
-        integer(self.hp, "encounter HP", 0, 3)
-        integer(self.heal, "encounter heal", 0, 100)
-        if type(self.loot) is not tuple or any(not isinstance(l, Loot) for l in self.loot):
-            raise ValueError("loot must be a tuple of Loot")
-        if (self.kind == "fight") != (self.hp > 0):
-            raise ValueError("fights, and only fights, have hit points")
-        integer(self.blessing, "encounter blessing", 0, 10)
-        if (self.kind == "pray") != (self.blessing > 0):
-            raise ValueError("prayers, and only prayers, grant blessings")
-        if self.window is not None:
-            if type(self.window) is not tuple or len(self.window) != 2:
-                raise ValueError("spawn window must be a (low, high) tuple")
-            integer(self.window[0], "spawn window low", 0, 1000)
-            integer(self.window[1], "spawn window high", self.window[0], 1000)
-
-
-# Dark forest, no equipment: everything here is done with bare hands.
-# XP is regular (current-life) XP; 20% also goes to the persistent dimensional track.
-DARK_FOREST = (
-    EncounterDef("bramble_berries", "Bramble berries", "forage", "perception", 40, 2400, 8, window=(0, 1),
-                 log="Picked bramble berries without getting scratched (much).",
-                 loot=(Loot("wild_berries", 1, 1), Loot("bramble_thorn", 1, 1, 30))),
-    EncounterDef("fallen_branches", "Fallen branches", "gather", "strength", 30, 2200, 24,
-                 log="Hauled a pile of fallen branches off the trail.", loot=(Loot("stick", 2, 3),)),
-    EncounterDef("animal_tracks", "Animal tracks", "observe", "perception", 50, 3000, 20,
-                 log="Read fresh tracks in the mud - something heavy passed here."),
-    EncounterDef("gnarled_tree", "Gnarled tree", "climb", "agility", 60, 3200, 12, near="T", window=(0, 1),
-                 log="Climbed a gnarled tree and scouted the canopy.",
-                 loot=(Loot("bird_egg", 1, 1, 15), Loot("stick", 1, 1, 40))),
-    EncounterDef("forest_spring", "Forest spring", "drink", "endurance", 40, 2000, 12, heal=10, window=(1, 2),
-                 log="Drank from a cold spring and caught your breath."),
-    EncounterDef("mossy_stone", "Mossy stone", "meditate", "willpower", 60, 4000, 8, near="^",
-                 log="Sat by a mossy stone until the forest went quiet."),
-    EncounterDef("old_carvings", "Old carvings", "study", "intelligence", 80, 3600, 5, "uncommon",
-                 log="Traced old carvings - the marks look almost like a summoning circle."),
-    EncounterDef("abandoned_camp", "Abandoned camp", "gather", "strength", 40, 3100, 10, "uncommon",
-                 log="Searched an abandoned camp for anything the travellers left behind.",
-                 loot=(Loot("stick", 1, 2), Loot("bramble_thorn", 1, 1, 30))),
-    EncounterDef("moonlit_pool", "Moonlit pool", "drink", "endurance", 45, 2600, 7, "uncommon",
-                 heal=8, window=(0, 1), log="Drank from a still pool beneath the branches."),
-    EncounterDef("fallen_watchtower", "Fallen watchtower", "study", "intelligence", 75, 4200, 6, "uncommon",
-                 log="Studied the ruins of a watchtower and its faded warning marks."),
-    EncounterDef("mushroom_ring", "Mushroom ring", "observe", "perception", 55, 3200, 9,
-                 log="Watched the small life stirring inside a ring of pale mushrooms."),
-    # Boars are rare spot rolls that pursue the player; asset-spawned boars are screened out.
-    EncounterDef("bramble_boar", "Bramble boar", "fight", "strength", 100, 1, 4, hp=3, window=(1, 1),
-                 log="Drove off a bramble boar with your bare fists.",
-                 loot=(Loot("boar_meat", 1, 1), Loot("boar_hide", 1, 1, 60))),
-)
-POOLS = {"dark_forest": DARK_FOREST}
-BY_ID = {entry.id: entry for pool in POOLS.values() for entry in pool}
+SPOT_ACTIONS = tuple(a for a in ACTIONS if a.placement == "spot")
+POOLS = {"dark_forest": tuple(a for a in SPOT_ACTIONS if "dark_forest" in a.biomes)}
+DARK_FOREST = POOLS["dark_forest"]
 
 
 def validate_pools(pools=POOLS):
     seen = set()
     for biome, pool in pools.items():
-        identifier(biome, "biome")
         if type(pool) is not tuple or not pool:
             raise ValueError("encounter pool must be a nonempty tuple")
         for entry in pool:
-            if not isinstance(entry, EncounterDef) or entry.id in seen:
+            if not isinstance(entry, ActionDef) or entry.id in seen or entry.placement != "spot":
                 raise ValueError("invalid or duplicate encounter definition")
             seen.add(entry.id)
 
@@ -236,45 +109,45 @@ def roll_loot(entry, seed):
     return result
 
 
-def spawn_window(entry, mastery=0):
+def spawn_window(entry, mastery=0, bonus=0):
     """(low, high) cap on how many of one encounter exist at once, or None (unlimited).
 
-    Hook for action mastery: each mastery level widens the window (+1 high, and
-    +1 low every second level). Nothing grants mastery yet, so it stays 0."""
+    Mastery (bought with ash) widens the window: +1 high per level and +1 low every
+    second level. `bonus` (e.g. the bountiful-path boon) adds to both ends."""
     if entry.window is None:
         return None
     integer(mastery, "mastery", 0, 1000)
+    integer(bonus, "window bonus", 0, 1000)
     low, high = entry.window
-    return low + mastery // 2, high + mastery
+    return low + mastery // 2 + bonus, high + mastery + bonus
 
 
-def roll_window(entry, seed, mastery=0):
+def roll_window(entry, seed, mastery=0, bonus=0):
     """This life's at-once cap for `entry` (None = unlimited), rolled at the anchor."""
-    window = spawn_window(entry, mastery)
+    window = spawn_window(entry, mastery, bonus)
     if window is None:
         return None
     low, high = window
     return low + derive_seed(seed, "window", entry.id) % (high - low + 1)
 
 
-def chunk_spots(chunk, pools=POOLS, life=1):
+def chunk_spots(chunk, life=1, *, unlocked=frozenset(), region=None):
     """Deterministic encounter spots for one chunk in one life (possibly none)."""
-    pool = pools.get(chunk.asset.biome)
-    if not pool:
-        return ()
     asset, key = chunk.asset, chunk.key
+    entries = bucket(Context(biome=asset.biome, region=region, placement="spot", unlocked=frozenset(unlocked)))
+    if not entries:
+        return ()
     seed = derive_seed(chunk.seed, ENCOUNTER_VERSION, life)
     reachable = _reachable(asset)
-    # 0..2 spots; empty chunks leave room to travel and feel scarce.
-    count = (0, 0, 1, 1, 2, 2)[derive_seed(seed, "count") % 6]
-    total = sum(entry.weight for entry in pool)
+    count = SPOTS_PER_CHUNK[derive_seed(seed, "count") % len(SPOTS_PER_CHUNK)]
+    total = sum(w for _, w in entries)
     spots, used, candidates = [], [], {}
     for index in range(count):
         roll = derive_seed(seed, "entry", index) % total
-        for entry in pool:
-            if roll < entry.weight:
+        for entry, w in entries:
+            if roll < w:
                 break
-            roll -= entry.weight
+            roll -= w
         if entry.near not in candidates:  # computed once per placement rule per chunk
             candidates[entry.near] = _candidates(asset, reachable, entry.near)
         options = [p for p in candidates[entry.near]
@@ -285,3 +158,18 @@ def chunk_spots(chunk, pools=POOLS, life=1):
         used.append((x, y))
         spots.append(EncounterSpot(spot_id(key, index), entry.id, key, x, y))
     return tuple(spots)
+
+
+FORCED_BASE = 10   # forced (pity) spots use indices FORCED_BASE.. so they never collide
+
+
+def forced_spot(chunk, encounter, index, taken=()):
+    """A pity spot of `encounter` in `chunk` (deterministic), or None if no cell fits."""
+    entry = BY_ID[encounter]
+    asset, key = chunk.asset, chunk.key
+    options = [p for p in _candidates(asset, _reachable(asset), entry.near)
+               if all(abs(p[0] - u[0]) + abs(p[1] - u[1]) >= 4 for u in taken)]
+    if not options:
+        return None
+    x, y = options[derive_seed(chunk.seed, ENCOUNTER_VERSION, "forced", encounter, index) % len(options)]
+    return EncounterSpot(spot_id(key, FORCED_BASE + index), encounter, key, x, y)

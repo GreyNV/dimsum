@@ -2,12 +2,15 @@
 import {TILE_W, TILE_H, ZOOM, clamp, residentBounds, cameraView, follow, retainResident, tileAt, visualHash, Controls} from './view.js';
 import {PALETTE, OBJECT_PAD, paintChunk, drawTree, terrainColor} from './art.js';
 import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawDamage, drawFloat, drawSpot, drawSpotCompletion, drawCamp, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
-import {ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
+import {debugText, shopSections, ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('scene'), ctx = canvas.getContext('2d'), mini = $('minimap'), map = mini.getContext('2d');
 const chunks = new Map(), pictures = new Map(), controls = new Controls();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+/* Design debug overlay: ?debug in the URL or the backquote key. Asks the server for its
+ * debug block (seed, region, buckets, windows, pity, screening) on every poll. */
+let debugOn = new URLSearchParams(location.search).has('debug');
 let state = null, paused = true, zoom = ZOOM.initial, width = 0, height = 0, dpr = 1;
 let camera = null, actor = null, lastFrame = 0, connection = 'connecting';
 let mapDirty = true, polling = false, stopped = false;
@@ -73,7 +76,13 @@ function adopt(next) {
   }
   const here = [...chunks.values()].find(c => c.x === Math.floor(next.player.x / c.width) && c.y === Math.floor(next.player.y / c.height));
   const biome = (here?.biome || 'dark_forest').replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
-  if ($('biome').textContent !== biome) $('biome').textContent = biome;
+  const region = next.expedition?.region?.name || biome;
+  if ($('biome').textContent !== region) $('biome').textContent = region;
+  const line = `Dimensional Summoner - ${biome}`;
+  if ($('biome-line').textContent !== line) $('biome-line').textContent = line;
+  const debugPanel = $('debug-panel');
+  debugPanel.hidden = !debugOn;
+  if (debugOn) debugPanel.textContent = debugText(next.expedition?.debug);
   updateActivity();
 }
 function updateAnchor(ex) {
@@ -83,18 +92,38 @@ function updateAnchor(ex) {
   if (!anchor) return;
   $('anchor-countdown').textContent = anchor.waiting ? 'The next life waits for your choice.'
     : `Next life in ${Math.ceil(anchor.remaining_ms / 1000)}s unless you offer a resource.`;
-  $('anchor-dust').textContent = String(ex.dust);
-  const signature = JSON.stringify(ex.inventory);
+  $('anchor-dust').textContent = String(ex.meta?.dust ?? ex.dust);
+  $('anchor-ash').textContent = String(ex.meta?.ash ?? 0);
+  $('anchor-blessing').textContent = String(ex.meta?.blessing ?? 0);
+  const signature = JSON.stringify([ex.inventory, ex.shop, ex.meta, anchor.ash_if_burned]);
   if (panel.dataset.inventory === signature) return;
   panel.dataset.inventory = signature;
+  $('anchor-hint').textContent = ex.inventory.length
+    ? `Offer items for dust (new actions). Keep them and they burn to ${anchor.ash_if_burned} ash (mastery) at rebirth.`
+    : `Nothing carried. Rebirth still leaves ${anchor.ash_if_burned} ash from the road you walked.`;
   const offers = $('anchor-offers');
   offers.replaceChildren(...ex.inventory.map(row => {
     const button = document.createElement('button');
     button.type = 'button'; button.dataset.trade = row.id;
-    button.textContent = `Offer ${row.count} ${row.name.toLowerCase()}`;
+    button.textContent = `Offer ${row.count} ${row.name.toLowerCase()} (+${anchor.offer?.[row.id] ?? '?'} dust)`;
     return button;
   }));
   if (!ex.inventory.length) offers.textContent = 'Nothing left to offer.';
+  const shop = $('anchor-shop');
+  shop.replaceChildren(...shopSections(ex.shop).flatMap(section => {
+    const heading = document.createElement('h3'); heading.textContent = section.title;
+    return [heading, ...section.rows.map(row => {
+      const button = document.createElement('button');
+      button.type = 'button'; button.dataset.buy = `${row.kind}:${row.id}`; button.disabled = !row.available;
+      button.title = row.available ? row.description : row.reasons.join('; ');
+      const cost = document.createElement('span'); cost.className = 'cost'; cost.textContent = `${row.cost} ${row.currency}`;
+      const name = document.createElement('b'); name.textContent = row.name;
+      const text = document.createElement('small');
+      text.textContent = row.available ? row.description : `${row.description} (${row.reasons.join('; ')})`;
+      button.append(cost, name, text);
+      return button;
+    })];
+  }));
 }
 function observeCombat(next) {
   const now = performance.now();
@@ -185,6 +214,7 @@ async function poll() {
   try {
     const body = controls.payload(paused, [...chunks.keys()]);
     if (pendingAction) body.action = pendingAction;
+    if (debugOn) body.debug = true;
     const attackRevision = controls.attackRevision;
     const next = await request('/api/input', body);
     controls.acknowledge(body, attackRevision); pendingAction = null; adopt(next);
@@ -262,7 +292,10 @@ function render(now) {
     camera.y=reducedMotion ? actor.y : follow(camera.y,actor.y,dt,140);
     const resident=[...chunks.values()].sort((a,b)=>a.y-b.y || a.x-b.x);
     const view=cameraView(camera,width,height,zoom,residentBounds(resident));
-    ctx.translate(width/2,height/2); ctx.scale(view.scale,view.scale); ctx.translate(-view.x,-view.y);
+    // Same transform as translate(w/2,h/2) scale(s) translate(-x,-y), with the offset
+    // rounded to whole device pixels so stamps and cell edges never land between pixels.
+    const ds=view.scale*dpr;
+    ctx.setTransform(ds,0,0,ds,Math.round(dpr*width/2-ds*view.x),Math.round(dpr*height/2-ds*view.y));
     ctx.imageSmoothingEnabled=false;
     const visible=resident.filter(c=>(c.x+1)*c.width*TILE_W+OBJECT_PAD>view.x-width/view.scale/2 &&
       c.x*c.width*TILE_W-OBJECT_PAD<view.x+width/view.scale/2 &&
@@ -274,6 +307,12 @@ function render(now) {
     const pending=resident.find(c=>!pictures.has(c.id));
     if(pending) pictures.set(pending.id, paintChunk(pending));
     for(const chunk of visible) ctx.drawImage(pictures.get(chunk.id).ground,chunk.x*chunk.width*TILE_W,chunk.y*chunk.height*TILE_H);
+    // Region tint: a flat, low-alpha wash per chunk so regions read at a glance (VISUAL_STYLE.md effects pass).
+    for(const chunk of visible) if(chunk.tint) {
+      ctx.globalAlpha=.28; ctx.fillStyle=chunk.tint;
+      ctx.fillRect(chunk.x*chunk.width*TILE_W,chunk.y*chunk.height*TILE_H,chunk.width*TILE_W,chunk.height*TILE_H);
+      ctx.globalAlpha=1;
+    }
     for(const chunk of visible) ctx.drawImage(pictures.get(chunk.id).objects,chunk.x*chunk.width*TILE_W-OBJECT_PAD,chunk.y*chunk.height*TILE_H-OBJECT_PAD);
     const anchor = state.expedition?.anchor;
     if (anchor) {
@@ -373,6 +412,7 @@ addEventListener('keydown', event=>{
   if(directions[event.code]) { event.preventDefault(); if(!paused && manualAllowed()) controls.press(event.code,directions[event.code]); }
   else if(event.code==='Space') { event.preventDefault(); if(!paused && manualAllowed()) controls.attack(true); }
   else if(event.code==='KeyP' && !event.repeat) { event.preventDefault(); setPause(!paused); }
+  else if(event.code==='Backquote' && !event.repeat) { event.preventDefault(); debugOn = !debugOn; $('debug-panel').hidden = !debugOn; }
   else if((event.code==='Equal' || event.code==='NumpadAdd') && !event.repeat) changeZoom(.1);
   else if((event.code==='Minus' || event.code==='NumpadSubtract') && !event.repeat) changeZoom(-.1);
 });
@@ -400,6 +440,12 @@ $('anchor-offers').addEventListener('click',event=>{
   if(item && !pendingAction) pendingAction={type:'trade',item};
 });
 $('anchor-begin').addEventListener('click',()=>{ if(!pendingAction) pendingAction={type:'begin_life'}; });
+$('anchor-shop').addEventListener('click',event=>{
+  const value=event.target.closest('button[data-buy]')?.dataset.buy;
+  if(!value || pendingAction) return;
+  const [type,id]=value.split(':');
+  pendingAction={type,id};
+});
 $('resume').addEventListener('click',()=>{setPause(false);canvas.focus();});
 $('zoom-in').addEventListener('click',()=>changeZoom(.1));
 $('zoom-out').addEventListener('click',()=>changeZoom(-.1));

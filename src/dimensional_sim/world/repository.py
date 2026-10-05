@@ -104,6 +104,10 @@ class WorldRepository:
         self._discovery[key] = ("visited", chunk.asset.biome)
         return chunk
 
+    def biome_for(self, key):
+        """Deterministic biome of a chunk without generating or residing it."""
+        return self._generator.biome_for(key)
+
     def peek(self, key):
         return self._resident.get(self._key(key))
 

@@ -72,3 +72,11 @@ body.eyes-open .memory{opacity:0}
 body.prologue .vitals{bottom:auto;top:96px}}
 @media(prefers-reduced-motion:reduce){.memory li{animation:none;opacity:.92}.memory{transition:none}}
 @media(max-width:720px){body:not(.prologue) .vitals{bottom:190px}}
+
+/* Anchor shop and debug overlay (closed-loop iteration). */
+#wealth{color:#b6e7ff}
+.anchor-shop{text-align:left;margin:4px 0 10px}.anchor-shop h3{font:600 10px ui-monospace,Consolas,monospace;letter-spacing:1.4px;text-transform:uppercase;color:#9fc8e6;margin:10px 0 5px}
+.anchor-shop button{display:block;width:100%;text-align:left;margin:4px 0;padding:6px 9px;font:11px/1.4 ui-monospace,Consolas,monospace;border-color:#4d6f8c;background:#111c28}
+.anchor-shop button b{color:#e8f4ff;font-weight:600}.anchor-shop button small{display:block;color:#93a9ba}.anchor-shop button:disabled{opacity:.45}
+.anchor-shop button .cost{float:right;color:#b6e7ff}
+.debug-panel{position:absolute;z-index:7;left:12px;top:12px;max-width:min(760px,calc(100vw - 24px));max-height:80vh;overflow:auto;margin:0;padding:10px 12px;background:rgba(4,8,6,.88);border:1px solid #4f6b43;color:#cfe3b8;font:10px/1.45 ui-monospace,Consolas,monospace;white-space:pre-wrap;pointer-events:none}

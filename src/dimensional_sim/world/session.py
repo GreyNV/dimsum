@@ -7,7 +7,9 @@ threading imports belong here; callers own any locking and should pass `now`.
 import time
 
 from .animation import rotate
-from .autopilot import INVENTORY_SLOTS
+from .autopilot import INVENTORY_SLOTS, Expedition
+from . import economy
+from .catalog import BOONS, UNLOCKS
 from .encounters import BY_ID
 from .models import ChunkKey, fields, integer
 from .progression import attribute_report
@@ -24,7 +26,7 @@ def chunk_id(key):
     return f"{key.dimension}:{key.x}:{key.y}"
 
 
-def snapshot(game, known=(), *, paused=False, expedition=None, control="manual"):
+def snapshot(game, known=(), *, paused=False, expedition=None, control="manual", debug=False):
     """Read-only transport projection: no get/stream/generate or simulation calls."""
     asset = game.current_chunk().asset
     w, h = asset.width, asset.height
@@ -41,7 +43,9 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual")
             if identity in known:
                 continue
             a = chunk.asset
+            region = expedition.region(key) if expedition is not None else None
             chunks.append({"id": identity, "x": x, "y": y,
+                "region": region.id if region else None, "tint": region.tint if region else None,
                 "width": a.width, "height": a.height, "biome": a.biome,
                 "seed": derive_seed(chunk.seed, "browser-art-v1") % 2**32,
                 "tiles": ["".join((obj or env).glyph for obj, env in zip(orow, erow))
@@ -73,11 +77,22 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual")
                 "depth": expedition.depth, "best_depth": expedition.best_depth,
                 "dust": expedition.dust,
                 "anchor_space": None if not in_anchor else {"remaining_ms": expedition.anchor_ms,
-                    "waiting": expedition.anchor_wait},
+                    "waiting": expedition.anchor_wait,
+                    "offer": {i: economy.offer_value(i, n) for i, n in expedition.inventory.items()},
+                    "ash_if_burned": economy.rebirth_ash(expedition.inventory, expedition.depth)},
                 "punch_damage": expedition.punch_damage(), "report": expedition.report,
                 "anchor": {"x": expedition.anchor[0], "y": expedition.anchor[1]},
                 "skills": sorted(expedition.skills), "control": control,
                 "prologue": expedition.prologue(),
+                "region": _region_view(expedition),
+                "meta": {"dust": expedition.dust, "ash": expedition.ash, "blessing": expedition.blessing,
+                         "unlocked": [{"id": u, "name": UNLOCKS[u].name} for u in sorted(expedition.unlocked)],
+                         "mastery": dict(expedition.mastery),
+                         "boon": None if expedition.boon is None else BOONS[expedition.boon].name,
+                         "boon_next": None if expedition.boon_next is None else BOONS[expedition.boon_next].name},
+                "shop": expedition.anchor_offers() if in_anchor else None,
+                "stats": dict(expedition.stats),
+                "debug": expedition.debug_info() if debug else None,
                 "bounty": [{"id": i, "name": BY_ID[i].name, "spawned": n, "limit": limit}
                            for i, n, limit in expedition.bounty()]}}
     return {**frame_extra, "world_seed": str(game.world.world_seed), "clock_ms": game.elapsed_ms,
@@ -90,13 +105,20 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual")
         "paused": paused}
 
 
+def _region_view(expedition):
+    region = expedition.region(expedition.game.player.chunk)
+    return None if region is None else {"id": region.id, "name": region.name}
+
+
 def validate_input(data):
-    if type(data) is not dict or set(data) not in (
-            {"move", "attack", "paused", "known"}, {"move", "attack", "paused", "known", "action"}):
+    base = {"move", "attack", "paused", "known"}
+    if type(data) is not dict or not base <= set(data) or not set(data) <= base | {"action", "debug"}:
         raise ValueError("invalid input fields")
+    if "debug" in data and type(data["debug"]) is not bool:
+        raise ValueError("debug must be boolean")
     if "action" in data:
         action = data["action"]
-        if type(action) is not dict or action.get("type") not in ("trade", "begin_life"):
+        if type(action) is not dict or action.get("type") not in Expedition.ANCHOR_ACTIONS:
             raise ValueError("invalid anchor action")
     command = InputCommand(data["move"], data["attack"])
     if type(data["paused"]) is not bool:
@@ -138,6 +160,7 @@ class BrowserSession:
         self.paused = start_paused
         self.input_time = float("-inf")
         self.manual_until = float("-inf")
+        self.debug = False
 
     @property
     def game(self):
@@ -156,15 +179,21 @@ class BrowserSession:
 
     def _frame(self, known=(), now=None):
         control = self._control(time.monotonic() if now is None else now)
-        return snapshot(self.game, known, paused=self.paused, expedition=self.expedition, control=control)
+        return snapshot(self.game, known, paused=self.paused, expedition=self.expedition, control=control,
+                        debug=self.debug and self.expedition is not None)
 
     def input(self, data, now):
         command, paused, known = validate_input(data)
         with self.lock:
+            self.debug = data.get("debug", False)
+            action_error = None
             if "action" in data:
                 if self.expedition is None:
                     raise ValueError("anchor action requires an expedition")
-                self.expedition.anchor_action(data["action"])
+                try:
+                    self.expedition.anchor_action(data["action"])
+                except ValueError as exc:   # a refused purchase must not break the connection
+                    action_error = str(exc)
             if not self._manual_allowed():
                 command = InputCommand()  # locked skill: the auto-pilot steers
             if self.expedition is not None and self.expedition.anchor_ms is not None:
@@ -178,7 +207,10 @@ class BrowserSession:
             if self.expedition is None or now < self.manual_until:
                 # Applying an edge at zero duration preserves even brief attack presses.
                 self.game.advance(0, self.command)
-            return self._frame(known, now)
+            frame = self._frame(known, now)
+            if frame.get("expedition") is not None:
+                frame["expedition"]["action_error"] = action_error
+            return frame
 
     def step(self, now):
         with self.lock:

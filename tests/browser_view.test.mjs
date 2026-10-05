@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {visualHash, residentBounds, cameraView, follow, retainResident, tileAt, Controls, TILE_W, TILE_H} from '../src/dimensional_sim/world/browser/view.js';
 import {groundMarks, paintChunk, TREE, terrainColor, OBJECT_PAD, clearStamps, stampCount, TILE_VARIANTS, TREE_VARIANTS, ROCK_VARIANTS} from '../src/dimensional_sim/world/browser/art.js';
 import {playerSprite, playerSpriteLayers, PLAYER_SLOTS, ENEMY, ROLE, spriteSize, mirrorSprite, paintSprite, punchReach, hiddenBehind, occludingTreeTiles, SPOTS, POSE, crouchSprite, drawSpot, CAMP, ELDER} from '../src/dimensional_sim/world/browser/actors.js';
-import {activityText, newRewards, ATTRIBUTES, rewardTexts, reportIsFresh, reportStorageKey, ExpeditionHud, prologueView} from '../src/dimensional_sim/world/browser/hud.js';
+import {activityText, newRewards, ATTRIBUTES, rewardTexts, reportIsFresh, reportStorageKey, ExpeditionHud, prologueView, shopSections, debugText} from '../src/dimensional_sim/world/browser/hud.js';
 const pose = (facing, animation='idle', animation_ms=0) => ({facing, animation, animation_ms, active:false});
 const chunk = (x=0,y=0) => ({id:'forest:'+x+':'+y,x,y,width:32,height:16,seed:1234,
   tiles:Array(16).fill('.'.repeat(32)),collision:Array(16).fill('0'.repeat(32))});
@@ -282,4 +282,120 @@ test('crouching hands start at the torso, never the head, in every direction',as
       if(dir==='east') assert.ok(hx>x); if(dir==='west') assert.ok(hx<x);
     }
   }
+});
+
+// Pixel-player acceptance checks (docs: one silhouette, every fill pixel enclosed by
+// OUTLINE except the ground row, no 1px fill slivers, constant frame and feet row).
+const actorsModule=await import('../src/dimensional_sim/world/browser/actors.js');
+const {pixelPlayerArt,pixelPlayerPose,paintPixelPlayer,pixelPlayerFrame,PIXEL,OUTLINE,AMBUSH,drawAmbushSite,drawPlayer}=actorsModule;
+function artGrid(art){
+  const g=Array.from({length:art.height},()=>Array(art.width).fill(null));
+  for(const [color,x,y,w,h] of art.rects){
+    assert.ok(x>=0&&y>=0&&x+w<=art.width&&y+h<=art.height,`rect ${[x,y,w,h]} inside the frame`);
+    for(let j=y;j<y+h;j++)for(let i=x;i<x+w;i++)g[j][i]=color;
+  }
+  return g;
+}
+const N4=[[1,0],[-1,0],[0,1],[0,-1]];
+function components(g,pred){
+  const at=(x,y)=>(y>=0&&y<g.length&&x>=0&&x<g[0].length)?g[y][x]:null;
+  const seen=new Set(),out=[],W=g[0].length;
+  for(let y=0;y<g.length;y++)for(let x=0;x<W;x++)if(pred(at(x,y))&&!seen.has(y*W+x)){
+    const q=[[x,y]],cells=[];seen.add(y*W+x);
+    while(q.length){const [a,b]=q.pop();cells.push([a,b]);
+      for(const [dx,dy] of N4){const k=(b+dy)*W+a+dx;if(pred(at(a+dx,b+dy))&&!seen.has(k)){seen.add(k);q.push([a+dx,b+dy]);}}}
+    out.push(cells);
+  }
+  return out;
+}
+const PIXEL_FRAMES=[];
+for(const facing of ['south','north','east','west']){
+  for(const [animation,ms] of [['idle',0],['idle',900],['walk',0],['walk',130],['walk',260],['walk',390],['run',90],['run',270]])
+    PIXEL_FRAMES.push({player:pose(facing,animation,ms),compact:false});
+  PIXEL_FRAMES.push({player:pose(facing),compact:true});
+}
+for(const {player,compact} of PIXEL_FRAMES) test(`pixel player ${player.facing} ${compact?'crouch':player.animation+' '+player.animation_ms} has no detached pixels`,()=>{
+  const art=pixelPlayerArt(player,{compact}),g=artGrid(art);
+  assert.equal(art.width,16); assert.equal(art.height,compact?13:20);
+  const frame=pixelPlayerFrame(compact);
+  assert.deepEqual(frame,{width:48,height:compact?40:60});
+  assert.ok(art.height*PIXEL<=frame.height && art.width*PIXEL===frame.width);
+  assert.equal(components(g,c=>c!==null).length,1,'silhouette is one 4-connected piece');
+  const at=(x,y)=>(y>=0&&y<g.length&&x>=0&&x<16)?g[y][x]:null;
+  const naked=[];
+  for(let y=0;y<art.height-1;y++)for(let x=0;x<16;x++)
+    if(g[y][x]&&g[y][x]!==OUTLINE&&N4.some(([dx,dy])=>!at(x+dx,y+dy)))naked.push([x,y]);
+  assert.deepEqual(naked,[],'every fill pixel is enclosed by OUTLINE (ground row exempt)');
+  for(const cells of components(g,c=>c&&c!==OUTLINE)){
+    const xs=cells.map(c=>c[0]),ys=cells.map(c=>c[1]);
+    assert.ok(cells.length>=2&&Math.max(...xs)>Math.min(...xs)&&Math.max(...ys)>Math.min(...ys),`no 1px fill sliver at ${cells[0]}`);
+  }
+  assert.ok(g.at(-1).some(Boolean),'feet always on the bottom row');
+  assert.ok(!art.rects.some(([c])=>c==='#241c1b'),'the pixel player uses the shared OUTLINE colour');
+});
+test('pixel player paints whole world pixels with feet on the frame bottom and a stable pose key',()=>{
+  for(const compact of [false,true]) for(const facing of ['south','east','west','north']){
+    const rects=[];let fill=null;
+    const ctx={set fillStyle(v){fill=v;},fillRect:(x,y,w,h)=>rects.push([fill,x,y,w,h])};
+    paintPixelPlayer(ctx,pose(facing,'walk',130),10,20,{compact});
+    for(const [,x,y,w,h] of rects) assert.ok([x,y,w,h].every(Number.isInteger)&&(x-10)%PIXEL===0&&w%PIXEL===0);
+    assert.equal(Math.max(...rects.map(([,,y,,h])=>y+h)),20+pixelPlayerFrame(compact).height,'feet row');
+  }
+  assert.deepEqual(pixelPlayerPose(pose('east','walk',0)),pixelPlayerPose(pose('east','walk',260)));
+  assert.notDeepEqual(pixelPlayerPose(pose('east','walk',130)),pixelPlayerPose(pose('east','walk',390)));
+});
+function recordingCtx(){
+  const calls=[];
+  const ctx=new Proxy({},{get:(_,k)=>k==='calls'?calls:(...a)=>{calls.push([k,...a]);
+    return k==='createLinearGradient'||k==='createRadialGradient'?{addColorStop(){}}:undefined;},set:()=>true});
+  return ctx;
+}
+test('crouch is a real frame: no squash scaling, same API, hands on the 3px grid',()=>{
+  for(const facing of ['south','north','east','west']) for(const [ax,ay] of [[2,3],[2,1],[3,2],[1,2]]){
+    const ctx=recordingCtx(),x=60,y=70;
+    const box=drawPlayer(ctx,pose(facing),x,y,null,{activity:{kind:'forage',x:ax,y:ay,progress:500},clock:300});
+    assert.deepEqual(box,{left:x-24,top:y+12-40,width:48,height:40});
+    assert.ok(!ctx.calls.some(([k,sx,sy])=>k==='scale'&&sx!==sy),'no non-uniform squash');
+    const fills=ctx.calls.filter(([k])=>k==='fillRect').map(c=>c.slice(1));
+    assert.ok(fills.every(r=>r.every(Number.isInteger)),'whole pixels only');
+  }
+  const rects=[];let fill=null;
+  const rec=new Proxy({},{get:(_,k)=>k==='fillRect'?(...a)=>rects.push([fill,...a]):()=>({addColorStop(){}}),set:(_,k,v)=>{if(k==='fillStyle')fill=v;return true;}});
+  drawPlayer(rec,pose('south'),61,70,null,{activity:{kind:'forage',x:2,y:3,progress:0},clock:500});
+  const sleeves=rects.filter(([c,,,w])=>c===ROLE.c.fill&&w===PIXEL);
+  assert.ok(sleeves.length>0,'working arms drawn');
+  for(const [,x,y] of sleeves) assert.ok(x%PIXEL===0&&y%PIXEL===0,`sleeve cell ${x},${y} on the art grid`);
+});
+test('ambush wagons are outlined cell sprites with no free-drawn geometry',()=>{
+  for(const [id,s] of Object.entries(AMBUSH)){
+    assert.equal(s.paint.length,s.glyph.length,id);
+    s.paint.forEach((row,r)=>{assert.equal(row.length,s.paint[0].length,id);assert.equal(s.glyph[r].length,row.length,id);});
+    assert.ok(s.paint[0].length<=24&&s.paint.length<=8,`${id} within 24x8 cells`);
+  }
+  for(const id of ['crate','crateDark']) assert.deepEqual([AMBUSH[id].paint[0].length,AMBUSH[id].paint.length],[4,2]);
+  const ctx=recordingCtx();drawAmbushSite(ctx,100.4,200.6);
+  const kinds=new Set(ctx.calls.map(c=>c[0]));
+  for(const banned of ['arc','ellipse','lineTo','stroke','strokeRect','rotate','createLinearGradient','createRadialGradient'])
+    assert.ok(!kinds.has(banned),banned);
+  const fills=ctx.calls.filter(([k])=>k==='fillRect');
+  assert.ok(fills.length>100&&fills.every(c=>c.slice(1).every(Number.isInteger)));
+  const xs=fills.map(c=>c[1]-100),ys=fills.map(c=>c[2]-201);
+  assert.ok(Math.min(...xs)>=-160&&Math.max(...xs)<=180&&Math.min(...ys)>=-60&&Math.max(...ys)<=50,'footprint unchanged');
+});
+
+test('anchor shop groups server rows and the debug overlay explains buckets',()=>{
+  const shop=[{kind:'unlock',id:'climbing',owned:false,available:true},{kind:'unlock',id:'snares',owned:true,available:false},
+    {kind:'boon',id:'iron_skin',owned:false,available:false},{kind:'mastery',id:'bramble_berries',owned:false,available:false}];
+  const sections=shopSections(shop);
+  assert.deepEqual(sections.map(s=>s.kind),['unlock','boon','mastery']);
+  assert.deepEqual(sections[0].rows.map(r=>r.id),['climbing'],'owned unlocks are hidden');
+  assert.deepEqual(shopSections(null),[]);
+  const text=debugText({world_seed:'7',life:2,chunk:'forest:0:0',region:'old_road',currencies:{dust:1,ash:2,blessing:3},
+    boon:null,unlocked:[],spot_bucket:[{id:'bramble_berries',weight:13,share_permille:224}],self_bucket:[],need:null,
+    windows:[{id:'bramble_boar',active:1,limit:1,spawned:2}],drought:{food:1},pity_after:{food:5},stats:{chunks:9},
+    why_not:[{id:'gnarled_tree',reasons:["locked: needs unlock 'Climbing' (15 dust)"]}],
+    screening:[{chunk:'forest:1:0',action:'bramble_boar',result:'rejected: window full (1/1 at once)'}]});
+  for(const needle of ['seed 7','bramble_berries 13 (22.4%)','bramble_boar 1/1','food 1/5','gnarled_tree: locked','window full'])
+    assert.ok(text.includes(needle),needle);
+  assert.match(activityText({expedition:{control:'auto',activity:{kind:'craft',name:'Carve a walking staff',progress:500}}}),/^Carve a walking staff - 50%/);
 });

@@ -1,3 +1,6 @@
+> 2026-10-05: the closed-loop iteration (action registry, regions, pity, crafting, dust/ash/blessing
+> sinks, frontier) is documented in docs/design/. Sections below describe earlier states.
+
 # World auto-pilot and biome encounters
 
 ## Direction (2026-10-04)

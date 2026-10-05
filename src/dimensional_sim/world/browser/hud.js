@@ -5,9 +5,10 @@ export const ATTRIBUTES = Object.freeze([
   ['intelligence', 'Intelligence', 'INT'], ['perception', 'Perception', 'PER'], ['willpower', 'Willpower', 'WIL']]);
 export const LABEL = Object.freeze(Object.fromEntries(ATTRIBUTES.map(([id, name]) => [id, name])));
 const VERB = Object.freeze({forage: 'Foraging', gather: 'Gathering', observe: 'Studying', climb: 'Climbing',
-  drink: 'Drinking at', meditate: 'Meditating by', study: 'Deciphering'});
+  drink: 'Drinking at', meditate: 'Meditating by', study: 'Deciphering', scavenge: 'Searching'});
 export const ITEM_COLOR = Object.freeze({wild_berries: '#e0505e', bird_egg: '#efe6cf', boar_meat: '#d9776a',
-  stick: '#c39a62', bramble_thorn: '#a9c97a', boar_hide: '#a6845d'});
+  stick: '#c39a62', bramble_thorn: '#a9c97a', boar_hide: '#a6845d', pale_mushroom: '#e8dcc0',
+  snared_hare: '#c7a27a', walking_staff: '#d6b27a', hide_wrap: '#b58c62'});
 
 /** One-line description of what the auto-pilot is doing. */
 export function activityText(state, paused = false) {
@@ -28,6 +29,7 @@ export function activityText(state, paused = false) {
     if (ex.activity.kind === 'pray') return `Praying to the gods - ${pct}%`;
     if (ex.activity.kind === 'think') return `Thinking about the road - ${pct}%`;
     if (ex.activity.kind === 'contemplate') return `Contemplating the forest - ${pct}%`;
+    if (ex.activity.kind === 'craft') return `${ex.activity.name} - ${pct}%`;
     return `${VERB[ex.activity.kind] || 'Investigating'} ${ex.activity.name.toLowerCase()} - ${pct}%`;
   }
   if (ex.mode === 'home') return 'Badly hurt - heading back to the anchor camp';
@@ -104,7 +106,7 @@ export class ExpeditionHud {
   }
   updateVitals(ex) {
     const v = ex.vitals, cd = v.food_cooldown_ms;
-    const signature = [v.health, v.hunger, Math.ceil(cd / 250), ex.life, ex.depth, ex.best_depth, v.blessing].join();
+    const signature = [v.health, v.hunger, Math.ceil(cd / 250), ex.life, ex.depth, ex.best_depth, v.blessing, v.dust, v.ash].join();
     if (signature === this.vitalsSignature) return;
     this.vitalsSignature = signature;
     for (const [name, value] of [['health', v.health], ['hunger', v.hunger]]) {
@@ -121,6 +123,8 @@ export class ExpeditionHud {
     this.$('depth').textContent = `Ring ${ex.depth} - best ${ex.best_depth}`;
     const blessing = this.$('blessing');
     if (blessing) blessing.textContent = `✦ ${v.blessing ?? 0} blessing`;
+    const wealth = this.$('wealth');
+    if (wealth) wealth.textContent = `◇ ${v.dust ?? 0} dust · ${v.ash ?? 0} ash`;
   }
   /** Opening scene: dark screen with memories, then the old man's words. The rest
    * of the HUD stays hidden until the prologue ends, then fades in. */
@@ -205,7 +209,9 @@ export class ExpeditionHud {
       head.textContent = entry.type === 'encounter'
         ? `+${entry.xp} ${LABEL[entry.attribute]}` + (entry.dim_xp ? ` (◆+${entry.dim_xp})` : '')
           + (entry.blessing ? ` ✦+${entry.blessing}` : '')
-        : {eat: 'Ate', rest: 'Rested', life: 'Anchor', blessing: 'Prayer', lore: 'The road', trade: 'Offered', ambush: 'Ambush'}[entry.type];
+        : {eat: 'Ate', rest: 'Rested', life: 'Anchor', blessing: 'Prayer', lore: 'The road', trade: 'Offered',
+          ambush: 'Ambush', craft: entry.xp ? `Crafted +${entry.xp} ${LABEL[entry.attribute] || ''}` : 'Crafted',
+          reflect: 'Thought', purchase: 'Anchor', rebirth: 'Rebirth'}[entry.type] || entry.type;
       const text = this.doc.createElement('span'); text.textContent = entry.text;
       li.append(head, text);
       return li;
@@ -225,4 +231,30 @@ export class ExpeditionHud {
     this.$('report').scrollTop = 0;
   }
   hideReport() { this.$('report').hidden = true; }
+}
+
+/** Anchor shop rows grouped for display: [{title, rows}] (rows come from the server). */
+export function shopSections(shop) {
+  const groups = [['unlock', 'New possibilities (dust / blessing)'], ['boon', 'Next-life boon (blessing)'],
+    ['mastery', 'Mastery (ash)']];
+  return groups.map(([kind, title]) => ({kind, title, rows: (shop || []).filter(r => r.kind === kind && !r.owned)}))
+    .filter(section => section.rows.length);
+}
+
+/** Compact multi-line text for the debug overlay (backquote key or ?debug). */
+export function debugText(info) {
+  if (!info) return 'debug: waiting for data...';
+  const pct = r => `${r.id} ${r.weight} (${(r.share_permille / 10).toFixed(1)}%)`;
+  return [
+    `seed ${info.world_seed}  life ${info.life}  chunk ${info.chunk}  region ${info.region}`,
+    `currencies dust ${info.currencies.dust} ash ${info.currencies.ash} blessing ${info.currencies.blessing}  boon ${info.boon || '-'}`,
+    `unlocked: ${info.unlocked.join(', ') || 'none'}`,
+    `spot bucket: ${info.spot_bucket.map(pct).join(' | ')}`,
+    `self bucket: ${info.self_bucket.map(pct).join(' | ')}  need: ${info.need || '-'}`,
+    `windows: ${info.windows.map(w => `${w.id} ${w.active}/${w.limit} (${w.spawned})`).join(' | ')}`,
+    `drought: ${Object.entries(info.drought).map(([k, v]) => `${k} ${v}/${info.pity_after[k]}`).join(' ')}`,
+    `stats: ${Object.entries(info.stats).map(([k, v]) => `${k} ${v}`).join(' ')}`,
+    'not eligible:', ...info.why_not.slice(0, 10).map(r => `  ${r.id}: ${r.reasons.join('; ')}`),
+    'recent screening:', ...info.screening.slice(-8).map(n => `  ${n.chunk} ${n.action || '-'}: ${n.result}`),
+  ].join('\n');
 }

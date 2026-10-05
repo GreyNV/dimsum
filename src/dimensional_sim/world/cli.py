@@ -73,6 +73,17 @@ def main(argv=None):
     gen.add_argument("--size", type=size, default=(32,16))
     gen.add_argument("--variants", type=int, default=1)
     gen.add_argument("--output", default=".codex/artifacts/world-assets")
+    sim = subs.add_parser("simulate", help="run seeded headless expeditions and print metrics JSON")
+    sim.add_argument("--seeds", default="1-10")
+    sim.add_argument("--minutes", type=int, default=30)
+    sim.add_argument("--policy", choices=("spend", "hoard", "idle"), default="spend")
+    sim.add_argument("--lives", action="store_true", help="include every life, not only the summary")
+    ins = subs.add_parser("inspect", help="explain one chunk: region, spots, action bucket, exclusions")
+    ins.add_argument("--seed", type=int, default=482910)
+    ins.add_argument("--x", type=int, default=0)
+    ins.add_argument("--y", type=int, default=0)
+    ins.add_argument("--life", type=int, default=1)
+    ins.add_argument("--unlock", action="append", default=[], help="unlock id (repeatable)")
     for name in ("chunk", "demo", "play", "browser"):
         sub = subs.add_parser(name)
         sub.add_argument("--seed", type=int, default=482910)
@@ -110,6 +121,18 @@ def main(argv=None):
             print(canonical_json({"counts": dict(Counter(j["status"] for j in report["jobs"])),
                                   "manifest": str(pipeline.manifest_path(request)), **report}))
             return 1 if any(j["status"] != "accepted" for j in report["jobs"]) else 0
+        if args.mode in ("simulate", "inspect"):
+            import json
+            from . import simulate
+            if args.mode == "inspect":
+                print(json.dumps(simulate.inspect_chunk(args.seed, args.x, args.y, args.life, args.unlock), indent=1))
+                return 0
+            results = [simulate.run(seed, args.minutes, args.policy) for seed in simulate.parse_seeds(args.seeds)]
+            out = {"summary": simulate.summarize(results)}
+            if args.lives:
+                out["runs"] = results
+            print(json.dumps(out, indent=1))
+            return 0
         if args.mode == "chunk":
             print(canonical_json(chunk_to_dict(_new_world(args).get(
                 ChunkKey(args.dimension, args.x, args.y)))))

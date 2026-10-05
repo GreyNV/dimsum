@@ -24,6 +24,12 @@ world/browser_server.py, world/browser/: browser client; actors.js = battle/acto
 world/encounters.py, autopilot.py: biome encounter pools/spots and the auto-pilot
 expedition (docs/technical/world-autopilot.md). Manual control = locked skill.
 world/progression.py: regular/dimensional levels and speed from core.GameConfig.
+world/catalog.py: ALL forest content as validated data (items, actions, unlocks, boons, regions).
+world/actions.py: action bucket (known -> eligible -> weighted) and explain(); regions.py: chunk regions.
+world/economy.py: dust/ash/blessing rules and anchor purchases; tuning.py: balance numbers.
+world/simulate.py: `cli simulate` (seeded metrics) and `cli inspect` (why a spot did/didn't appear).
+Design docs for the closed loop: docs/design/*.md (start with DEFINITION_OF_DONE.md, SYSTEMS_MAP.md).
+Debug overlay in the browser: ?debug or the backquote key.
 world/session.py: transport-free session (local server and hosted build share it).
 world/web.py + web/ + vercel.json: hosted Pyodide build (docs/technical/hosting.md).
 equipment-review/: unfinished unrelated React popup; preserve.
@@ -36,5 +42,7 @@ Add biomes as validated catalog assets, preserving reachable midpoint exits/spaw
 test negative transitions and snapshot replay. Add animations via validated frame
 durations/active-window/hitbox metadata; test bulk/split timing, never infer damage
 from pixels. Register only through validation; freeze catalog for existing worlds.
+Content rules live in catalog/actions, never in generators or the auto-pilot by id.
+Bump encounters.ENCOUNTER_VERSION + add a save upgrade when existing worlds' spot rolls change.
 Run focused tests before/after a subsystem, then full unittest. Preserve existing
 idle save/return/progression rules. No credentials or new runtime dependencies needed.
