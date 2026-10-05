@@ -166,11 +166,11 @@ export function punchReach(player, phase) {
 /** Shoulder of the punching arm, relative to the feet anchor. */
 const SHOULDER = {south: [9, -33], north: [-9, -33], east: [5, -33], west: [-5, -33]};
 
-/** Snap to the 3px pixel-player art grid so arms step in whole art pixels. */
+/** Snap to the pixel-player art grid so arms step in whole art pixels. */
 const snap = v => Math.round(v / PIXEL) * PIXEL;
 function drawFist(ctx, sx, sy, fx, fy) {
   sx = snap(sx); sy = snap(sy); fx = snap(fx); fy = snap(fy);
-  // One 3x3 sleeve cell per grid step: a staircase of whole cells, never a 1px diagonal.
+  // One sleeve cell per grid step: a staircase of whole cells, never a 1px diagonal.
   const steps = Math.max(1, Math.abs(fx - sx) / PIXEL, Math.abs(fy - sy) / PIXEL);
   const cells = [];
   for (let i = 0; i <= steps; i++) cells.push([snap(sx + (fx - sx) * i / steps), snap(sy + (fy - sy) * i / steps)]);
@@ -202,8 +202,8 @@ export function pixelPlayerPose(player, reducedMotion = false) {
   return {facing, moving, stride, breathe};
 }
 
-/** Pixel-player art unit: one logical art pixel is 3x3 world px. */
-export const PIXEL = 3;
+/** Pixel-player art unit: one logical art pixel is 2x2 world px. */
+export const PIXEL = 2;
 const PIXEL_COLORS = Object.freeze({edge: OUTLINE, hair:'#3c2a27', hairLight:'#60423a', skin:'#f0bc89',
   skinLight:'#ffd0a0', scarf:'#944a3d', scarfLight:'#bd6c4e', tunic:'#484936',
   tunicLight:'#69654a', belt:'#ae8355', pants:'#25332e', pantsLight:'#3a4a3c',
@@ -275,7 +275,7 @@ export function pixelPlayerArt(player, {compact = false, reducedMotion = false} 
 }
 
 /** Frame size in world px; the art sits on the bottom edge so feet share one row. */
-export const pixelPlayerFrame = compact => ({width: 48, height: compact ? 40 : 60});
+export const pixelPlayerFrame = compact => ({width: 16 * PIXEL, height: (compact ? 13 : 20) * PIXEL});
 
 /** A clean pixel character drawn from the uploaded four-direction reference, at
  * whole world pixels with (left, top) the frame's top-left. */
@@ -321,8 +321,8 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
   if (compact) sprite = crouchSprite(sprite);
   const usingLegacyEquipment = Object.keys(equipment).length > 0;
   const {width, height} = usingLegacyEquipment ? spriteSize(sprite) : pixelPlayerFrame(compact);
-  // Whole-body bob is legacy-sprite only: 1 world px is 1/3 of a pixel-player art pixel
-  // and its 120/600 ms clocks are unrelated to the 130 ms walk frames.
+  // Whole-body bob is legacy-sprite only: its clocks are unrelated to the pixel-player walk frames
+  // and can move the body between art pixels.
   let bob = !usingLegacyEquipment ? 0 : player.animation === 'idle' ? Math.floor(player.animation_ms / 600) % 2
     : player.animation === 'walk' ? Math.floor(player.animation_ms / 120) % 2 : 0;
   if (pose === 'crouch') bob = usingLegacyEquipment ? Math.floor(clock / 300) % 2 : 0;   // working hands (legacy only)
@@ -333,7 +333,7 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
   const lunge = reach !== null && phase === 'strike' ? 2 : 0;
   const lx = Math.round(Math.cos(angle) * lunge), ly = Math.round(Math.sin(angle) * lunge);
   const left = x - width / 2 + lx, top = y + ACTOR_FOOT - height + bob + ly;
-  drawShadow(ctx, x, y, 14);
+  drawShadow(ctx, x, y, usingLegacyEquipment ? 14 : 10);
   if (pose === 'sit') {
     const pulse = .25 + .2 * Math.sin(clock / 400);
     ctx.save(); ctx.globalAlpha = pulse; ctx.strokeStyle = '#cfe6ff'; ctx.lineWidth = 2;
@@ -341,17 +341,19 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
   }
   let fist = null;
   if (reach !== null) {
-    const [sx, sy] = SHOULDER[player.facing] || SHOULDER.south;
+    const [oldX, oldY] = SHOULDER[player.facing] || SHOULDER.south;
+    const scale = usingLegacyEquipment ? 1 : PIXEL / 3;
+    const sx = Math.round(oldX * scale), sy = Math.round(oldY * scale);
     const ox = x + sx + lx, oy = y + ACTOR_FOOT + sy + ly;
-    fist = [ox, oy, ox + Math.cos(angle) * reach, oy + Math.sin(angle) * reach * .8];
+    fist = [ox, oy, ox + Math.cos(angle) * reach * scale, oy + Math.sin(angle) * reach * .8 * scale];
   }
   // Seen from behind, a pulled-back fist hides behind the body; a strike is in front.
   if (fist && player.facing === 'north' && phase !== 'strike') drawFist(ctx, ...fist);
   if (activity?.kind === 'pray') {  // a thin column of light over the kneeling avatar
     ctx.save(); ctx.globalAlpha = .32 + .16 * Math.sin(clock / 350);
-    const ray = ctx.createLinearGradient(x, top - 60, x, top + height);
+    const ray = ctx.createLinearGradient(x, top - 40, x, top + height);
     ray.addColorStop(0, '#fff3c400'); ray.addColorStop(.5, '#fff3c4'); ray.addColorStop(1, '#fff3c400');
-    ctx.fillStyle = ray; ctx.fillRect(x - 9, top - 60, 18, height + 60); ctx.restore();
+    ctx.fillStyle = ray; ctx.fillRect(x - 6, top - 40, 12, height + 40); ctx.restore();
   }
   const hands = pose === 'crouch' ? workingHands(activity, player.facing, x, y, clock, reducedMotion) : null;
   if (hands?.behind) for (const arm of hands.arms) drawFist(ctx, ...arm);   // seen from behind
@@ -388,13 +390,13 @@ export function workingHands(activity, facing, x, y, clock = 0, reducedMotion = 
     if (dx || dy) dir = Math.abs(dy) >= Math.abs(dx) ? (dy > 0 ? 'south' : 'north') : (dx > 0 ? 'east' : 'west');
   }
   const beat = reducedMotion ? 0 : Math.round(Math.sin(clock / 145) * 2);
-  const shoulderY = y - 3;   // crouch frame: head y-27..y-4, scarf/shoulders y-3..y+2, knees y+6
+  const shoulderY = y + 1;   // compact frame: shoulders near the torso, below the head
   if (dir === 'south') return {behind: false, arms: [
-    [x - 9, shoulderY, x - 6, y + 6 + beat], [x + 9, shoulderY, x + 6, y + 6 - beat]]};
+    [x - 6, shoulderY, x - 4, y + 7 + beat], [x + 6, shoulderY, x + 4, y + 7 - beat]]};
   if (dir === 'north') return {behind: true, arms: [
-    [x - 9, shoulderY, x - 11, y - 20 + beat], [x + 9, shoulderY, x + 11, y - 20 - beat]]};
+    [x - 6, shoulderY, x - 7, y - 10 + beat], [x + 6, shoulderY, x + 7, y - 10 - beat]]};
   const side = dir === 'east' ? 1 : -1;
-  return {behind: false, arms: [[x + side * 7, shoulderY, x + side * (19 + beat), y + 4]]};
+  return {behind: false, arms: [[x + side * 5, shoulderY, x + side * (13 + beat), y + 5]]};
 }
 
 function drawActionInteraction(ctx, activity, x, y, clock, reducedMotion, {armDrawn = false} = {}) {
@@ -410,9 +412,9 @@ function drawActionInteraction(ctx, activity, x, y, clock, reducedMotion, {armDr
   const beat = reducedMotion ? 0 : Math.sin(clock / (activity.kind === 'climb' ? 170 : 145));
   const touch = ['forage','gather','climb','drink','study'].includes(activity.kind);
   if (touch && !armDrawn) {   // climbing: the standing sprite reaches up from the chest
-    const sx = x + ux * 8, sy = y - 24 + uy * 3;
-    const reach = 11 + beat * 4;
-    drawFist(ctx, sx, sy, sx + ux * reach, sy + uy * reach - (activity.kind === 'climb' ? 8 + beat * 6 : 0));
+    const sx = x + ux * 5, sy = y - 11 + uy * 2;
+    const reach = 8 + beat * 3;
+    drawFist(ctx, sx, sy, sx + ux * reach, sy + uy * reach - (activity.kind === 'climb' ? 5 + beat * 4 : 0));
   }
   ctx.save();
   ctx.strokeStyle = color; ctx.fillStyle = color;
@@ -501,7 +503,7 @@ export function drawPunchLines(ctx, x, y, facing, age, duration = 200) {
   if (age < 0 || age >= duration) return;
   const a = FACING_ANGLE[facing] ?? Math.PI / 2, t = age / duration;
   const cx = Math.cos(a), cy = Math.sin(a), px = -cy, py = cx;
-  const ox = x + cx * 10, oy = y + ACTOR_FOOT - 30 + cy * 8;
+  const ox = x + cx * 7, oy = y + ACTOR_FOOT - 20 + cy * 5;
   ctx.save(); ctx.globalAlpha = 1 - t; ctx.lineCap = 'round';
   for (const k of [-5, 0, 5]) {
     const sx = ox + px * k, sy = oy + py * k * .8, len = 9 - Math.abs(k) * .6;

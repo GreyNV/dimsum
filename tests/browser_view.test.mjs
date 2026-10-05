@@ -318,7 +318,7 @@ for(const {player,compact} of PIXEL_FRAMES) test(`pixel player ${player.facing} 
   const art=pixelPlayerArt(player,{compact}),g=artGrid(art);
   assert.equal(art.width,16); assert.equal(art.height,compact?13:20);
   const frame=pixelPlayerFrame(compact);
-  assert.deepEqual(frame,{width:48,height:compact?40:60});
+  assert.deepEqual(frame,{width:32,height:compact?26:40});
   assert.ok(art.height*PIXEL<=frame.height && art.width*PIXEL===frame.width);
   assert.equal(components(g,c=>c!==null).length,1,'silhouette is one 4-connected piece');
   const at=(x,y)=>(y>=0&&y<g.length&&x>=0&&x<16)?g[y][x]:null;
@@ -350,11 +350,11 @@ function recordingCtx(){
     return k==='createLinearGradient'||k==='createRadialGradient'?{addColorStop(){}}:undefined;},set:()=>true});
   return ctx;
 }
-test('crouch is a real frame: no squash scaling, same API, hands on the 3px grid',()=>{
+test('crouch is a real frame: no squash scaling, same API, hands on the 2px grid',()=>{
   for(const facing of ['south','north','east','west']) for(const [ax,ay] of [[2,3],[2,1],[3,2],[1,2]]){
     const ctx=recordingCtx(),x=60,y=70;
     const box=drawPlayer(ctx,pose(facing),x,y,null,{activity:{kind:'forage',x:ax,y:ay,progress:500},clock:300});
-    assert.deepEqual(box,{left:x-24,top:y+12-40,width:48,height:40});
+    assert.deepEqual(box,{left:x-16,top:y+12-26,width:32,height:26});
     assert.ok(!ctx.calls.some(([k,sx,sy])=>k==='scale'&&sx!==sy),'no non-uniform squash');
     const fills=ctx.calls.filter(([k])=>k==='fillRect').map(c=>c.slice(1));
     assert.ok(fills.every(r=>r.every(Number.isInteger)),'whole pixels only');
