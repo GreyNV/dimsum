@@ -90,7 +90,10 @@ REST_MS = 10_000
 INVENTORY_SLOTS = 12
 STACK_LIMIT = 20
 BOAR_ENCOUNTER = "bramble_boar"    # rare spot monsters use this spawn window
-MONSTER_STEP_MS = 1_000
+MONSTER_STEP_MS = 300             # boars take one step this often while they chase
+BOAR_AGGRO_RADIUS = 9             # a live boar this close (in steps) charges the avatar
+CAMP_SAFE_RADIUS = 5              # boars stop at the edge of the anchor camp
+LEGACY_MONSTER_MAX_MS = 999       # saves before 2026-10-05 used a 1000 ms monster clock
 PRAYER_MS = BY_ID["pray"].duration_ms
 REFLECTION_MS = {"think": BY_ID["think"].duration_ms, "contemplate": BY_ID["contemplate"].duration_ms}
 AFTER_LOCATION_REST_WEIGHT = 26   # weight of "just pause" inside the after-location bucket
@@ -166,6 +169,7 @@ class Expedition:
         self.report = {"seq": 0, "life": 0, "clock_ms": 0, "title": "", "lines": []}
         self._spot_cache = {}
         self._field_cache = {}
+        self.strikes = {}          # presentation only, not saved: boar attacks landed per target id
         self._new_life_state()
         self.anchor = self._anchor()
         self.elder = self._elder_cell()
@@ -977,12 +981,22 @@ class Expedition:
         goal = self.goal
         target = self.game.targets.get(goal["id"]) if goal and goal["kind"] == "target" else None
         if target is not None and target.hp > 0:
-            self.health = max(0, self.health - self.boar_hit(target.chunk))
-            if self.health == 0:
-                self.cause = "boar"
+            self._boar_bites(target)
+
+    def _near_camp(self, gx, gy):
+        """Boars never chase into the anchor camp: it is where a hurt avatar recovers."""
+        return self.anchor is not None and abs(gx - self.anchor[0]) + abs(gy - self.anchor[1]) <= CAMP_SAFE_RADIUS
+
+    def _boar_bites(self, target):
+        """One boar attack on the avatar (its counter feeds the client's lunge animation)."""
+        self.health = max(0, self.health - self.boar_hit(target.chunk))
+        self.strikes[target.id] = self.strikes.get(target.id, 0) + 1
+        if self.health == 0:
+            self.cause = "boar"
 
     def _pursue(self):
-        """Move rare encounter boars once per second; contact interrupts work."""
+        """Live boars within BOAR_AGGRO_RADIUS charge the avatar one step per MONSTER_STEP_MS.
+        Reaching it, a boar bites first and interrupts whatever the avatar was doing."""
         if self.monster_ms < MONSTER_STEP_MS:
             return
         self.monster_ms -= MONSTER_STEP_MS
@@ -992,13 +1006,13 @@ class Expedition:
         grid = self._grid()
         field = self._field({(px, py)})
         for target in sorted(self.game.targets.values(), key=lambda t: t.id):
-            if not target.id.startswith("enc:") or target.hp == 0 or target.id not in self.admitted:
+            if target.hp == 0 or target.id not in self.admitted or target.chunk.dimension != self.dimension:
                 continue
             tx, ty = self._global(target.chunk, target.x, target.y)
             distance = abs(tx - px) + abs(ty - py)
-            if distance > 6:
+            if distance > BOAR_AGGRO_RADIUS or self._near_camp(px, py) or self._near_camp(tx, ty):
                 continue
-            if distance > 1 and (self.goal or {}).get("id") != target.id:
+            if distance > 1:
                 choices = []
                 blocked = self._blocked()
                 for direction in DIRECTIONS:
@@ -1014,10 +1028,16 @@ class Expedition:
                     target.chunk, target.x, target.y = key, tx % w, ty % h
                     self._field_cache.clear()
                     distance = abs(tx - px) + abs(ty - py)
-            if distance == 1 and (self.goal or {}).get("id") != target.id:
+            # A second boar waits its turn; a badly hurt avatar running home is chased, not stopped.
+            if distance == 1 and (self.goal or {}).get("kind") not in ("target", "home"):
                 self.task = None
-                self.goal = {"kind": "target", "id": target.id, "x": tx, "y": ty}
-                self._entry("ambush", "A bramble boar rushes in and interrupts your work!")
+                self._boar_bites(target)
+                if self.health > self.fight_damage(self.ring(target.chunk)):
+                    self.goal = {"kind": "target", "id": target.id, "x": tx, "y": ty}
+                    self._entry("ambush", "A bramble boar charges and gores you - fists up!")
+                else:   # this fight would kill: outrun it to the camp (boars are slower)
+                    self.goal = {"kind": "home", "id": None, "x": self.anchor[0], "y": self.anchor[1]}
+                    self._entry("ambush", "A bramble boar gores you - too hurt to fight, you run for the camp!")
                 break
 
     def _start_self(self, action):
@@ -1326,7 +1346,8 @@ class Expedition:
                 raise ValueError("invalid pity spots")
             result.forced = {k: list(v) for k, v in forced.items()}
             result.journal = validate_journal(data["journal"])
-            result.monster_ms = integer(data["monster_ms"], "monster clock", 0, MONSTER_STEP_MS - 1)
+            result.monster_ms = min(integer(data["monster_ms"], "monster clock", 0, LEGACY_MONSTER_MAX_MS),
+                                    MONSTER_STEP_MS - 1)
             result.prayers_this_life = integer(data["prayers_this_life"], "prayers this life", 0, 1)
             result.anchor_ms = data["anchor_ms"]
             if result.anchor_ms is not None:

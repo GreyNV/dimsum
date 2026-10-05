@@ -18,6 +18,10 @@ let mapDirty = true, polling = false, stopped = false;
 /* Cosmetic combat feedback derived from consecutive snapshots. Client clocks only
  * fade these marks; damage, timing and hits always come from the server. */
 const hpSeen = new Map(), hits = new Map(), deaths = new Map();
+/* Boars chase on the server; the client glides them between cells and plays a lunge
+ * whenever a target's `strikes` counter rises (each one is a bite the avatar took). */
+const enemyPos = new Map(), strikesSeen = new Map(), lunges = new Map();
+const LUNGE_MS = 320;
 let swing = {serial: 0, active: false, slashAt: null, lastMs: -1, effects: []};
 /* Expedition presentation: reward popups and fading completed spots (cosmetic). */
 const hud = new ExpeditionHud(), rewards = [], fadingSpots = new Map();
@@ -145,6 +149,13 @@ function observeCombat(next) {
       if (target.hp === 0) deaths.set(target.id, {at: now, target: {...target}});
     }
     hpSeen.set(target.id, target.hp);
+    const struck = strikesSeen.get(target.id);
+    if (struck !== undefined && (target.strikes || 0) > struck && next.expedition?.life === state?.expedition?.life) {
+      lunges.set(target.id, {at: now});
+      const lost = Math.round(((state?.expedition?.vitals?.health ?? 0) - (next.expedition?.vitals?.health ?? 0)) / 100);
+      rewards.push({text: lost > 0 ? `-${lost} health` : 'Gored!', color: '#ff7a63', at: now});
+    }
+    strikesSeen.set(target.id, target.strikes || 0);
   }
   const p = next.player;
   if (p.animation === 'attack') {
@@ -179,7 +190,7 @@ function observeExpedition(next) {
   }
   if (next.expedition.anchor_space && report) reportSeen = report.seq;
   if (state?.expedition && next.expedition.life !== state.expedition.life) {
-    actor = null; hits.clear(); deaths.clear(); hpSeen.clear(); rewards.length = 0; fadingSpots.clear();
+    actor = null; hits.clear(); deaths.clear(); hpSeen.clear(); enemyPos.clear(); lunges.clear(); rewards.length = 0; fadingSpots.clear();
   }
   const current = new Map((next.spots || []).map(s => [s.id, s]));
   for (const [id, spot] of spotsSeen) {
@@ -282,6 +293,26 @@ function drawMap() {
   map.strokeStyle='#ffe6a0'; map.lineWidth=.7; map.strokeRect(px-3.5,py-3.5,7,7);
   mapDirty=false;
 }
+/** Where to draw a target now: glides toward its cell, plus a short lunge at the avatar. */
+function enemyXY(t, now, dt = 0) {
+  const tx = (t.x + .5) * TILE_W, ty = (t.y + .5) * TILE_H;
+  let p = enemyPos.get(t.id);
+  if (!p || Math.abs(p.x - tx) + Math.abs(p.y - ty) > TILE_W * 4 || reducedMotion) p = {x: tx, y: ty};
+  else if (dt) p = {x: follow(p.x, tx, dt, 90), y: follow(p.y, ty, dt, 90)};
+  if (dt || !enemyPos.has(t.id)) enemyPos.set(t.id, p);
+  let x = p.x, y = p.y;
+  const lunge = lunges.get(t.id);
+  if (lunge && state) {
+    const age = now - lunge.at;
+    if (age >= LUNGE_MS) lunges.delete(t.id);
+    else if (!reducedMotion) {
+      const k = age < 110 ? age / 110 : 1 - (age - 110) / (LUNGE_MS - 110);
+      const dx = state.player.x - t.x, dy = state.player.y - t.y, len = Math.hypot(dx, dy) || 1;
+      x += dx / len * 8 * k; y += dy / len * 6 * k;
+    }
+  }
+  return {x, y};
+}
 function render(now) {
   const dt=Math.min(100,now-lastFrame || 16); lastFrame=now;
   ctx.setTransform(dpr,0,0,dpr,0,0); ctx.fillStyle=PALETTE.void; ctx.fillRect(0,0,width,height);
@@ -365,14 +396,16 @@ function render(now) {
         {clock:state.clock_ms,facing:item.facing,alpha:item.alpha,talking:item.talking,reducedMotion});
       else {
         const t=item.target, hit=hits.get(t.id), death=deaths.get(t.id);
-        drawEnemy(ctx,t,(t.x+.5)*TILE_W,(t.y+.5)*TILE_H,{clock:state.clock_ms,reducedMotion,
+        const at=enemyXY(t,now,dt);
+        drawEnemy(ctx,t,at.x,at.y,{clock:state.clock_ms,reducedMotion,
           hit:hit?now-hit.at:Infinity,dying:t.hp===0&&death?Math.min(1,(now-death.at)/600):null});
       }
       repaintCanopies(item.tx,item.ty,resident);
     }
     for(const t of state.targets) if(hiddenBehind(t,state.player)) {
       const hit=hits.get(t.id);
-      drawEnemy(ctx,t,(t.x+.5)*TILE_W,(t.y+.5)*TILE_H,{clock:state.clock_ms,reducedMotion,ghost:true,hit:hit?now-hit.at:Infinity});
+      const at=enemyXY(t,now);
+      drawEnemy(ctx,t,at.x,at.y,{clock:state.clock_ms,reducedMotion,ghost:true,hit:hit?now-hit.at:Infinity});
     }
     // Combat marks draw above canopies so a swing is never hidden by leaves.
     if(swing.slashAt!==null) {
@@ -382,7 +415,7 @@ function render(now) {
     }
     for(const t of state.targets) {
       const hit=hits.get(t.id);
-      if(hit && now-hit.at<600) drawDamage(ctx,(t.x+.5)*TILE_W,(t.y+.5)*TILE_H-44,hit.amount,reducedMotion?0:now-hit.at);
+      if(hit && now-hit.at<600) { const at=enemyXY(t,now); drawDamage(ctx,at.x,at.y-44,hit.amount,reducedMotion?0:now-hit.at); }
     }
     for (let i = rewards.length - 1; i >= 0; i--) {
       const age = now - rewards[i].at;
@@ -542,11 +575,17 @@ function renderSection(section) {
     }
   } else if (section.kind === 'progress') {
     const list = el('ul', 'progress');
-    for (const item of section.items) {
-      const li = el('li', [item.done ? 'done' : '', item.dim ? 'dim' : ''].join(' ').trim());
+    const bar = (target, item) => {
       const top = el('div', 'p-head'); top.append(el('span', '', item.label), el('b', '', item.text));
-      const bar = el('i'), fill = el('s'); fill.style.width = `${Math.round(100 * Math.min(1, item.value / Math.max(1, item.max)))}%`; bar.append(fill);
-      li.append(top, bar);
+      const track = el('i'), fill = el('s'); fill.style.width = `${Math.round(100 * Math.min(1, item.value / Math.max(1, item.max)))}%`; track.append(fill);
+      target.append(top, track);
+    };
+    for (const item of section.items) {
+      const li = el('li', [item.done ? 'done' : '', item.dim ? 'dim' : '', item.bars ? 'group' : ''].join(' ').trim());
+      if (item.bars) {   // one attribute: regular bar with its dimensional bar right below
+        li.append(el('div', 'p-group', item.label));
+        for (const sub of item.bars) { const row = el('div', sub.dim ? 'p-bar dim' : 'p-bar'); bar(row, sub); li.append(row); }
+      } else bar(li, item);
       if (item.note) li.append(el('small', '', item.note));
       list.append(li);
     }

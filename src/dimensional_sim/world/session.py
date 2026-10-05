@@ -52,7 +52,9 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual",
                           for orow, erow in zip(a.objects, a.environment)],
                 "collision": ["".join("1" if c else "0" for c in row) for row in a.collision]})
     in_anchor = expedition is not None and expedition.anchor_ms is not None
-    targets = [] if in_anchor else [{"id": t.id, "x": t.chunk.x * w + t.x, "y": t.chunk.y * h + t.y, "hp": t.hp}
+    strikes = expedition.strikes if expedition is not None else {}
+    targets = [] if in_anchor else [{"id": t.id, "x": t.chunk.x * w + t.x, "y": t.chunk.y * h + t.y, "hp": t.hp,
+                                     "strikes": strikes.get(t.id, 0)}
                for t in game.targets.values() if chunk_id(t.chunk) in resident]
     p = game.player
     rate = game.attack_rate_percent if p.animation == "attack" else game.animation_rate_percent

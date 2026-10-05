@@ -26,3 +26,9 @@ Pages (2026-10-05): the client asks for `detail: true` (at most twice a second) 
 World/Settings is open; `session.snapshot` then adds `expedition.detail` from `details.detail()`. Achievements
 are computed from the journal on demand, never stored, so thresholds can change without a save upgrade.
 The journal itself is saved (expedition schema 7; schema 6 saves upgrade with an empty journal).
+
+Boar behavior (2026-10-05): every live, admitted boar within `BOAR_AGGRO_RADIUS` (9 steps) charges the avatar one
+step per `MONSTER_STEP_MS` (300 ms; the avatar walks a step per 120 ms, so it only gets caught while busy). On contact
+the boar bites first (one `boar_hit`) and interrupts work; the avatar fights back unless that fight would kill it,
+in which case it runs for the camp. Boars never chase within `CAMP_SAFE_RADIUS` (5) of the anchor. Bites are counted
+per target (`strikes`, presentation only) so the client plays a lunge and a red damage number.

@@ -142,3 +142,7 @@ body.page-open .touch-controls,body.page-open .anchor-space,body.page-open .dial
 }
 @media(min-width:721px){body.fold-location .expedition{top:108px}body.fold-map .inventory{top:102px}}
 @media(max-width:720px){body.fold-map .inventory{top:50px}}
+.progress li.group{gap:4px;padding:6px 8px;border:1px solid #2f2a1d;background:rgba(0,0,0,.18)}
+.p-group{font:600 11px ui-monospace,Consolas,monospace;letter-spacing:1px;text-transform:uppercase;color:#e7c27a}
+.p-bar{display:flex;flex-direction:column;gap:2px}.p-bar .p-head span{color:#a99d7d}
+.p-bar.dim i s{background:#8fb7e0}.p-bar.dim .p-head span{color:#8fb7e0}

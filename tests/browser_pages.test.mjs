@@ -55,6 +55,13 @@ test('pages: journal counts by type, rolls flag max, multipliers multiply', () =
   assert.equal(times(1000), '×1.00'); assert.equal(seconds(90000), '1.5 min');
 });
 
+test('stats: each attribute groups its regular bar with its dimensional bar right below', () => {
+  const levels = pageModel('stats', state).sections[0];
+  assert.equal(levels.items.length, 6);
+  assert.equal(levels.items[0].label, 'Strength');
+  assert.deepEqual(levels.items[0].bars.map(b => [b.label, !!b.dim]), [['level 2', false], ['dimensional 1', true]]);
+});
+
 test('settings: reset buttons only when hosted, seed always shown', () => {
   const local = pageModel('settings', state);
   assert.deepEqual(local.sections[0].rows[0], ['World seed', '482910']);

@@ -539,16 +539,23 @@ class PrayerTests(unittest.TestCase):
 
 
 class PursuitTests(unittest.TestCase):
+    def _boar_at(self, e, offset, ident="enc:forest:0:0:99"):
+        """Place a live, admitted boar `offset` walkable steps from the avatar (far from camp)."""
+        px, py = e._player()
+        e.anchor = (px + 40, py)   # the camp is elsewhere: boars may chase here
+        grid = e._grid()
+        field = e._field({(px, py)})
+        cell = min((c for c, d in field.items() if d == offset), key=lambda c: (c[1], c[0]))
+        w, h = e._dims()
+        key = ChunkKey(e.dimension, cell[0] // w, cell[1] // h)
+        e.game.targets[ident] = Target(ident, key, cell[0] % w, cell[1] % h, 3)
+        e.admitted[ident] = "bramble_boar"
+        e._field_cache.clear()
+        return ident
+
     def test_rare_boar_interrupts_a_thought_and_survives_reload(self):
         e = skip_prologue(expedition())
-        px, py = e._player()
-        position = next((px + dx, py + dy) for dx, dy in DELTAS.values()
-                        if e._walkable(e._grid(), px + dx, py + dy))
-        key = e.game.player.chunk
-        w, h = e._dims()
-        ident = "enc:forest:0:0:99"
-        e.game.targets[ident] = Target(ident, key, position[0] % w, position[1] % h, 3)
-        e.admitted[ident] = "bramble_boar"
+        ident = self._boar_at(e, 1)
         e.task = {"type": "think", "spot": None, "elapsed_ms": 1000, "duration_ms": 3000}
         e.monster_ms = ap.MONSTER_STEP_MS
         e._settle()
@@ -556,6 +563,54 @@ class PursuitTests(unittest.TestCase):
         self.assertEqual(e.goal["id"], ident)
         self.assertEqual(e.log[-1]["type"], "ambush")
         self.assertEqual(dump(Expedition.from_dict(json.loads(dump(e)))), dump(e))
+
+    def test_boar_in_aggro_range_charges_and_bites_first(self):
+        e = skip_prologue(expedition())
+        ident = self._boar_at(e, 3)
+        e.task = {"type": "think", "spot": None, "elapsed_ms": 0, "duration_ms": 60_000}
+        before = e.health
+        steps = []
+        for _ in range(3):
+            e.monster_ms = ap.MONSTER_STEP_MS
+            e._settle()
+            t = e.game.targets[ident]
+            gx, gy = e._global(t.chunk, t.x, t.y)
+            px, py = e._player()
+            steps.append(abs(gx - px) + abs(gy - py))
+            if e.goal and e.goal.get("id") == ident:
+                break
+        self.assertEqual(steps[0], 2)
+        self.assertEqual(steps[-1], 1)
+        self.assertEqual(e.strikes[ident], 1)
+        self.assertEqual(e.health, before - e.boar_hit(e.game.targets[ident].chunk))
+
+    def test_boars_ignore_the_avatar_beyond_range_and_at_camp(self):
+        e = skip_prologue(expedition())
+        far = self._boar_at(e, ap.BOAR_AGGRO_RADIUS + 1)
+        spot = (e.game.targets[far].x, e.game.targets[far].y)
+        e.monster_ms = ap.MONSTER_STEP_MS
+        e._settle()
+        self.assertEqual((e.game.targets[far].x, e.game.targets[far].y), spot)
+        e = skip_prologue(expedition())   # at the anchor camp: safe
+        ident = self._boar_at(e, 1)
+        e.anchor = e._player()
+        e.monster_ms = ap.MONSTER_STEP_MS
+        e._settle()
+        self.assertNotIn(ident, e.strikes)
+
+    def test_too_hurt_to_win_runs_for_the_camp(self):
+        e = skip_prologue(expedition())
+        self._boar_at(e, 1)
+        e.health = e.fight_damage(e.ring(e.game.player.chunk)) + e.boar_hit(e.game.player.chunk)
+        e.monster_ms = ap.MONSTER_STEP_MS
+        e._settle()
+        self.assertEqual(e.goal["kind"], "home")
+
+    def test_legacy_monster_clock_loads(self):
+        e = skip_prologue(expedition())
+        data = json.loads(dump(e))
+        data["monster_ms"] = 999
+        self.assertEqual(Expedition.from_dict(data).monster_ms, ap.MONSTER_STEP_MS - 1)
 
 
 class AutopilotSessionTests(unittest.TestCase):
