@@ -381,3 +381,47 @@ def validate_catalog():
 
 
 validate_catalog()
+
+
+# ----- journal achievements ------------------------------------------------------
+# Metrics (journal.metric): "action:<id>", "category:<category>", "item:<id>", "deaths:<cause>",
+# "deaths", "lives", "best_depth", "best_life_min", "unlocks".
+@dataclass(frozen=True)
+class AchievementDef:
+    id: str
+    name: str
+    description: str
+    metric: str
+    threshold: int
+
+    def __post_init__(self):
+        identifier(self.id, "achievement ID")
+        integer(self.threshold, "achievement threshold", 1, 10**9)
+        kind, _, arg = self.metric.partition(":")
+        valid = {"action": BY_ID, "category": set(CATEGORIES), "item": ITEMS,
+                 "deaths": {"starvation", "boar", "exhaustion", ""}}
+        if kind in valid:
+            if arg not in valid[kind] and not (kind == "deaths" and arg == ""):
+                raise ValueError(f"achievement {self.id}: unknown metric argument {arg}")
+        elif kind not in ("lives", "best_depth", "best_life_min", "unlocks") or arg:
+            raise ValueError(f"achievement {self.id}: unknown metric {self.metric}")
+
+
+ACHIEVEMENTS = tuple(AchievementDef(*row) for row in (
+    ("first_steps", "First steps", "Complete your first task in the forest.", "category:gather", 1),
+    ("berry_picker", "Berry picker", "Forage bramble berries 25 times.", "action:bramble_berries", 25),
+    ("woodsman", "Woodsman", "Gather fallen branches 50 times.", "action:fallen_branches", 50),
+    ("tracker", "Tracker", "Read animal tracks 25 times.", "action:animal_tracks", 25),
+    ("boar_breaker", "Boar breaker", "Drive off 10 bramble boars.", "action:bramble_boar", 10),
+    ("toolmaker", "Toolmaker", "Craft 5 times.", "category:craft", 5),
+    ("devout", "Devout", "Finish 5 prayers.", "category:pray", 5),
+    ("deep_walker", "Deep walker", "Reach ring 5.", "best_depth", 5),
+    ("far_walker", "Far walker", "Reach ring 10.", "best_depth", 10),
+    ("survivor", "Survivor", "Live 15 minutes in one life.", "best_life_min", 15),
+    ("returner", "Returner", "Begin your fifth life.", "lives", 5),
+    ("hunger_lesson", "A hungry lesson", "Starve once.", "deaths:starvation", 1),
+    ("possibilities", "New possibilities", "Own 3 unlocks.", "unlocks", 3),
+))
+ACHIEVEMENT_IDS = {a.id for a in ACHIEVEMENTS}
+if len(ACHIEVEMENT_IDS) != len(ACHIEVEMENTS):
+    raise ValueError("duplicate achievement ids")

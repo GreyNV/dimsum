@@ -73,7 +73,7 @@ async function init({save, seed, awayMs}) {
   last = performance.now();
   clearTimeout(loopTimer);
   loop();
-  return {manifest, caughtUpMs: total, before, after};
+  return {manifest, caughtUpMs: total, before, after, worldSeed: game.world_seed()};
 }
 
 const handlers = {
@@ -81,6 +81,8 @@ const handlers = {
   visibility: ({active: visible}) => { active = visible === true; },
   input: ({body}) => game.input(JSON.stringify(body), now()),
   save: () => game.save(),
+  // New world, same soul: keeps dimensional XP, currencies, unlocks, mastery and journal.
+  rebuild: ({seed}) => game.rebuild(seed | 0),
 };
 
 onmessage = async ({data}) => {

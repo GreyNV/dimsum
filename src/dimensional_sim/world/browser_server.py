@@ -22,6 +22,7 @@ STATIC = {"/": ("index.html", "text/html"),
           "/art.js": ("art.js", "text/javascript"),
           "/actors.js": ("actors.js", "text/javascript"),
           "/hud.js": ("hud.js", "text/javascript"),
+          "/pages.js": ("pages.js", "text/javascript"),
           "/view.js": ("view.js", "text/javascript")}
 
 

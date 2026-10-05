@@ -8,4 +8,4 @@
 .save-panel input{width:220px;max-width:55vw;background:#0c120b;border:1px solid #66523a;color:#e1c79b;padding:7px;font:inherit}
 .save-panel button{padding:6px 10px;margin:0}.code-note{color:#d3b575;word-break:break-all;max-width:360px;margin:6px auto 0}
 .toast{position:fixed;top:118px;left:50%;transform:translateX(-50%);z-index:15;background:rgba(8,12,8,.86);border:1px solid #9f8050;color:#e9dcb8;padding:10px 16px;font:12px ui-monospace,Consolas,monospace;max-width:90vw;text-align:center}
-@media(max-width:720px){.toast{top:auto;bottom:250px}}
+@media(max-width:720px){.toast{top:auto;bottom:300px}}

@@ -80,3 +80,65 @@ body.prologue .vitals{bottom:auto;top:96px}}
 .anchor-shop button b{color:#e8f4ff;font-weight:600}.anchor-shop button small{display:block;color:#93a9ba}.anchor-shop button:disabled{opacity:.45}
 .anchor-shop button .cost{float:right;color:#b6e7ff}
 .debug-panel{position:absolute;z-index:7;left:12px;top:12px;max-width:min(760px,calc(100vw - 24px));max-height:80vh;overflow:auto;margin:0;padding:10px 12px;background:rgba(4,8,6,.88);border:1px solid #4f6b43;color:#cfe3b8;font:10px/1.45 ui-monospace,Consolas,monospace;white-space:pre-wrap;pointer-events:none}
+
+/* Pages and collapsible panels (2026-10-05). Tabs sit on top on desktop, at the bottom on
+   phones; every bottom-anchored HUD element moves up by the tab bar's height there. */
+.fold{min-width:0;min-height:0;width:18px;height:16px;padding:0;margin:0 5px 0 0;border:0;background:none;color:#d3b575;font:10px/1 ui-monospace,Consolas,monospace;vertical-align:middle}
+.fold:hover{background:none;color:#fff1bc}
+.map-heading[data-fold]{cursor:pointer}
+.location .fold{position:absolute;top:8px;right:8px;margin:0;width:22px;height:20px}
+.panel.collapsed .attributes,.panel.collapsed .log,.panel.collapsed #minimap,.panel.collapsed .map-legend,.panel.collapsed .slots{display:none}
+.panel.collapsed .map-heading{margin-bottom:0}
+.location.collapsed .eyebrow,.location.collapsed .location-line{display:none}
+.location.collapsed{padding:10px 36px 10px 16px}.location.collapsed h1{font-size:18px;margin:0}
+.tabs{position:absolute;z-index:8;top:0;left:50%;transform:translateX(-50%);display:flex;gap:2px;padding:4px 6px;background:rgba(10,15,9,.62);border:1px solid rgba(160,128,80,.42);border-top:0;text-shadow:0 1px 2px #000c}
+.tabs button{display:flex;align-items:center;gap:6px;min-height:30px;padding:3px 11px;border:1px solid transparent;background:transparent;color:#cbbf9c;font:11px ui-monospace,Consolas,monospace;letter-spacing:.5px}
+.tabs button:hover{background:rgba(200,150,90,.12)}
+.tabs button[aria-pressed="true"]{background:rgba(200,150,90,.22);border-color:rgba(200,150,90,.6);color:#fff1bc}
+.tab-icon{font-size:13px;color:#d3b575}
+
+@media(min-width:721px){.location,.map-panel{top:56px}.vitals{top:56px;left:331px;right:240px;transform:none;flex-wrap:wrap;justify-content:center;gap:8px 18px}.expedition{top:210px}.inventory{top:284px}.location{padding-right:36px}}
+.page{position:absolute;z-index:7;top:52px;left:50%;transform:translateX(-50%);width:min(780px,calc(100vw - 32px));max-height:calc(100vh - 140px);display:flex;flex-direction:column;background:rgba(8,12,8,.92);border-color:#7a6038;text-shadow:none}
+.page-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 8px;border-bottom:1px solid #51452e}
+.page-head h2{font:400 24px Georgia,serif;margin:0;color:#f0d9a6}
+.page-body{overflow-y:auto;padding:6px 16px 16px;font:12px/1.5 ui-monospace,Consolas,monospace;color:#d8d2b4;-webkit-user-select:text;user-select:text}
+.page-loading{color:#8f8f78;padding:12px 0}
+.page-section{border-bottom:1px solid #2f2a1d;padding:6px 0}
+.page-section summary{cursor:pointer;font:600 11px ui-monospace,Consolas,monospace;letter-spacing:1.4px;text-transform:uppercase;color:#c59a64;padding:6px 0;list-style-position:inside}
+.page-section .note{color:#8f8f78;margin:6px 0 2px;font-size:11px}
+.rows{margin:2px 0 4px;display:grid;grid-template-columns:minmax(120px,1fr) 2fr;gap:3px 14px}
+.rows dt{color:#a99d7d}.rows dd{margin:0;color:#f1e3bd}.rows dd small{display:block;color:#8f8f78;font-size:10.5px}
+.page table{width:100%;border-collapse:collapse;margin:2px 0 4px;font-size:11.5px}
+.page th{text-align:left;font-weight:400;color:#a99d7d;border-bottom:1px solid #3d3826;padding:3px 8px 3px 0}
+.page td{padding:3px 8px 3px 0;border-bottom:1px solid #1f2318;color:#e7dcc0;vertical-align:top}
+.page td:first-child{color:#f1e3bd}
+.progress{list-style:none;margin:2px 0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px 16px}
+.progress li{display:flex;flex-direction:column;gap:3px}
+.p-head{display:flex;justify-content:space-between;gap:8px}.p-head b{font-weight:400;color:#f1e3bd;white-space:nowrap}
+.progress i{display:block;height:5px;background:rgba(0,0,0,.5);border:1px solid #3d3826}.progress i s{display:block;height:100%;background:#d3b575;text-decoration:none}
+.progress li.dim i s{background:#8fb7e0}.progress li.done i s{background:#9fc27a}.progress li.done .p-head b{color:#bfe39a}
+.progress small{color:#8f8f78;font-size:10.5px}
+.page-actions{display:flex;flex-direction:column;gap:10px;margin:4px 0}
+.page-actions div{display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+.page-actions button{padding:8px 14px;background:#232a1d}
+.page-actions button.danger{border-color:#9a4a3a;background:#2a1714}.page-actions button.armed{border-color:#ff9f86;background:#5a2219;color:#fff}
+.page-actions small{color:#8f8f78;font-size:10.5px;max-width:560px}
+body.page-open .location,body.page-open .vitals,body.page-open .expedition,body.page-open .map-panel,body.page-open .inventory,
+body.page-open .touch-controls,body.page-open .anchor-space,body.page-open .dialogue,body.page-open .debug-panel{display:none!important}
+@media(max-width:720px){
+  .tabs{top:auto;bottom:0;left:0;right:0;transform:none;justify-content:space-between;gap:0;padding:3px 2px calc(3px + env(safe-area-inset-bottom));border:0;border-top:1px solid rgba(160,128,80,.42);background:rgba(8,12,8,.9)}
+  .tabs button{flex:1;flex-direction:column;gap:0;min-width:0;min-height:40px;padding:2px 0;font-size:9px;letter-spacing:0}
+  .tab-icon{font-size:15px;line-height:18px}
+  .location .fold{top:6px;right:6px;width:28px;height:26px}
+  .controls{bottom:60px}.expedition{bottom:124px}body.manual-unlocked .expedition{bottom:232px}
+  .touch-controls{bottom:133px}.status{bottom:248px}.dialogue{bottom:64px}
+  body:not(.prologue) .vitals{bottom:238px}body.fold-expedition:not(.prologue) .vitals{bottom:164px}
+  body.manual-unlocked.fold-expedition:not(.prologue) .vitals{bottom:272px}
+  .anchor-space{bottom:60px;max-height:calc(100vh - 150px)}
+  .page{top:8px;left:8px;right:8px;bottom:56px;width:auto;max-height:none;transform:none}
+  .page-head{padding:10px 12px 6px}.page-head h2{font-size:20px}.page-body{padding:4px 12px 12px;font-size:11.5px}
+  .rows{grid-template-columns:1fr 1.3fr;gap:3px 10px}
+  .page table{font-size:10.5px}
+}
+@media(min-width:721px){body.fold-location .expedition{top:108px}body.fold-map .inventory{top:102px}}
+@media(max-width:720px){body.fold-map .inventory{top:50px}}

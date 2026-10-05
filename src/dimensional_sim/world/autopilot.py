@@ -50,6 +50,7 @@ from ..core import _softcapped_level
 from . import economy
 from .actions import Context, bucket, reasons_against
 from .catalog import BOONS, REGIONS, UNLOCKS
+from .journal import new_journal, record_action, record_death, record_items, validate_journal
 from .encounters import (ATTRIBUTES, BY_ID, ENCOUNTER_VERSION, ITEMS, chunk_spots, forced_spot, roll_loot,
                          roll_window)
 from .regions import region_for
@@ -121,7 +122,7 @@ ELDER_LINES = (
 LOG_TYPES = ("encounter", "eat", "rest", "life", "blessing", "lore", "trade", "ambush",
              "craft", "reflect", "purchase", "rebirth")
 TASK_TYPES = ("perform", "pause", "rest", *SELF_ACTIONS, *PROLOGUE_MS)
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 def _table():
@@ -155,6 +156,7 @@ class Expedition:
         self.mastery = {}          # action id -> mastery level bought with ash
         self.boon_next = None      # BoonDef id for the next life
         self.boon = None           # BoonDef id active this life
+        self.journal = new_journal()   # lifetime counts (journal.py); persists across lives
         self.screen_log = []       # debug only, not saved: recent admissions/rejections
         self._region_cache = {}
         self.monster_ms = 0
@@ -777,6 +779,8 @@ class Expedition:
         if entry.heal:
             self.health = min(VITAL_MAX, self.health + entry.heal * POINT)
         self.blessing += entry.blessing
+        record_action(self.journal, entry.id)
+        record_items(self.journal, items)
         self.stats["completed"] += 1
         if entry.category == "fight":
             self.stats["fights"] += 1
@@ -825,6 +829,7 @@ class Expedition:
         self.report = {"seq": self.sequence + 1, "life": self.life, "clock_ms": self.total_ms,
                        "title": f"Life {self.life} ends", "lines": lines}
         self._entry("life", f"Life {self.life} ended. The anchor pulls you back.")
+        record_death(self.journal, self.cause or "exhaustion", self.game.elapsed_ms)
         config = {name: getattr(self.game, name) for name in (
             "movement_interval_ms", "animation_rate_percent", "attack_rate_percent", "attack_damage")}
         press = self.game.step_on_press
@@ -1068,6 +1073,8 @@ class Expedition:
                 items.append((action.effect, 1))
         seed = derive_seed(self.game.world.world_seed, "self-loot", self.life, action.id, self.sequence)
         items += [(item, kept) for item, count in roll_loot(action, seed) if (kept := self._add_item(item, count))]
+        record_action(self.journal, action.id)
+        record_items(self.journal, [(i, n) for i, n in items if n > 0])
         dim = action.xp // DIMENSIONAL_DIVISOR
         if action.xp:
             self.regular[action.attribute] += action.xp
@@ -1225,7 +1232,7 @@ class Expedition:
                 "depth": self.depth, "best_depth": self.best_depth, "blessing": self.blessing,
                 "dust": self.dust, "ash": self.ash, "unlocked": sorted(self.unlocked),
                 "mastery": dict(sorted(self.mastery.items())), "boon": self.boon, "boon_next": self.boon_next,
-                "stats": dict(self.stats), "drought": dict(self.drought),
+                "stats": dict(self.stats), "drought": dict(self.drought), "journal": validate_journal(self.journal),
                 "forced": {k: list(v) for k, v in sorted(self.forced.items())},
                 "anchor_ms": self.anchor_ms, "anchor_wait": self.anchor_wait,
                 "monster_ms": self.monster_ms, "prayers_this_life": self.prayers_this_life,
@@ -1241,7 +1248,7 @@ class Expedition:
     SAVE_FIELDS = ("schema_version", "encounters", "exploration", "life", "total_ms", "regular",
                    "dimensional", "life_gain", "completed", "inventory", "hunger", "health",
                    "food_cooldown_ms", "cause", "depth", "best_depth", "blessing", "dust", "ash", "unlocked",
-                   "mastery", "boon", "boon_next", "stats", "drought", "forced", "anchor_ms", "anchor_wait",
+                   "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal", "anchor_ms", "anchor_wait",
                    "monster_ms", "prayers_this_life", "budget", "spawned",
                    "admitted", "screened_chunks", "screened_targets", "log", "sequence",
                    "decisions", "skills", "report", "task", "goal")
@@ -1258,6 +1265,8 @@ class Expedition:
             data = cls._upgrade_v4(data)
         if isinstance(data, dict) and data.get("schema_version") == 5:
             data = cls._upgrade_v5(data)
+        if isinstance(data, dict) and data.get("schema_version") == 6:
+            data = cls._upgrade_v6(data)
         fields(data, cls.SAVE_FIELDS)
         if data["schema_version"] != SCHEMA_VERSION or data["encounters"] != ENCOUNTER_VERSION:
             raise ValueError("unsupported expedition save")
@@ -1316,6 +1325,7 @@ class Expedition:
                                                                           for e in v) for v in forced.values()):
                 raise ValueError("invalid pity spots")
             result.forced = {k: list(v) for k, v in forced.items()}
+            result.journal = validate_journal(data["journal"])
             result.monster_ms = integer(data["monster_ms"], "monster clock", 0, MONSTER_STEP_MS - 1)
             result.prayers_this_life = integer(data["prayers_this_life"], "prayers this life", 0, 1)
             result.anchor_ms = data["anchor_ms"]
@@ -1390,12 +1400,39 @@ class Expedition:
             raise ValueError("malformed expedition save") from exc
         return result
 
-    V6_FIELDS = ("ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced")
+    V6_FIELDS = ("ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal")
 
     @classmethod
     def _v6_defaults(cls):
         return {"ash": 0, "unlocked": [], "mastery": {}, "boon": None, "boon_next": None,
-                "stats": {k: 0 for k in STAT_KEYS}, "drought": {k: 0 for k in PITY_CHUNKS}, "forced": {}}
+                "stats": {k: 0 for k in STAT_KEYS}, "drought": {k: 0 for k in PITY_CHUNKS}, "forced": {},
+                "journal": new_journal()}
+
+    @classmethod
+    def _upgrade_v6(cls, data):
+        """Schema 6 -> 7 adds the lifetime journal (empty: earlier lives were not counted)."""
+        fields(data, tuple(name for name in cls.SAVE_FIELDS if name != "journal"))
+        return {**data, "schema_version": SCHEMA_VERSION, "journal": new_journal()}
+
+    @classmethod
+    def rebuilt(cls, old, game):
+        """A brand-new world (`game`) for an existing expedition: keeps everything that
+        persists across lives (dimensional XP, currencies, unlocks, mastery, journal,
+        skills, the boon chosen for the next life) and starts the next life there,
+        without the prologue. Used by the hosted "New world, keep progress" button."""
+        new = cls(game, skills=old.skills, fresh=False)
+        new.dimensional = dict(old.dimensional)
+        for name in ("blessing", "dust", "ash", "best_depth", "total_ms", "sequence", "decisions"):
+            setattr(new, name, getattr(old, name))
+        new.unlocked, new.mastery = set(old.unlocked), dict(old.mastery)
+        new.journal = validate_journal(old.journal)
+        new.log = [dict(e) for e in old.log]
+        new.life = old.life + 1
+        new.boon, new.boon_next = old.boon_next, None
+        new._new_life_state()
+        new._screen()
+        new._entry("rebirth", "The world was rebuilt. A new forest, the same soul.")
+        return new
 
     @classmethod
     def _upgrade_v5(cls, data):

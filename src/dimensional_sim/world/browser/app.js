@@ -2,6 +2,7 @@
 import {TILE_W, TILE_H, ZOOM, clamp, residentBounds, cameraView, follow, retainResident, tileAt, visualHash, Controls} from './view.js';
 import {PALETTE, OBJECT_PAD, paintChunk, drawTree, terrainColor} from './art.js';
 import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawDamage, drawFloat, drawSpot, drawSpotCompletion, drawCamp, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
+import {PAGES, needsDetail, pageModel, PANELS, COLLAPSE_KEY, loadCollapsed, toggleCollapsed, defaultCollapsed} from './pages.js';
 import {debugText, shopSections, ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
 
 const $ = id => document.getElementById(id);
@@ -27,6 +28,14 @@ const ELDER_LEAVE_MS = 2200;
 const SEEN_REPORT_KEY = 'dimsum.report.seen';
 const seenReport = () => { try { return localStorage.getItem(SEEN_REPORT_KEY); } catch { return null; } };
 const markReport = (worldSeed, report) => { try { localStorage.setItem(SEEN_REPORT_KEY, reportStorageKey(worldSeed, report)); } catch { /* optional */ } };
+/* Pages (tabs) and collapsible HUD panels. The detail block is requested at most twice a
+ * second while a page that needs it is open, so ordinary polling stays small. */
+let page = 'world', lastDetail = null, lastDetailAt = 0, pageSignature = '', armed = null, armTimer = 0;
+const closedSections = new Set();
+const isMobile = () => matchMedia('(max-width: 720px)').matches;
+const readUi = key => { try { return localStorage.getItem(key); } catch { return null; } };
+const writeUi = (key, value) => { try { localStorage.setItem(key, value); } catch { /* optional */ } };
+let collapsed = loadCollapsed(readUi(COLLAPSE_KEY), isMobile());
 const manualAllowed = () => !state?.expedition || state.expedition.skills.includes('take_control');
 
 function status(message) { if ($('status').textContent !== message) $('status').textContent = message; }
@@ -70,6 +79,8 @@ function adopt(next) {
   if (firstSnapshot && $('report').hidden) setPause(false);
   hud.update(next);
   updateAnchor(next.expedition);
+  if (next.expedition?.detail) lastDetail = next.expedition.detail;
+  if (page !== 'world') renderPage();
   const position = {x:(next.player.x + .5) * TILE_W, y:(next.player.y + .5) * TILE_H};
   if (!actor || Math.abs(actor.x - position.x) + Math.abs(actor.y - position.y) > TILE_W * 5) {
     actor = {...position}; camera = {...position};
@@ -215,6 +226,7 @@ async function poll() {
     const body = controls.payload(paused, [...chunks.keys()]);
     if (pendingAction) body.action = pendingAction;
     if (debugOn) body.debug = true;
+    if (needsDetail(page) && (!lastDetail || started - lastDetailAt > 500)) { body.detail = true; lastDetailAt = started; }
     const attackRevision = controls.attackRevision;
     const next = await request('/api/input', body);
     controls.acknowledge(body, attackRevision); pendingAction = null; adopt(next);
@@ -412,7 +424,9 @@ addEventListener('keydown', event=>{
   if(directions[event.code]) { event.preventDefault(); if(!paused && manualAllowed()) controls.press(event.code,directions[event.code]); }
   else if(event.code==='Space') { event.preventDefault(); if(!paused && manualAllowed()) controls.attack(true); }
   else if(event.code==='KeyP' && !event.repeat) { event.preventDefault(); setPause(!paused); }
-  else if(event.code==='Backquote' && !event.repeat) { event.preventDefault(); debugOn = !debugOn; $('debug-panel').hidden = !debugOn; }
+  else if(event.code==='Backquote' && !event.repeat) { event.preventDefault(); toggleDebug(); }
+  else if(event.code==='Escape' && page !== 'world') { event.preventDefault(); openPage('world'); }
+  else if(/^Digit[1-7]$/.test(event.code) && !event.repeat) { event.preventDefault(); openPage(PAGES[Number(event.code.slice(5)) - 1].id); }
   else if((event.code==='Equal' || event.code==='NumpadAdd') && !event.repeat) changeZoom(.1);
   else if((event.code==='Minus' || event.code==='NumpadSubtract') && !event.repeat) changeZoom(-.1);
 });
@@ -460,5 +474,131 @@ for(const button of document.querySelectorAll('[data-move],#touch-attack')) {
     controls.release(key);if(!button.dataset.move)controls.attack(false);
   });
 }
+function toggleDebug() { debugOn = !debugOn; $('debug-panel').hidden = !debugOn; }
+function applyCollapsed() {
+  for (const id of PANELS) {
+    const panel = document.querySelector(`[data-panel="${id}"]`);
+    if (!panel) continue;
+    panel.classList.toggle('collapsed', collapsed[id]);
+    document.body.classList.toggle('fold-' + id, collapsed[id]);
+    const button = panel.querySelector('button.fold');
+    button.textContent = collapsed[id] ? '▸' : '▾';
+    button.setAttribute('aria-expanded', String(!collapsed[id]));
+    button.setAttribute('aria-label', `${collapsed[id] ? 'Expand' : 'Collapse'} ${id} panel`);
+  }
+  mapDirty = true;
+}
+document.addEventListener('click', event => {
+  const id = event.target.closest('[data-fold]')?.dataset.fold;
+  if (!id) return;
+  collapsed = toggleCollapsed(collapsed, id);
+  writeUi(COLLAPSE_KEY, JSON.stringify(collapsed));
+  applyCollapsed();
+});
+function buildTabs() {
+  $('tabs').replaceChildren(...PAGES.map((p, i) => {
+    const button = document.createElement('button');
+    button.type = 'button'; button.dataset.page = p.id; button.title = `${p.label} (${i + 1})`;
+    const icon = document.createElement('span'); icon.className = 'tab-icon'; icon.setAttribute('aria-hidden', 'true'); icon.textContent = p.icon;
+    const text = document.createElement('span'); text.className = 'tab-label'; text.textContent = p.label;
+    button.append(icon, text);
+    return button;
+  }));
+}
+function openPage(id) {
+  page = id; pageSignature = ''; armed = null; lastDetailAt = 0;
+  for (const button of $('tabs').querySelectorAll('button')) button.setAttribute('aria-pressed', String(button.dataset.page === page));
+  document.body.classList.toggle('page-open', page !== 'world');
+  $('page').hidden = page === 'world';
+  if (page !== 'world') { $('page-body').scrollTop = 0; renderPage(); }
+  else canvas.focus();
+}
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = String(text);
+  return node;
+}
+function renderSection(section) {
+  const key = `${page}:${section.title.replace(/ ·.*$/, '')}`;
+  const box = el('details', 'page-section'); box.open = !closedSections.has(key);
+  box.addEventListener('toggle', () => { box.open ? closedSections.delete(key) : closedSections.add(key); });
+  box.append(el('summary', '', section.title));
+  if (section.kind === 'rows') {
+    const list = el('dl', 'rows');
+    for (const [name, value, note] of section.rows) {
+      const dd = el('dd', '', value);
+      if (note) dd.append(el('small', '', note));
+      list.append(el('dt', '', name), dd);
+    }
+    box.append(list);
+  } else if (section.kind === 'table') {
+    if (!section.rows.length) box.append(el('p', 'note', section.empty || 'Nothing yet.'));
+    else {
+      const table = el('table'), head = el('tr'), body = el('tbody');
+      for (const name of section.head) head.append(el('th', '', name));
+      for (const row of section.rows) { const tr = el('tr'); for (const cell of row) tr.append(el('td', '', cell)); body.append(tr); }
+      const thead = el('thead'); thead.append(head); table.append(thead, body); box.append(table);
+    }
+  } else if (section.kind === 'progress') {
+    const list = el('ul', 'progress');
+    for (const item of section.items) {
+      const li = el('li', [item.done ? 'done' : '', item.dim ? 'dim' : ''].join(' ').trim());
+      const top = el('div', 'p-head'); top.append(el('span', '', item.label), el('b', '', item.text));
+      const bar = el('i'), fill = el('s'); fill.style.width = `${Math.round(100 * Math.min(1, item.value / Math.max(1, item.max)))}%`; bar.append(fill);
+      li.append(top, bar);
+      if (item.note) li.append(el('small', '', item.note));
+      list.append(li);
+    }
+    box.append(list);
+  } else if (section.kind === 'actions') {
+    const list = el('div', 'page-actions');
+    for (const b of section.buttons) {
+      const row = el('div');
+      const button = el('button', [b.danger ? 'danger' : '', armed === b.id ? 'armed' : ''].join(' ').trim(),
+        armed === b.id ? 'Select again to confirm' : b.label);
+      button.type = 'button'; button.dataset.act = b.id;
+      row.append(button, el('small', '', b.note));
+      list.append(row);
+    }
+    box.append(list);
+  }
+  if (section.note) box.append(el('p', 'note', section.note));
+  return box;
+}
+function renderPage(force = false) {
+  if (page === 'world') return;
+  const model = pageModel(page, {world_seed: state?.world_seed, expedition: {detail: lastDetail}}, window.DIMSUM_HOST || null);
+  const signature = JSON.stringify([model, armed]);
+  if (!force && signature === pageSignature) return;
+  pageSignature = signature;
+  $('page-title').textContent = model.title;
+  const body = $('page-body'), scroll = body.scrollTop;
+  body.replaceChildren(...(model.loading ? [el('p', 'page-loading', 'Reading the expedition...')] : model.sections.map(renderSection)));
+  body.scrollTop = scroll;
+}
+$('tabs').addEventListener('click', event => {
+  const id = event.target.closest('button[data-page]')?.dataset.page;
+  if (id) openPage(id === page && id !== 'world' ? 'world' : id);
+});
+$('page-close').addEventListener('click', () => openPage('world'));
+$('page-body').addEventListener('click', event => {
+  const act = event.target.closest('button[data-act]')?.dataset.act;
+  if (!act) return;
+  if (act === 'layout') { collapsed = defaultCollapsed(isMobile()); writeUi(COLLAPSE_KEY, JSON.stringify(collapsed)); applyCollapsed(); return; }
+  if (act === 'debug') { toggleDebug(); return; }
+  const host = window.DIMSUM_HOST;
+  if (!host) return;
+  clearTimeout(armTimer);
+  if (armed !== act) {   // two-step confirmation without browser dialogs
+    armed = act; renderPage(true);
+    armTimer = setTimeout(() => { armed = null; renderPage(true); }, 5000);
+    return;
+  }
+  armed = null; renderPage(true);
+  status(act === 'rebuild' ? 'Building a new world...' : 'Starting over...');
+  Promise.resolve(act === 'rebuild' ? host.rebuildWorld() : host.wipe()).catch(error => status(`Could not reset: ${error.message}`));
+});
+buildTabs(); openPage('world'); applyCollapsed();
 addEventListener('resize',resize);
 resize(); requestAnimationFrame(render); poll();

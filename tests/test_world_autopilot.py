@@ -238,7 +238,7 @@ class LifeTests(unittest.TestCase):
         e = expedition()
         e.advance(40_000)
         old = json.loads(dump(e))
-        for key in ("dust", "anchor_ms", "anchor_wait", "monster_ms", "prayers_this_life", "ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced"):
+        for key in ("dust", "anchor_ms", "anchor_wait", "monster_ms", "prayers_this_life", "ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal"):
             del old[key]
         for entry in old["log"]:
             entry["type"] = "encounter" if entry["type"] not in ap.LOG_TYPES[:8] else entry["type"]
@@ -252,7 +252,7 @@ class LifeTests(unittest.TestCase):
         e = expedition()
         e.advance(40_000)
         old = json.loads(dump(e))
-        for key in ("monster_ms", "prayers_this_life", "ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced"):
+        for key in ("monster_ms", "prayers_this_life", "ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal"):
             old.pop(key)
         old.update(schema_version=4, encounters="encounters-v4", task=None, goal=None, blessing=23)
         migrated = Expedition.from_dict(old)
@@ -265,7 +265,7 @@ class LifeTests(unittest.TestCase):
         e.advance(40_000)
         e.dust, e.blessing = 9, 4
         old = json.loads(dump(e))
-        for key in ("ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced"):
+        for key in ("ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal"):
             old.pop(key)
         old.update(schema_version=5, encounters="encounters-v5")
         migrated = Expedition.from_dict(old)
@@ -524,7 +524,7 @@ class PrayerTests(unittest.TestCase):
         e.advance(60000)
         data = json.loads(dump(e))
         for key in ("blessing", "budget", "spawned", "admitted", "screened_chunks", "screened_targets",
-                    "dust", "anchor_ms", "anchor_wait", "monster_ms", "prayers_this_life", "ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced"):
+                    "dust", "anchor_ms", "anchor_wait", "monster_ms", "prayers_this_life", "ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal"):
             del data[key]
         for entry in data["log"]:
             del entry["blessing"]

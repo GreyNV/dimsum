@@ -32,6 +32,15 @@ Supabase stores cloud saves. Python remains the single source of truth.
 - Offline progress: real time away x 0.65 (idle offline efficiency), capped at
   30 simulated minutes per return, then a "While you were away" note.
 
+## Resetting (Settings tab)
+- "New world, keep progress": the worker calls `WebGame.rebuild(seed)` (`Expedition.rebuilt`): a new random
+  world seed, the next life starts there without the prologue; dimensional XP, dust, ash, blessing, unlocks,
+  mastery, journal and the chosen boon carry over. Saved locally and to the cloud, then the page reloads.
+- "Start over": removes the local save, the identity and the report flag, so the old cloud save is never
+  restored; a brand-new game starts. Both are two-step buttons (no browser dialogs).
+- `vercel.json` serves HTML/JS/CSS with `max-age=0, must-revalidate` (Pyodide stays immutable), so a new
+  deploy is picked up on the next reload; the save, not the cache, is what kept the old world.
+
 ## Run the hosted build locally
 ```powershell
 npm install --prefix web

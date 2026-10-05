@@ -87,7 +87,9 @@ const cloud = {
 };
 
 let latest = null;  // {saved_at, data}
+let resetting = false;  // set while wiping/rebuilding so no stale save is written back
 async function saveLocal() {
+  if (resetting) return latest;
   const data = await call('save');
   latest = {saved_at: Date.now(), data};
   store.set(LOCAL_KEY, latest);
@@ -163,6 +165,28 @@ async function start() {
   const awayMs = local ? Math.max(0, Date.now() - local.saved_at) : 0;
   const result = await call('init', {save: local ? local.data : null, seed, awayMs});
   worker.postMessage({id: 0, type: 'visibility', active: !document.hidden});
+  // Settings page actions (app.js renders the buttons; the host owns saves and identity).
+  window.DIMSUM_HOST = {
+    worldSeed: result.worldSeed,
+    build: result.manifest && result.manifest.built,
+    cloudStatus: () => cloud.status,
+    async rebuildWorld() {
+      const seed = crypto.getRandomValues(new Uint32Array(1))[0];
+      await call('rebuild', {seed});
+      await saveLocal();
+      await saveCloud();
+      resetting = true;
+      location.reload();
+    },
+    wipe() {
+      // A fresh identity means the old cloud save can never be restored over the new game.
+      resetting = true;
+      store.remove(LOCAL_KEY);
+      store.remove(IDENTITY_KEY);
+      store.remove('dimsum.report.seen');
+      location.reload();
+    },
+  };
   window.DIMSUM_TRANSPORT = {
     hosted: true,
     async request(path, body) {
@@ -187,6 +211,6 @@ async function start() {
     worker.postMessage({id: 0, type: 'visibility', active: !document.hidden});
     if (document.visibilityState === 'hidden') saveLocal().then(saveCloud).catch(() => {});
   });
-  addEventListener('pagehide', () => { if (latest) store.set(LOCAL_KEY, latest); });
+  addEventListener('pagehide', () => { if (latest && !resetting) store.set(LOCAL_KEY, latest); });
 }
 start().catch(error => showFatal(error && error.stack || error));

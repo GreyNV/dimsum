@@ -59,6 +59,17 @@ class WebGame:
     def state(self, now):
         return json.dumps(self.session.state(float(now)), separators=(",", ":"))
 
+    def rebuild(self, seed):
+        """New world from `seed`, keeping everything that persists across lives."""
+        expedition = Expedition.rebuilt(self.expedition, Exploration(new_world(int(seed)), "forest"))
+        paused = self.session.paused
+        self.expedition = expedition
+        self.session = BrowserSession(expedition.game, expedition, start_paused=paused)
+        return self.summary()
+
+    def world_seed(self):
+        return str(self.expedition.game.world.world_seed)
+
     def save(self):
         return canonical_json(self.expedition.to_dict())
 

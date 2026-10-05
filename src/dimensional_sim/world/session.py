@@ -8,7 +8,7 @@ import time
 
 from .animation import rotate
 from .autopilot import INVENTORY_SLOTS, Expedition
-from . import economy
+from . import details, economy
 from .catalog import BOONS, UNLOCKS
 from .encounters import BY_ID
 from .models import ChunkKey, fields, integer
@@ -26,7 +26,7 @@ def chunk_id(key):
     return f"{key.dimension}:{key.x}:{key.y}"
 
 
-def snapshot(game, known=(), *, paused=False, expedition=None, control="manual", debug=False):
+def snapshot(game, known=(), *, paused=False, expedition=None, control="manual", debug=False, detail=False):
     """Read-only transport projection: no get/stream/generate or simulation calls."""
     asset = game.current_chunk().asset
     w, h = asset.width, asset.height
@@ -93,6 +93,7 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual",
                 "shop": expedition.anchor_offers() if in_anchor else None,
                 "stats": dict(expedition.stats),
                 "debug": expedition.debug_info() if debug else None,
+                "detail": details.detail(expedition) if detail else None,
                 "bounty": [{"id": i, "name": BY_ID[i].name, "spawned": n, "limit": limit}
                            for i, n, limit in expedition.bounty()]}}
     return {**frame_extra, "world_seed": str(game.world.world_seed), "clock_ms": game.elapsed_ms,
@@ -112,10 +113,11 @@ def _region_view(expedition):
 
 def validate_input(data):
     base = {"move", "attack", "paused", "known"}
-    if type(data) is not dict or not base <= set(data) or not set(data) <= base | {"action", "debug"}:
+    if type(data) is not dict or not base <= set(data) or not set(data) <= base | {"action", "debug", "detail"}:
         raise ValueError("invalid input fields")
-    if "debug" in data and type(data["debug"]) is not bool:
-        raise ValueError("debug must be boolean")
+    for flag in ("debug", "detail"):
+        if flag in data and type(data[flag]) is not bool:
+            raise ValueError(f"{flag} must be boolean")
     if "action" in data:
         action = data["action"]
         if type(action) is not dict or action.get("type") not in Expedition.ANCHOR_ACTIONS:
@@ -161,6 +163,7 @@ class BrowserSession:
         self.input_time = float("-inf")
         self.manual_until = float("-inf")
         self.debug = False
+        self.detail = False
 
     @property
     def game(self):
@@ -180,12 +183,14 @@ class BrowserSession:
     def _frame(self, known=(), now=None):
         control = self._control(time.monotonic() if now is None else now)
         return snapshot(self.game, known, paused=self.paused, expedition=self.expedition, control=control,
-                        debug=self.debug and self.expedition is not None)
+                        debug=self.debug and self.expedition is not None,
+                        detail=self.detail and self.expedition is not None)
 
     def input(self, data, now):
         command, paused, known = validate_input(data)
         with self.lock:
             self.debug = data.get("debug", False)
+            self.detail = data.get("detail", False)
             action_error = None
             if "action" in data:
                 if self.expedition is None:
