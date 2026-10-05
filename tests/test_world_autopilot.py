@@ -658,3 +658,53 @@ class AutopilotSessionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PathfindingSpeedTests(unittest.TestCase):
+    """The cached move graph must give exactly the old cell-by-cell BFS distances."""
+
+    @staticmethod
+    def reference_field(e, goals):
+        from collections import deque
+        grid, blocked = e._grid(), e._blocked()
+        dist, queue = {}, deque()
+        for g in sorted(goals):
+            if e._walkable(grid, *g) and g not in blocked:
+                dist[g] = 0
+                queue.append(g)
+        while queue:
+            x, y = queue.popleft()
+            for direction in ap.DIRECTIONS:
+                dx, dy = DELTAS[direction]
+                px, py = x - dx, y - dy
+                if (px, py) in dist or (px, py) in blocked:
+                    continue
+                if e._walkable(grid, px, py) and e._can_move(grid, blocked, px, py, direction):
+                    dist[(px, py)] = dist[(x, y)] + 1
+                    queue.append((px, py))
+        return dist
+
+    def test_graph_field_matches_reference_bfs_while_exploring(self):
+        e = skip_prologue(expedition())
+        checked = 0
+        for _ in range(40):
+            e.advance(3000)
+            if e.anchor_ms is not None:
+                continue
+            for goals in ({e._player()}, {e.anchor}):
+                self.assertEqual(e._field(goals), self.reference_field(e, goals))
+                limited = e._field(goals, limit=7)
+                full = self.reference_field(e, goals)
+                self.assertEqual(limited, {c: d for c, d in full.items() if d <= 7})
+                checked += 1
+        self.assertGreater(checked, 20)
+
+    def test_recycled_chunks_equal_regenerated_ones(self):
+        e = skip_prologue(expedition())
+        e.advance(120_000)
+        world = e.game.world
+        self.assertTrue(world._recycled, "walking around should evict some chunks")
+        for key, chunk in list(world._recycled.items())[:5]:
+            fresh = world._generator.generate(key)
+            self.assertEqual(chunk.asset, fresh.asset)
+            self.assertEqual(chunk.seed, fresh.seed)

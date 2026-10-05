@@ -51,6 +51,7 @@ class WorldRepository:
         self._catalog = self._generator.catalog
         self._cache_limit = cache_limit
         self._resident = OrderedDict()
+        self._recycled = OrderedDict()   # recently evicted chunks: identical on regeneration, so reuse them
         self._discovery = {}
         self._generation_count = 0
 
@@ -89,15 +90,24 @@ class WorldRepository:
     def get(self, key):
         key = self._key(key)
         if key not in self._resident:
-            chunk = self._generator.generate(key)
+            chunk = self._recycled.pop(key, None) or self._generator.generate(key)
             self._resident[key] = chunk
             self._generation_count += 1
             self._discovery.setdefault(key, ("generated", chunk.asset.biome))
             while len(self._resident) > self.cache_limit:
-                self._resident.popitem(last=False)
+                self._recycle(*self._resident.popitem(last=False))
         else:
             self._resident.move_to_end(key)
         return self._resident[key]
+
+    RECYCLE_LIMIT = 48
+
+    def _recycle(self, key, chunk):
+        """Chunks are pure functions of seed/spec/catalog/key; keeping a few evicted ones
+        only skips regeneration when the avatar walks back (residency rules are unchanged)."""
+        self._recycled[key] = chunk
+        while len(self._recycled) > self.RECYCLE_LIMIT:
+            self._recycled.popitem(last=False)
 
     def visit(self, key):
         chunk = self.get(key)
@@ -125,7 +135,7 @@ class WorldRepository:
         retained = set(selected)
         for key in tuple(self._resident):
             if key not in retained:
-                del self._resident[key]
+                self._recycle(key, self._resident.pop(key))
         # Center is last touched, never evicted by neighborhood prefetch.
         for key in reversed(selected):
             self.get(key)
