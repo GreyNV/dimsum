@@ -151,7 +151,7 @@ def inspect_chunk(seed, x, y, life=1, unlocked=(), knowledge=(), recipes=()):
             "actions": [{k: v for k, v in explain(a.id, Context(**{**ctx.__dict__, "spawned": a.id in rolled})).items()
                          if k in ("id", "state", "weight", "share_permille", "bucket_reasons", "weight_modifiers")}
                         for a in BY_ID.values() if a.placement == "spot"],
-            "note": "AVAILABLE here = rolled in this chunk; live play may still turn it away by its at-once cap."}
+            "note": "ROLLED here is a chunk opportunity; live spawn-window screening may still reject it."}
 
 
 def region_map(seed, radius=2):

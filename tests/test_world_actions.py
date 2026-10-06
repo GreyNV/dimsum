@@ -66,7 +66,11 @@ class ActionAvailabilityTests(unittest.TestCase):
         self.assertIsNone(permitted["available"])
         rolled = explain("gnarled_tree", Context(region="deep_woods", unlocked=frozenset({"climbing"}),
                                                   spawned=True))
-        self.assertTrue(rolled["available"])
+        self.assertEqual(rolled["state"], "ROLLED")
+        self.assertIsNone(rolled["available"], "window admission has not happened yet")
+        admitted = explain("gnarled_tree", Context(region="deep_woods", unlocked=frozenset({"climbing"}),
+                                                    spawned=True, admitted=True))
+        self.assertTrue(admitted["available"])
         self.assertFalse(explain("gnarled_tree", Context(region="deep_woods",
                                                        unlocked=frozenset({"climbing"}),
                                                        spawned=False))["available"])
@@ -143,7 +147,11 @@ class LifecycleStateTests(unittest.TestCase):
         climb = dict(deep, unlocked=frozenset({"climbing"}))
         self.assertEqual(explain("gnarled_tree", Context(**climb))["state"], "BUCKET_ELIGIBLE")
         self.assertEqual(explain("gnarled_tree", Context(**climb, spawned=False))["state"], "NOT_ROLLED")
-        self.assertEqual(explain("gnarled_tree", Context(**climb, spawned=True))["state"], "AVAILABLE")
+        self.assertEqual(explain("gnarled_tree", Context(**climb, spawned=True))["state"], "ROLLED")
+        self.assertEqual(explain("gnarled_tree", Context(**climb, spawned=True, admitted=False))["state"],
+                         "NOT_ADMITTED")
+        self.assertEqual(explain("gnarled_tree", Context(**climb, spawned=True, admitted=True))["state"],
+                         "AVAILABLE")
         self.assertEqual(explain("fallen_branches", Context(region="still_glade"))["state"], "BUCKET_INELIGIBLE")
         disabled = Context(region="old_road", mastery={"fallen_branches": 2},
                            journal_disabled=frozenset({"fallen_branches"}))
@@ -159,6 +167,19 @@ class LifecycleStateTests(unittest.TestCase):
         self.assertEqual(explain("craft_staff", Context(placement="self", trigger="need"))["state"], "UNKNOWN")
         self.assertEqual(explain("hunt_deer", replace(live, resolved=True))["state"], "RESOLVED")
 
+    def test_live_debug_distinguishes_a_roll_rejected_by_spawn_window(self):
+        from tests.test_world_autopilot import expedition
+        e = expedition()
+        chunk = e.game.current_chunk()
+        spot = e._spots(chunk)[0]
+        self.assertIn(spot.id, e.admitted)
+        before = {row["id"]: row for row in e.debug_info()["spot_explanations"]}
+        self.assertEqual(before[spot.encounter]["state"], "AVAILABLE")
+        e.admitted.pop(spot.id)
+        after = {row["id"]: row for row in e.debug_info()["spot_explanations"]}
+        self.assertEqual(after[spot.encounter]["state"], "NOT_ADMITTED")
+        self.assertFalse(after[spot.encounter]["available"])
+
     def test_inspect_explains_region_generation_and_every_spot_state(self):
         from dimensional_sim.world.simulate import inspect_chunk, region_map
         report = inspect_chunk(1, 3, 0)
@@ -170,6 +191,6 @@ class LifecycleStateTests(unittest.TestCase):
         self.assertEqual(states["gnarled_tree"], "UNKNOWN")
         rolled = {spot["action"] for spot in report["spots"]}
         for action, state in states.items():
-            self.assertEqual(state == "AVAILABLE", action in rolled, (action, state))
+            self.assertEqual(state == "ROLLED", action in rolled, (action, state))
         self.assertEqual(region_map(1), region_map(1))
         self.assertNotEqual(region_map(1)["rows"], region_map(2)["rows"])

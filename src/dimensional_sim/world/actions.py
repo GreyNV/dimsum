@@ -36,6 +36,7 @@ class Context:
     visible: bool = True
     flags: frozenset = frozenset()
     spawned: bool | None = None
+    admitted: bool | None = None
     resolved: bool = False
 
 
@@ -177,27 +178,34 @@ def explain(action_id, ctx):
     eligible = w > 0
     spawned = ctx.spawned if action.placement == "spot" else \
         action.id in ctx.active_leads if action.placement == "lead" else True
-    available = eligible and bool(spawned) if spawned is not None else None
+    if not eligible:
+        available = False
+    elif action.placement == "spot":
+        available = (eligible and bool(spawned) and bool(ctx.admitted)
+                     if spawned is not None and (not spawned or ctx.admitted is not None) else None)
+    else:
+        available = eligible and bool(spawned) if spawned is not None else None
     return {"id": action.id, "name": action.name, "known": known(action, ctx),
             "state": lifecycle_state(action, ctx, b_reasons, c_reasons, spawned),
             "bucket_eligible": not b_reasons, "context_eligible": not c_reasons,
             "eligible": eligible, "weight": w,
             "share_permille": w * 1000 // total if total and w else 0,
-            "spawned": spawned, "available": available,
+            "spawned": spawned, "admitted": ctx.admitted if action.placement == "spot" else None,
+            "available": available,
             "reasons": b_reasons + c_reasons or ["eligible"],
             "bucket_reasons": b_reasons, "context_reasons": c_reasons,
             "weight_modifiers": _weight_modifiers(action, ctx)}
 
 
 STATES = ("UNKNOWN", "JOURNAL_DISABLED", "BUCKET_INELIGIBLE", "BUCKET_ELIGIBLE", "NOT_ROLLED",
-          "TEMPORARY_LEAD", "RECIPE", "CONTEXT_INELIGIBLE", "AVAILABLE", "RESOLVED")
+          "ROLLED", "NOT_ADMITTED", "TEMPORARY_LEAD", "RECIPE", "CONTEXT_INELIGIBLE", "AVAILABLE", "RESOLVED")
 
 
 def lifecycle_state(action, ctx, b_reasons, c_reasons, spawned):
     """One label for where an action stops in the pipeline (debug overlay and `cli inspect`).
 
     UNKNOWN -> (JOURNAL_DISABLED | BUCKET_INELIGIBLE) -> BUCKET_ELIGIBLE -> NOT_ROLLED | rolled
-    -> CONTEXT_INELIGIBLE | AVAILABLE (a rolled spot still needs spawn-window admission in play). Leads report TEMPORARY_LEAD while their token is live;
+    -> ROLLED -> NOT_ADMITTED | CONTEXT_INELIGIBLE | AVAILABLE. Leads report TEMPORARY_LEAD while their token is live;
     recipes report RECIPE when known but not currently affordable. BUCKET_ELIGIBLE means the
     spawn state was not supplied, so whether a spot exists is unknown."""
     if ctx.resolved:
@@ -212,6 +220,10 @@ def lifecycle_state(action, ctx, b_reasons, c_reasons, spawned):
         return "BUCKET_ELIGIBLE"
     if action.placement == "spot" and not spawned:
         return "NOT_ROLLED"
+    if action.placement == "spot" and ctx.admitted is None:
+        return "ROLLED"
+    if action.placement == "spot" and not ctx.admitted:
+        return "NOT_ADMITTED"
     if c_reasons:
         return "RECIPE" if action.category == "craft" else "CONTEXT_INELIGIBLE"
     if action.placement == "lead":

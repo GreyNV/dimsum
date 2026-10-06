@@ -314,8 +314,10 @@ class Expedition:
                            action_counts=self.journal["actions"], item_counts=self.journal["items"])
         region = self.region(key)
         current = self.game.world.peek(key)
-        rolled = {spot.encounter for spot in self._spots(current)} if current is not None else set()
-        admitted = {spot.encounter for spot in self._live(current)} if current is not None else set()
+        current_spots = self._spots(current) if current is not None else ()
+        rolled = {spot.encounter for spot in current_spots}
+        admitted = {spot.encounter for spot in current_spots if spot.id in self.admitted}
+        screened = self.chunk_ident(key) in self.screened_chunks
         return {"world_seed": str(self.game.world.world_seed), "life": self.life,
                 "chunk": self.chunk_ident(key), "region": region.id if region else None,
                 "generator_version": self.game.world.generator_version,
@@ -331,7 +333,8 @@ class Expedition:
                                      for a in BY_ID.values())],
                 "unlocked": sorted(self.unlocked), "boon": self.boon, "mastery": dict(self.mastery),
                 "spot_bucket": describe_bucket(spot_ctx),
-                "spot_explanations": [explain(a.id, replace(spot_ctx, spawned=a.id in rolled))
+                "spot_explanations": [explain(a.id, replace(spot_ctx, spawned=a.id in rolled,
+                                                          admitted=(a.id in admitted) if screened else None))
                                       for a in BY_ID.values() if a.placement == "spot"],
                 "leads": [dict(lead) for lead in self.leads],
                 "lead_history": [dict(lead) for lead in self.lead_history[-12:]],

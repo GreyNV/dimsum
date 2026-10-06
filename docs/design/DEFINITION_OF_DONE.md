@@ -57,7 +57,7 @@ seeds; resting at the camp on 6/8 (75%) because it only triggers below 35 health
 | 13 | Chains interact with locations | done | tracks only in Deep Woods/Still Glade; branches not in Still Glade |
 | 14 | Debug explains action availability and region generation | done | `cli inspect`, `cli regions`, overlay; test_inspect_explains_region_generation_and_every_spot_state |
 | 15 | Save/load separates permanent progression from temporary state | done | schema 8 + world schema 2; persistence tests; v1 worlds regrow at rebirth |
-| 16 | Regressions pass; docs match behavior | done | Python 257, JS 67 |
+| 16 | Regressions pass; docs match behavior | done | Python 258, JS 67 |
 
 Known limits: region cells are an independent weighted patchwork (no adjacency rules yet); the deer hunt is a
 lead action, not a runtime fight; equipment overlays on the player sprite are not drawn yet.
