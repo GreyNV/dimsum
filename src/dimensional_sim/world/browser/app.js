@@ -5,12 +5,10 @@ import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawDamage, drawFloat
 import {PAGES, needsDetail, pageModel, PANELS, COLLAPSE_KEY, loadCollapsed, toggleCollapsed, defaultCollapsed} from './pages.js';
 import {debugText, shopSections, ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
 import {regionCue, skillSlots, worldMode} from './world_ui.js';
-import {drawAsciiWorld} from './ascii.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('scene'), ctx = canvas.getContext('2d'), mini = $('minimap'), map = mini.getContext('2d');
 const chunks = new Map(), pictures = new Map(), controls = new Controls();
-const asciiPictures = new Map();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 /* Design debug overlay: ?debug in the URL or the backquote key. Asks the server for its
  * debug block (seed, region, buckets, windows, pity, screening) on every poll. */
@@ -79,10 +77,8 @@ function adopt(next) {
   for (const chunk of next.chunks) {
     chunks.set(chunk.id, chunk);
     pictures.delete(chunk.id);   // painted lazily: visible now, others one per frame
-    asciiPictures.delete(chunk.id);
   }
   retainResident(chunks, next.resident); retainResident(pictures, next.resident);
-  retainResident(asciiPictures, next.resident);
   observeCombat(next);
   observeExpedition(next);
   if (next.expedition?.anchor_space && !state?.expedition?.anchor_space) {
@@ -369,22 +365,11 @@ function render(now) {
   const dt=Math.min(100,now-lastFrame || 16); lastFrame=now;
   ctx.setTransform(dpr,0,0,dpr,0,0); ctx.fillStyle=PALETTE.void; ctx.fillRect(0,0,width,height);
   if (state?.expedition?.anchor_space) {
-    const glow=ctx.createRadialGradient(width/2,height*.42,10,width/2,height*.42,Math.max(width,height)*.65);
-    glow.addColorStop(0,'#18314a');glow.addColorStop(.45,'#0e1b2b');glow.addColorStop(1,'#060b13');
-    ctx.fillStyle=glow;ctx.fillRect(0,0,width,height);
-    ctx.fillStyle='#b4d8e7';ctx.textAlign='center';ctx.textBaseline='middle';
-    ctx.font='700 76px ui-monospace,Consolas,monospace';ctx.fillText('A',width*.42,height*.35);
-    ctx.fillStyle='#f4e5bb';ctx.fillText('@',width*.62,height*.35);
+    const scale=Math.min(2.6,width/240,height/340);
+    ctx.translate(width/2,height*.38);ctx.scale(scale,scale);
+    drawCamp(ctx,-48,-15,{clock:state.expedition.total_ms,reducedMotion});
+    drawPlayer(ctx,state.player,59,-11,null,{clock:state.expedition.total_ms});
     if(!stopped)requestAnimationFrame(render);
-    return;
-  }
-  if (state && actor && camera) {
-    drawAsciiWorld(ctx, state, chunks, asciiPictures, camera, actor,
-      {width, height, dpr, zoom, dt}, now, reducedMotion);
-    if(mapDirty) drawMap();
-    $('zoom').textContent=`${Math.round(zoom*100)}%`;
-    $('zoom-out').disabled=zoom<=ZOOM.min; $('zoom-in').disabled=zoom>=ZOOM.max;
-    if(!stopped) requestAnimationFrame(render);
     return;
   }
   if (state && actor && camera) {
