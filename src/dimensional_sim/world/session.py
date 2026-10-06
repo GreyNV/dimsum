@@ -15,6 +15,7 @@ from .models import ChunkKey, fields, integer
 from .progression import attribute_report
 from .runtime import InputCommand
 from .seeds import derive_seed
+from .tuning import UNARMED_REACH
 
 TICK_MS = 20
 INPUT_LEASE = 0.3
@@ -67,6 +68,7 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual",
     frame_extra = {}
     if expedition is not None:
         kinds = expedition.target_kinds()
+        unarmed_target = expedition.unarmed_target() if control == "manual" and not in_anchor else None
         frame_extra = {"spots": [] if in_anchor else expedition.visible_spots(), "target_kinds": {
             t["id"]: kinds.get(t["id"], "bramble_boar") for t in targets},
             "expedition": {"mode": expedition.mode(), "activity": expedition.activity(),
@@ -86,6 +88,8 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual",
                 "punch_damage": expedition.punch_damage(), "report": expedition.report,
                 "anchor": {"x": expedition.anchor[0], "y": expedition.anchor[1]},
                 "skills": sorted(expedition.skills), "control": control,
+                "attack_radius": UNARMED_REACH,
+                "auto_target": unarmed_target[1] if unarmed_target else None,
                 "skill_slots": [{"name": "Empty", "state": "locked"} for _ in range(3)],
                 "prologue": expedition.prologue(),
                 "region": _region_view(expedition),
@@ -243,7 +247,7 @@ class BrowserSession:
                 # Applying an edge at zero duration preserves even brief attack presses.
                 self.game.advance(0, self.command)
             elif self.active or now < self.manual_until:
-                self.expedition.advance_manual(0, self.command)
+                self.expedition.advance_manual(0, self.command, auto_attack=self.active)
             frame = self._frame(known, now)
             if frame.get("expedition") is not None:
                 frame["expedition"]["action_error"] = action_error
@@ -260,7 +264,7 @@ class BrowserSession:
                 return
             command = self.command if now - self.input_time <= INPUT_LEASE else InputCommand()
             if self.expedition is not None:
-                self.expedition.advance_manual(TICK_MS, command)
+                self.expedition.advance_manual(TICK_MS, command, auto_attack=self.active)
                 if self.expedition.anchor_ms is not None:
                     self.active = False
             else:
@@ -280,7 +284,7 @@ class BrowserSession:
                 return
             command = self.command if now - self.input_time <= INPUT_LEASE else InputCommand()
             if self.expedition is not None:
-                self.expedition.advance_manual(ms, command)
+                self.expedition.advance_manual(ms, command, auto_attack=self.active)
                 if self.expedition.anchor_ms is not None:
                     self.active = False
             else:

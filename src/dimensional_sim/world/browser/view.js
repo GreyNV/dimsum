@@ -6,6 +6,12 @@ export const CELL_H = 7;
 /** Default zoom frames a fight legibly; players can zoom out to survey terrain. */
 export const ZOOM = Object.freeze({min: .7, initial: 1.3, max: 2.4});
 export const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+/** A touch stick chooses one of the four movement directions used by the runtime. */
+export function stickDirection(dx, dy, deadZone = 10) {
+  if (Math.hypot(dx, dy) < deadZone) return null;
+  return Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'east' : 'west')
+    : (dy >= 0 ? 'south' : 'north');
+}
 /** Stable uint32 visual noise. Never used for gameplay or terrain selection. */
 export function visualHash(x, y, seed = 0) {
   let n = (Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ seed) >>> 0;
@@ -55,6 +61,11 @@ export class Controls {
     if (this.taps.length > 4) this.taps.shift();
   }
   release(key) { this.held.delete(key); }
+  steer(key, direction) {
+    if (!direction) { this.release(key); return; }
+    if (!this.held.has(key)) this.held.set(key, {direction, order: ++this.serial});
+    else this.held.get(key).direction = direction;
+  }
   nextMove() {
     const held = [...this.held.values()].sort((a, b) => b.order - a.order)[0]?.direction;
     if (held) return held;

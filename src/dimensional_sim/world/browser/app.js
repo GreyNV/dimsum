@@ -1,7 +1,7 @@
 /** Browser adapter: snapshots in, character art out. Python owns all game rules. */
-import {TILE_W, TILE_H, ZOOM, clamp, residentBounds, cameraView, follow, retainResident, tileAt, visualHash, Controls} from './view.js';
+import {TILE_W, TILE_H, ZOOM, clamp, residentBounds, cameraView, follow, retainResident, tileAt, visualHash, stickDirection, Controls} from './view.js';
 import {PALETTE, OBJECT_PAD, paintChunk, drawTree, terrainColor} from './art.js';
-import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawDamage, drawFloat, drawSpot, drawSpotCompletion, drawCamp, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
+import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawUnarmedReach, drawDamage, drawFloat, drawSpot, drawSpotCompletion, drawCamp, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
 import {PAGES, needsDetail, pageModel, PANELS, COLLAPSE_KEY, loadCollapsed, toggleCollapsed, defaultCollapsed} from './pages.js';
 import {debugText, shopSections, ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
 import {regionCue, skillSlots, worldMode} from './world_ui.js';
@@ -42,7 +42,26 @@ const readUi = key => { try { return localStorage.getItem(key); } catch { return
 const writeUi = (key, value) => { try { localStorage.setItem(key, value); } catch { /* optional */ } };
 let collapsed = loadCollapsed(readUi(COLLAPSE_KEY), isMobile());
 let controlMode = 'auto', bagOpen = false, pendingInteract = false;
+/* A mode the player just chose; polls already in flight still carry the old mode, so the
+ * server's answer is only adopted once a request with this mode has been answered. */
+let requestedMode = null;
+let stickPointer = null;
+const STICK_KEY = 'touch:stick';
 const manualAllowed = () => !state?.expedition || controlMode === 'active';
+
+function resetStick() {
+  stickPointer = null;
+  controls.steer(STICK_KEY, null);
+  $('stick-thumb').style.transform = 'translate(-50%,-50%)';
+}
+function moveStick(event) {
+  const rect = $('move-stick').getBoundingClientRect();
+  const dx = event.clientX - (rect.left + rect.width / 2);
+  const dy = event.clientY - (rect.top + rect.height / 2);
+  const distance = Math.hypot(dx, dy), scale = distance ? Math.min(30, distance) / distance : 0;
+  $('stick-thumb').style.transform = `translate(calc(-50% + ${Math.round(dx * scale)}px),calc(-50% + ${Math.round(dy * scale)}px))`;
+  controls.steer(STICK_KEY, stickDirection(dx, dy));
+}
 
 function status(message) { if ($('status').textContent !== message) $('status').textContent = message; }
 function resize() {
@@ -54,6 +73,7 @@ function resize() {
 function setPause(value) {
   paused = value;
   controls.reset();
+  resetStick();
   $('pause-overlay').hidden = !paused;
   $('pause').setAttribute('aria-pressed', String(paused));
   $('pause').setAttribute('aria-label', paused ? 'Resume exploration' : 'Pause exploration');
@@ -72,7 +92,7 @@ function updateActivity() {
 function changeZoom(delta) {
   zoom = clamp(Math.round((zoom + delta) * 10) / 10, ZOOM.min, ZOOM.max);
 }
-function adopt(next) {
+function adopt(next, sentControl = null) {
   const firstSnapshot = state === null;
   for (const chunk of next.chunks) {
     chunks.set(chunk.id, chunk);
@@ -87,13 +107,16 @@ function adopt(next) {
     setPause(false);
   }
   state = next; mapDirty = true;
-  if (next.expedition?.anchor_space || next.expedition?.prologue) controlMode = 'auto';
-  else controlMode = worldMode(next.expedition);
+  if (requestedMode !== null && sentControl === requestedMode) requestedMode = null;
+  if (next.expedition?.anchor_space || next.expedition?.prologue) { controlMode = 'auto'; requestedMode = null; }
+  else if (requestedMode === null) controlMode = worldMode(next.expedition);
   const active = controlMode === 'active';
+  if (!active) resetStick();
   document.body.classList.toggle('active-control', active);
   document.body.classList.toggle('manual-unlocked', active);
   $('mode-switch').textContent = active ? 'Auto explore' : 'Take control';
   $('mode-switch').setAttribute('aria-pressed', String(active));
+  $('attack-state').textContent = next.expedition?.auto_target ? 'TARGET IN REACH' : 'AUTO STRIKE';
   $('mode-switch').disabled = !!next.expedition?.prologue || !!next.expedition?.anchor_space;
   $('region-tip').textContent = regionCue(next.expedition?.region);
   const progress = next.expedition?.activity;
@@ -288,7 +311,7 @@ async function poll() {
     if (needsDetail(page) && (!lastDetail || started - lastDetailAt > 500)) { body.detail = true; lastDetailAt = started; }
     const attackRevision = controls.attackRevision;
     const next = await request('/api/input', body);
-    controls.acknowledge(body, attackRevision); pendingAction = null; pendingInteract = false; adopt(next);
+    controls.acknowledge(body, attackRevision); pendingAction = null; pendingInteract = false; adopt(next, body.control);
     if (connection !== 'connected') { connection = 'connected'; status(''); }
   } catch {
     connection = 'disconnected';
@@ -452,6 +475,11 @@ function render(now) {
       const at=enemyXY(t,now);
       drawEnemy(ctx,t,at.x,at.y,{clock:state.clock_ms,reducedMotion,ghost:true,hit:hit?now-hit.at:Infinity});
     }
+    if (state.expedition?.control === 'manual' && !prologue) {
+      const target = state.targets.find(t=>t.id===state.expedition.auto_target && t.hp>0);
+      drawUnarmedReach(ctx,actor.x,actor.y,target ? [(target.x+.5)*TILE_W,(target.y+.5)*TILE_H] : null,
+        state.player.animation === 'attack');
+    }
     // Combat marks draw above canopies so a swing is never hidden by leaves.
     if(swing.slashAt!==null) {
       const age=now-swing.slashAt;
@@ -528,17 +556,20 @@ $('pause').addEventListener('click',()=>setPause(!paused));
 $('mode-switch').addEventListener('click',()=>{
   if ($('mode-switch').disabled) return;
   controlMode = controlMode === 'auto' ? 'active' : 'auto';
-  controls.reset(); pendingInteract = false;
+  requestedMode = controlMode;
+  controls.reset(); resetStick(); pendingInteract = false;
   document.body.classList.toggle('active-control', controlMode === 'active');
   document.body.classList.toggle('manual-unlocked', controlMode === 'active');
   $('mode-switch').textContent = controlMode === 'active' ? 'Auto explore' : 'Take control';
   $('mode-switch').setAttribute('aria-pressed', String(controlMode === 'active'));
 });
-$('bag-toggle').addEventListener('click',()=>{
-  bagOpen = !bagOpen;
+function setBag(open) {
+  bagOpen = open;
   document.body.classList.toggle('bag-open', bagOpen);
   $('bag-toggle').setAttribute('aria-expanded', String(bagOpen));
-});
+}
+$('bag-toggle').addEventListener('click',()=>setBag(!bagOpen));
+$('bag-close').addEventListener('click',()=>setBag(false));
 $('touch-interact').addEventListener('click',()=>{ if (!paused && manualAllowed()) pendingInteract = true; });
 // Some mobile browsers still zoom on a double tap over HUD text; touch-action covers the rest.
 document.addEventListener('dblclick',event=>event.preventDefault());
@@ -570,17 +601,20 @@ $('anchor-shop').addEventListener('click',event=>{
 $('resume').addEventListener('click',()=>{setPause(false);canvas.focus();});
 $('zoom-in').addEventListener('click',()=>changeZoom(.1));
 $('zoom-out').addEventListener('click',()=>changeZoom(-.1));
-for(const button of document.querySelectorAll('[data-move],#touch-attack')) {
-  const key='touch:'+button.id+button.dataset.move;
-  button.addEventListener('pointerdown',event=>{
-    event.preventDefault(); if(paused || !manualAllowed())return;
-    button.setPointerCapture(event.pointerId);
-    if(button.dataset.move)controls.press(key,button.dataset.move);else controls.attack(true);
-  });
-  for(const name of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(name,()=>{
-    controls.release(key);if(!button.dataset.move)controls.attack(false);
-  });
-}
+const stick = $('move-stick');
+stick.addEventListener('pointerdown',event=>{
+  event.preventDefault();
+  if (paused || !manualAllowed() || stickPointer !== null) return;
+  stickPointer = event.pointerId;
+  stick.setPointerCapture(event.pointerId);
+  moveStick(event);
+});
+stick.addEventListener('pointermove',event=>{
+  if (event.pointerId === stickPointer) { event.preventDefault(); moveStick(event); }
+});
+for (const name of ['pointerup','pointercancel','lostpointercapture']) stick.addEventListener(name,event=>{
+  if (event.pointerId === stickPointer) resetStick();
+});
 function toggleDebug() { debugOn = !debugOn; $('debug-panel').hidden = !debugOn; }
 function applyCollapsed() {
   for (const id of PANELS) {

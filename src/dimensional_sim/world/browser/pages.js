@@ -22,10 +22,11 @@ const title = text => String(text).replaceAll('_', ' ').replace(/^\w/, c => c.to
 const label = id => LABEL[id] || title(id);
 
 /* ---------- collapsible panels ---------- */
-export const PANELS = Object.freeze(['location', 'expedition', 'map', 'inventory']);
+// The inventory is never folded: on phones it opens as a centered bag (Bag button), on desktop it stays open.
+export const PANELS = Object.freeze(['location', 'expedition', 'map']);
 export const COLLAPSE_KEY = 'dimsum.ui.collapsed';
 export function defaultCollapsed(mobile) {
-  return {location: false, expedition: false, map: false, inventory: !!mobile};
+  return {location: false, expedition: false, map: false};
 }
 /** Stored layout (JSON text or null) over the defaults; unknown keys and bad values are ignored. */
 export function loadCollapsed(raw, mobile) {

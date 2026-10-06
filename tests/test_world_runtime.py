@@ -117,6 +117,17 @@ class RuntimeTests(unittest.TestCase):
         game.advance(360, InputCommand(attack=True))
         self.assertEqual(game.targets["near"].hp, 3)
 
+    def test_facing_command_turns_without_moving_before_attack(self):
+        game = exploration()
+        game.targets["east"] = Target("east", game.player.chunk, game.player.x + 1, game.player.y, 3)
+        start = (game.player.chunk, game.player.x, game.player.y)
+        game.advance(120, InputCommand(attack=True, face="east"))
+        self.assertEqual((game.player.chunk, game.player.x, game.player.y), start)
+        self.assertEqual(game.player.facing, "east")
+        self.assertEqual(game.targets["east"].hp, 2)
+        with self.assertRaises(ValueError):
+            InputCommand(face="northeast")
+
     def test_all_facing_hitboxes_and_attack_locks_movement(self):
         for facing, offset in zip(("north", "east", "south", "west"),
                                   ((0, -1), (1, 0), (0, 1), (-1, 0))):

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {visualHash, residentBounds, cameraView, follow, retainResident, tileAt, Controls, TILE_W, TILE_H} from '../src/dimensional_sim/world/browser/view.js';
+import {visualHash, residentBounds, cameraView, follow, retainResident, tileAt, stickDirection, Controls, TILE_W, TILE_H} from '../src/dimensional_sim/world/browser/view.js';
 import {groundMarks, paintChunk, TREE, terrainColor, OBJECT_PAD, clearStamps, stampCount, TILE_VARIANTS, TREE_VARIANTS, ROCK_VARIANTS} from '../src/dimensional_sim/world/browser/art.js';
 import {playerSprite, playerSpriteLayers, PLAYER_SLOTS, ENEMY, ROLE, spriteSize, mirrorSprite, paintSprite, punchReach, hiddenBehind, occludingTreeTiles, SPOTS, POSE, crouchSprite, drawSpot, CAMP, ELDER} from '../src/dimensional_sim/world/browser/actors.js';
 import {activityText, newRewards, ATTRIBUTES, rewardTexts, reportIsFresh, reportStorageKey, ExpeditionHud, prologueView, shopSections, debugText} from '../src/dimensional_sim/world/browser/hud.js';
@@ -64,6 +64,20 @@ test('movement prioritizes latest held key; pause and reset release all input',(
   input.attack(true);
   assert.deepEqual(input.payload(true,['x']),{move:null,attack:false,paused:true,known:['x']});
   input.reset();assert.deepEqual(input.payload(false,[]),{move:null,attack:false,paused:false,known:[]});
+});
+test('movement stick changes cardinal direction and stops at its dead zone',()=>{
+  assert.equal(stickDirection(4, 3), null);
+  assert.equal(stickDirection(27, 9), 'east');
+  assert.equal(stickDirection(-22, 8), 'west');
+  assert.equal(stickDirection(8, -28), 'north');
+  assert.equal(stickDirection(-7, 29), 'south');
+  const input = new Controls();
+  input.steer('stick', 'north');
+  assert.equal(input.payload(false, []).move, 'north');
+  input.steer('stick', 'east');
+  assert.equal(input.payload(false, []).move, 'east');
+  input.steer('stick', null);
+  assert.equal(input.payload(false, []).move, null);
 });
 test('character art is multi-cell; cached ground and objects paint separately without actors',()=>{
   assert.ok(TREE.length>4 && TREE.some(row=>row.length>6));

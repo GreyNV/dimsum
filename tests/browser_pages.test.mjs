@@ -78,11 +78,11 @@ test('settings: reset buttons only when hosted, seed always shown', () => {
 
 test('collapse state: defaults per screen, stored values win, junk ignored', () => {
   assert.equal(COLLAPSE_KEY, 'dimsum.ui.collapsed');
-  assert.deepEqual(PANELS, ['location', 'expedition', 'map', 'inventory']);
-  assert.deepEqual(defaultCollapsed(false), {location: false, expedition: false, map: false, inventory: false});
+  assert.deepEqual(PANELS, ['location', 'expedition', 'map'], 'the bag is never folded');
+  assert.deepEqual(defaultCollapsed(false), {location: false, expedition: false, map: false});
   assert.equal(defaultCollapsed(true).expedition, false, 'auto action and recent events stay visible on phones');
   assert.deepEqual(loadCollapsed('{"map":true,"bogus":true,"location":"yes"}', false),
-    {location: false, expedition: false, map: true, inventory: false});
+    {location: false, expedition: false, map: true});
   assert.deepEqual(loadCollapsed('not json', true), defaultCollapsed(true));
   assert.deepEqual(loadCollapsed(null, false), defaultCollapsed(false));
   const s = toggleCollapsed(defaultCollapsed(false), 'map');

@@ -140,7 +140,6 @@ body.page-open .touch-controls,body.page-open .anchor-space,body.page-open .dial
   .page table{font-size:10.5px}
 }
 @media(min-width:721px){body.fold-location .expedition{top:108px}body.fold-map .inventory{top:102px}}
-@media(max-width:720px){body.fold-map .inventory{top:50px}}
 .progress li.group{gap:4px;padding:6px 8px;border:1px solid #2f2a1d;background:rgba(0,0,0,.18)}
 .p-group{font:600 11px ui-monospace,Consolas,monospace;letter-spacing:1px;text-transform:uppercase;color:#e7c27a}
 .p-bar{display:flex;flex-direction:column;gap:2px}.p-bar .p-head span{color:#a99d7d}
@@ -167,7 +166,7 @@ body.page-open .touch-controls,body.page-open .anchor-space,body.page-open .dial
 #bag-toggle{display:none}
 body.active-control .expedition{display:none!important}
 body.active-control .inventory:not(.bag-open){display:none!important}
-body.active-control .touch-controls.manual-only{display:grid!important}
+body.active-control .touch-controls.manual-only{display:none!important}
 body.active-control .auto-badge{display:none}
 body.anchor-active .skill-bar,body.prologue .skill-bar,body.page-open .skill-bar{display:none!important}
 body.page-open .controls{display:none!important}
@@ -197,13 +196,31 @@ body.page-open .controls{display:none!important}
   .view-controls{width:100%;justify-content:space-between;gap:4px}
   .view-controls button,#bag-toggle{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:5px 10px;font-size:11px}
   #mode-switch{flex:1;min-width:124px}
-  .inventory{display:none;top:143px;right:8px;width:150px;z-index:5}
+  /* Bag: a centered, always-expanded panel opened by the Bag button (never stacked on the minimap). */
+  .inventory{display:none;position:fixed;left:50%;top:50%;right:auto;transform:translate(-50%,-50%);
+    width:min(340px,calc(100vw - 32px));padding:12px 14px 14px;z-index:7;background:rgba(8,12,8,.95);
+    border-color:#8a6c44;box-shadow:0 18px 70px #000c}
+  .inventory .map-heading{font-size:10px;letter-spacing:1px;margin-bottom:10px;align-items:center}
+  .inventory .slots{grid-template-columns:repeat(4,1fr);gap:6px}
+  .inventory .slots li{font-size:16px}
+  .bag-close{display:inline-flex;align-items:center;justify-content:center;min-width:32px;min-height:32px;
+    margin-left:10px;padding:0;font-size:18px;line-height:1}
   body.bag-open .inventory{display:block!important}
-  .touch-controls{display:none;left:8px;right:8px;bottom:160px;grid-template-columns:44px 44px 44px 1fr 58px 58px;
-    grid-template-rows:42px 42px;gap:4px;z-index:3}
-  .touch-controls .interact{grid-column:5;grid-row:2}
-  .touch-controls .attack{grid-column:6;grid-row:2}
-  .touch-controls button{min-width:42px;min-height:42px;border:1px solid #8b9b73;color:#e4efd5}
+  body.page-open .inventory,body.anchor-active .inventory,body.prologue .inventory{display:none!important}
+  body.active-control:not(.page-open):not(.anchor-active) .touch-controls.manual-only{display:grid!important}
+  .touch-controls{left:8px;right:8px;bottom:158px;grid-template-columns:108px minmax(0,1fr) 66px;
+    align-items:center;gap:8px;height:108px;z-index:3;pointer-events:none}
+  .touch-controls button{pointer-events:auto;touch-action:none;color:#e4efd5}
+  #move-stick{position:relative;width:108px;height:108px;border-radius:50%;border:2px solid #a8b992;
+    background:radial-gradient(circle,#243523e8 0 26%,#142015e8 27% 100%);box-shadow:0 0 0 4px #10190bbb,inset 0 0 0 8px #30452a99}
+  .stick-cross{position:absolute;inset:0;display:grid;place-items:center;color:#698063;font:36px ui-monospace,Consolas,monospace}
+  .stick-thumb{position:absolute;left:50%;top:50%;width:48px;height:48px;transform:translate(-50%,-50%);
+    border-radius:50%;border:2px solid #d6c58d;background:#475d3d;box-shadow:0 3px 12px #000a;pointer-events:none}
+  .attack-readout{align-self:end;margin-bottom:9px;min-width:0;padding:5px 6px;background:#142014d9;
+    border:1px solid #65784d;font:9px/1.3 ui-monospace,Consolas,monospace;color:#a9bb93;text-align:center}
+  .attack-readout strong{display:block;color:#e7d19a;letter-spacing:.8px;font-size:9px}
+  .attack-readout span{display:block}
+  .touch-controls .interact{min-width:60px;min-height:52px;align-self:end;margin-bottom:8px;border:1px solid #8b9b73;background:#192519e8}
   body.active-control .skill-bar{bottom:106px}
   body.active-control .map-panel{opacity:.8}
   body.active-control .location .location-line{font-size:9px;line-height:1.2}
@@ -212,3 +229,6 @@ body.page-open .controls{display:none!important}
   body.prologue .vitals{top:90px;left:8px;right:8px}
 }
 @media(max-width:380px){.location{width:56vw}.map-panel{width:34vw}.region-tip{font-size:8px}}
+
+.bag-head{display:inline-flex;align-items:center}.bag-close{display:none}
+@media(max-width:720px){.bag-close{display:inline-flex}}

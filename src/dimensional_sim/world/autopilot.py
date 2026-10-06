@@ -59,7 +59,7 @@ from .journal import new_journal, record_action, record_death, record_items, val
 from .encounters import (ATTRIBUTES, BY_ID, ENCOUNTER_VERSION, ITEMS, EncounterSpot, chunk_spots,
                          forced_spot, lead_spot, roll_loot, roll_window, spot_id)
 from .tuning import (BOUNTY_WINDOW_BONUS, COMFORT_DAMAGE_PERCENT, IRON_SKIN_HIT_PERCENT, PITY_CHUNKS,
-                     STAFF_PUNCH_BONUS, WRAP_HIT_PERCENT)
+                     STAFF_PUNCH_BONUS, UNARMED_REACH, WRAP_HIT_PERCENT)
 from .models import DELTAS, DIRECTIONS, ChunkKey, fields, identifier, integer
 
 DIRECTION_DELTAS = tuple(DELTAS[d] for d in DIRECTIONS)
@@ -1298,7 +1298,33 @@ class Expedition:
         self._apply_vitals(ms)
         self.monster_ms += ms
 
-    def advance_manual(self, milliseconds, command=InputCommand()):
+    def unarmed_target(self):
+        """The nearest admitted enemy within the current unarmed hitbox reach."""
+        px, py = self._player()
+        candidates = []
+        for target in self.game.targets.values():
+            if target.hp <= 0 or target.id not in self.admitted or target.chunk.dimension != self.dimension:
+                continue
+            tx, ty = self._global(target.chunk, target.x, target.y)
+            distance = abs(tx - px) + abs(ty - py)
+            if 0 < distance <= UNARMED_REACH:
+                candidates.append((distance, target.id, tx, ty))
+        return min(candidates) if candidates else None
+
+    def _manual_combat_command(self, command, auto_attack):
+        if not auto_attack or command.move or command.attack or self.task:
+            return command
+        target = self.unarmed_target()
+        if target is None:
+            return command
+        _, _, tx, ty = target
+        px, py = self._player()
+        direction = next(d for d, delta in DELTAS.items() if delta == (tx - px, ty - py))
+        # Release the attack edge during the animation; a later tick can punch again.
+        return InputCommand(attack=self.game.player.animation != "attack" and not self.game.attack_held,
+                            face=direction)
+
+    def advance_manual(self, milliseconds, command=InputCommand(), *, auto_attack=False):
         """Player chooses movement; expedition still owns time, spots, vitals and enemies."""
         integer(milliseconds, "elapsed milliseconds", 0)
         if self.anchor_ms is not None:
@@ -1307,7 +1333,7 @@ class Expedition:
             return self.advance(milliseconds)
         if milliseconds == 0:
             self._settle()
-            self.game.advance(0, command)
+            self.game.advance(0, self._manual_combat_command(command, auto_attack))
             return
         remaining = milliseconds
         while remaining:
@@ -1323,7 +1349,7 @@ class Expedition:
             task = self.task
             if task:
                 cap = min(cap, task["duration_ms"] - task["elapsed_ms"])
-            self._run(cap, InputCommand() if task else command)
+            self._run(cap, InputCommand() if task else self._manual_combat_command(command, auto_attack))
             remaining -= cap
             if task:
                 task["elapsed_ms"] += cap

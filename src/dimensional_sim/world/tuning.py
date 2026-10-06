@@ -20,6 +20,7 @@ ASH_DIVISOR = 2
 ASH_PER_RING = 1
 
 # Crafted gear effects.
+UNARMED_REACH = 1             # one cardinal cell; the default punch hitbox
 STAFF_PUNCH_BONUS = 1
 WRAP_HIT_PERCENT = 70          # hide wrap: boar hits deal 70%
 IRON_SKIN_HIT_PERCENT = 75     # boon: boar hits deal 75%

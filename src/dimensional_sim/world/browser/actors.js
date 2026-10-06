@@ -498,6 +498,32 @@ export function drawHealth(ctx, cx, y, hp, maxHp) {
   }
 }
 
+/** One-cell cardinal reach and the server-selected target, shown during Active play. */
+export function drawUnarmedReach(ctx, x, y, target = null, attacking = false) {
+  const foot = y + ACTOR_FOOT - 2;
+  ctx.save();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = target ? '#f2cb79' : '#a8b88b';
+  ctx.fillStyle = target ? '#d9a65325' : '#8caf6b12';
+  ctx.globalAlpha = attacking ? .85 : target ? .68 : .42;
+  ctx.beginPath();
+  ctx.moveTo(x, foot - TILE_H);
+  ctx.lineTo(x + TILE_W, foot);
+  ctx.lineTo(x, foot + TILE_H);
+  ctx.lineTo(x - TILE_W, foot);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  if (target) {
+    const [tx, ty] = target;
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = '#ffdb8f';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(tx - TILE_W * .42, ty - TILE_H * .45, TILE_W * .84, TILE_H * .9);
+    ctx.beginPath(); ctx.moveTo(x, foot); ctx.lineTo(tx, ty); ctx.stroke();
+  }
+  ctx.restore();
+}
+
 /** Punch speed lines from the shoulder toward the facing; age in ms (0..200). */
 export function drawPunchLines(ctx, x, y, facing, age, duration = 200) {
   if (age < 0 || age >= duration) return;

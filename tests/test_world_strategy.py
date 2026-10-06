@@ -7,7 +7,7 @@ from dimensional_sim.world.autopilot import Expedition
 from dimensional_sim.world.catalog import BY_ID, REGION_CELL, REGIONS
 from dimensional_sim.world.models import ChunkKey
 from dimensional_sim.world.repository import WorldRepository
-from dimensional_sim.world.runtime import Exploration
+from dimensional_sim.world.runtime import Exploration, Target
 from dimensional_sim.world.session import BrowserSession
 from dimensional_sim.world.web import new_world
 
@@ -159,6 +159,41 @@ class GeographyStrategyTests(unittest.TestCase):
         self.assertEqual(expedition.task["spot"], spot.id)
         session.step(.04)
         self.assertEqual(expedition.total_ms, before + 40)
+
+    def test_active_stop_in_one_cell_range_faces_and_auto_attacks(self):
+        expedition = Expedition(Exploration(new_world(5), "forest"), fresh=False)
+        expedition.game.targets.clear()
+        player = expedition.game.player
+        target = Target("enc:test-boar", player.chunk, player.x + 1, player.y, 4)
+        expedition.game.targets[target.id] = target
+        expedition.admitted[target.id] = "bramble_boar"
+        session = BrowserSession(expedition.game, expedition)
+        body = {"move": None, "attack": False, "paused": False, "known": [], "control": "active"}
+        frame = session.input(body, 0)
+        self.assertEqual(frame["expedition"]["attack_radius"], 1)
+        self.assertEqual(frame["expedition"]["auto_target"], target.id)
+        self.assertEqual(player.facing, "east")
+        self.assertEqual(player.animation, "attack")
+        for tick in range(1, 35):
+            session.step(tick * .02)
+        self.assertLess(target.hp, 4)
+        self.assertEqual((player.x, player.y), (expedition.anchor[0], expedition.anchor[1]))
+
+    def test_active_movement_and_diagonal_enemy_do_not_auto_attack(self):
+        expedition = Expedition(Exploration(new_world(5), "forest"), fresh=False)
+        expedition.game.targets.clear()
+        player = expedition.game.player
+        target = Target("enc:test-boar", player.chunk, player.x + 1, player.y + 1, 4)
+        expedition.game.targets[target.id] = target
+        expedition.admitted[target.id] = "bramble_boar"
+        session = BrowserSession(expedition.game, expedition)
+        body = {"move": "north", "attack": False, "paused": False, "known": [], "control": "active"}
+        frame = session.input(body, 0)
+        self.assertIsNone(frame["expedition"]["auto_target"])
+        self.assertNotEqual(player.animation, "attack")
+        for tick in range(1, 6):
+            session.step(tick * .02)
+        self.assertEqual(target.hp, 4)
 
     def test_legacy_region_save_retains_v1_geography(self):
         old = WorldRepository(19, region_version=1)

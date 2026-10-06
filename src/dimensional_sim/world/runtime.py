@@ -19,12 +19,15 @@ from .seeds import derive_seed
 class InputCommand:
     move: str | None = None
     attack: bool = False
+    face: str | None = None
 
     def __post_init__(self):
         if self.move is not None and self.move not in DIRECTIONS:
             raise ValueError("move must be a cardinal direction")
         if type(self.attack) is not bool:
             raise ValueError("attack input must be boolean")
+        if self.face is not None and self.face not in DIRECTIONS:
+            raise ValueError("face must be a cardinal direction")
 
 
 @dataclass
@@ -202,6 +205,8 @@ class Exploration:
         self.last_move = command.move
         if command.move and self.player.animation != "attack":
             self.player.facing = command.move
+        if command.face and self.player.animation != "attack":
+            self.player.facing = command.face
         if command.attack and not self.attack_held and self.player.animation != "attack":
             self._set_animation("attack")
             self.move_elapsed_ms = 0

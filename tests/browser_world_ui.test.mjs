@@ -26,8 +26,8 @@ test('mobile World has one canvas and both control presentations', () => {
   const html = readFileSync(new URL('../src/dimensional_sim/world/browser/index.html', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../src/dimensional_sim/world/browser/style.css', import.meta.url), 'utf8');
   assert.equal((html.match(/<canvas id="scene"/g) || []).length, 1);
-  for (const id of ['mode-switch', 'skill-bar', 'touch-interact', 'touch-attack'])
+  for (const id of ['mode-switch', 'skill-bar', 'touch-interact', 'move-stick', 'attack-state'])
     assert.match(html, new RegExp(`id="${id}"`));
   assert.match(css, /body\.active-control \.expedition\{display:none/);
-  assert.match(css, /body\.active-control \.touch-controls\.manual-only\{display:grid!important\}/);
+  assert.match(css, /body\.active-control:not\(\.page-open\):not\(\.anchor-active\) \.touch-controls\.manual-only\{display:grid!important\}/);
 });
