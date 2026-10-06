@@ -25,7 +25,7 @@ const label = id => LABEL[id] || title(id);
 export const PANELS = Object.freeze(['location', 'expedition', 'map', 'inventory']);
 export const COLLAPSE_KEY = 'dimsum.ui.collapsed';
 export function defaultCollapsed(mobile) {
-  return {location: false, expedition: !!mobile, map: false, inventory: !!mobile};
+  return {location: false, expedition: false, map: false, inventory: !!mobile};
 }
 /** Stored layout (JSON text or null) over the defaults; unknown keys and bad values are ignored. */
 export function loadCollapsed(raw, mobile) {

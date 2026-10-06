@@ -123,9 +123,7 @@ def _terrain_profile(chunk):
 
 
 def inspect_chunk(seed, x, y, life=1, unlocked=(), knowledge=(), recipes=()):
-    """Why this chunk looks and plays the way it does: its pinned region (and how it was
-    chosen), the region's generation parameters and resulting terrain, the rolled spots,
-    and every spot action's lifecycle state (UNKNOWN ... SPAWNED) with reasons."""
+    """Inspect geography and a hypothetical first-entry roll; no event map is generated."""
     from .encounters import chunk_spots
     from .regions import REGION_VERSION, region_cell
     world = new_world(seed)
@@ -134,24 +132,27 @@ def inspect_chunk(seed, x, y, life=1, unlocked=(), knowledge=(), recipes=()):
     region = world.region_for(key)
     ctx = Context(biome=chunk.asset.biome, region=region.id, region_def=region, placement="spot",
                   unlocked=frozenset(unlocked), knowledge=frozenset(knowledge), recipes=frozenset(recipes))
-    spots = chunk_spots(chunk, life, context=ctx)
+    from .seeds import derive_seed
+    sample_seed = derive_seed(seed, "runtime-opportunity-v1", life, 0, f"forest:{x}:{y}")
+    spots = chunk_spots(chunk, life, context=ctx, roll_seed=sample_seed)
     rolled = {s.encounter for s in spots}
     return {"seed": seed, "chunk": [x, y], "biome": chunk.asset.biome,
             "generator_version": world.generator_version,
             "region": region.id, "region_name": region.name,
-            "region_provenance": {"cell": list(region_cell(key)), "version": REGION_VERSION,
+            "region_provenance": {"cell": list(region_cell(key)), "version": world.region_version,
                                   "rule": "origin cell" if region_cell(key) == (0, 0) else
-                                  "weighted roll of derive_seed(world_seed, version, biome, cell)"},
+                                  "coordinate proposals plus adjacency compatibility"},
             "region_parameters": {"canopy": region.canopy, "brush": region.brush, "landmark": region.landmark,
                                   "tint": region.tint, "action_weight_percent": dict(region.weights)},
             "terrain": _terrain_profile(chunk),
             "life": life, "unlocked": sorted(unlocked), "knowledge": sorted(knowledge), "recipes": sorted(recipes),
             "spots": [{"id": s.id, "action": s.encounter, "cell": [s.x, s.y]} for s in spots],
+            "sample_only": True,
             "bucket": describe_bucket(ctx),
             "actions": [{k: v for k, v in explain(a.id, Context(**{**ctx.__dict__, "spawned": a.id in rolled})).items()
                          if k in ("id", "state", "weight", "share_permille", "bucket_reasons", "weight_modifiers")}
                         for a in BY_ID.values() if a.placement == "spot"],
-            "note": "ROLLED here is a chunk opportunity; live spawn-window screening may still reject it."}
+            "note": "Hypothetical first-entry sample only. The live expedition rolls at entry, after preceding entries and current progression; no spots are stored in geography."}
 
 
 def region_map(seed, radius=2):

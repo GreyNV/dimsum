@@ -451,17 +451,29 @@ ORIGIN_REGION = "old_road"   # the ambush road runs through the anchor's region
 REGIONS = {r.id: r for r in (
     RegionDef("old_road", "The Old Road", "dark_forest", 3, "#2a2716",
               {"abandoned_camp": 300, "fallen_watchtower": 200, "old_carvings": 150,
-               "bramble_berries": 120, "bramble_boar": 70, "mushroom_ring": 50}, 34, 12, "road"),
+               "bramble_berries": 120, "bramble_boar": 70, "mushroom_ring": 50,
+               "fallen_branches": 75}, 34, 12, "road"),
     RegionDef("deep_woods", "Deep Woods", "dark_forest", 3, "#101a10",
               {"bramble_boar": 250, "gnarled_tree": 200, "mushroom_ring": 200, "animal_tracks": 150,
-               "bramble_berries": 60, "forest_spring": 70}, 78, 22, "grove"),
+               "bramble_berries": 60, "forest_spring": 70, "fallen_branches": 160,
+               "hunt_deer": 90}, 78, 22, "grove"),
     RegionDef("bramble_thicket", "Bramble Thicket", "dark_forest", 2, "#22180f",
               {"bramble_berries": 300, "bramble_boar": 130, "fallen_branches": 130, "forest_spring": 60},
               68, 58, "thicket"),
     RegionDef("still_glade", "Still Glade", "dark_forest", 2, "#13201d",
               {"forest_spring": 220, "moonlit_pool": 300, "mossy_stone": 220, "bramble_boar": 40,
-               "animal_tracks": 140}, 18, 8, "glade"),
+               "animal_tracks": 140, "follow_deer_tracks": 130, "hunt_deer": 125}, 18, 8, "glade"),
 )}
+
+# Compatibility of neighboring region cells. This affects geography only; action
+# eligibility and odds remain on RegionDef. Keep versioned with regions.py so an
+# existing world's saved geography is never silently changed by a tuning edit.
+REGION_ADJACENCY_V2 = {
+    "old_road": {"old_road": 5, "deep_woods": 2, "bramble_thicket": 2, "still_glade": 2},
+    "deep_woods": {"old_road": 2, "deep_woods": 5, "bramble_thicket": 4, "still_glade": 3},
+    "bramble_thicket": {"old_road": 2, "deep_woods": 4, "bramble_thicket": 5, "still_glade": 2},
+    "still_glade": {"old_road": 2, "deep_woods": 3, "bramble_thicket": 2, "still_glade": 5},
+}
 
 
 def validate_catalog():
@@ -499,6 +511,15 @@ def validate_catalog():
             raise ValueError(f"unlock {unlock.id} opens no action")
     if ORIGIN_REGION not in REGIONS:
         raise ValueError("origin region missing")
+    if set(REGION_ADJACENCY_V2) != set(REGIONS):
+        raise ValueError("region adjacency rows must cover the catalog")
+    for region, neighbors in REGION_ADJACENCY_V2.items():
+        if set(neighbors) != set(REGIONS):
+            raise ValueError(f"region adjacency row incomplete: {region}")
+        for neighbor, value in neighbors.items():
+            integer(value, "region adjacency weight", 1, 100)
+            if value != REGION_ADJACENCY_V2[neighbor][region]:
+                raise ValueError("region adjacency must be symmetric")
     for item in ITEMS.values():
         sources = [a for a in ACTIONS if any(l.item == item.id for l in a.loot) or a.effect == item.id]
         if not sources:

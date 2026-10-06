@@ -4,7 +4,7 @@
 |---|---|---|---|
 | `world/catalog.py` | Items, actions, unlocks, boons, regions, mastery cost (validated data) | - | - |
 | `world/tuning.py` | Balance numbers for spots, pity, offering, ash, gear, frontier | - | - |
-| `world/regions.py` / `world/repository.py` | Region selection and pinned region catalog per world | catalog.REGIONS, seeds | world save schema 2 |
+| `world/regions.py` / `world/repository.py` | Adjacency-weighted region selection and pinned region catalog per world | catalog.REGIONS, seeds | world save schema 3 |
 | `world/actions.py` | Known/eligible/bucket/explain (pure) | catalog | - |
 | `world/encounters.py` | Rolled spot, pity spot and temporary lead placement (pure) | actions, tuning | - |
 | `world/equipment.py` | Validated current-life weapon/body slots | catalog.ITEMS | - |
@@ -16,17 +16,17 @@
 | `world/simulate.py` | Seeded multi-run metrics (regions, leads, staff), chunk inspection, region map | autopilot | stdout |
 | `world/browser/*.js` | Presentation only (no rules); `pages.js` = tab pages + collapsible panels | snapshot | localStorage UI prefs |
 
-Data flow per chunk: `region_for` -> `Context` -> `bucket` -> `chunk_spots` -> `Expedition._screen`
+Data flow on entering a chunk: `region_for` -> `Context` -> `bucket` -> runtime `chunk_spots` -> `Expedition._screen`
 (window caps, drought, pity) -> admitted spots -> goals -> tasks -> rewards -> inventory -> crafting / eating /
 anchor economy -> meta (dust, ash, blessing, unlocked, mastery, boon) -> next life's windows and buckets.
 
-Determinism: every random choice is `derive_seed(world_seed | chunk_seed, label, ...)`. Screening order follows
-the deterministic resident-chunk order. All new state (stats, drought, forced pity spots, meta) is saved.
+Determinism: every random choice is derived from saved seed and entry history. Screening order follows
+player entry order. Runtime spot plans, stats, drought, forced pity spots and meta are saved.
 
 Pages (2026-10-05): the client asks for `detail: true` (at most twice a second) only while a page other than
 World/Settings is open; `session.snapshot` then adds `expedition.detail` from `details.detail()`. Achievements
 are computed from the journal on demand, never stored, so thresholds can change without a save upgrade.
-The journal itself is saved (expedition schema 8; schema 6 saves upgrade with an empty journal,
+The journal itself is saved (expedition schema 9; schema 6 saves upgrade with an empty journal,
 schema 7 saves migrate spot rolls and initialize discovery/Journal choice fields).
 
 Boar behavior (2026-10-05): every live, admitted boar within `BOAR_AGGRO_RADIUS` (9 steps) charges the avatar one

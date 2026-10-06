@@ -49,7 +49,7 @@ from dataclasses import replace
 
 from ..core import _softcapped_level
 from . import economy
-from .actions import Context, _requirement_reasons, bucket, reasons_against
+from .actions import Context, _requirement_reasons, bucket, outcome_chance, reasons_against
 from .catalog import (BOONS, REGIONS, UNLOCKS, JOURNAL_TOGGLE_MASTERY,
                       JOURNAL_FAVOR_MASTERY)
 from .equipment import equip_item, is_equipped, validate_equipped
@@ -57,7 +57,7 @@ from .generation import GENERATOR_VERSION
 from .repository import WorldRepository
 from .journal import new_journal, record_action, record_death, record_items, validate_journal
 from .encounters import (ATTRIBUTES, BY_ID, ENCOUNTER_VERSION, ITEMS, EncounterSpot, chunk_spots,
-                         forced_spot, lead_spot, roll_loot, roll_window)
+                         forced_spot, lead_spot, roll_loot, roll_window, spot_id)
 from .tuning import (BOUNTY_WINDOW_BONUS, COMFORT_DAMAGE_PERCENT, IRON_SKIN_HIT_PERCENT, PITY_CHUNKS,
                      STAFF_PUNCH_BONUS, WRAP_HIT_PERCENT)
 from .models import DELTAS, DIRECTIONS, ChunkKey, fields, identifier, integer
@@ -134,7 +134,7 @@ ELDER_LINES = (
 LOG_TYPES = ("encounter", "eat", "rest", "life", "blessing", "lore", "trade", "ambush",
              "craft", "reflect", "purchase", "rebirth")
 TASK_TYPES = ("perform", "pause", "rest", *SELF_ACTIONS, *PROLOGUE_MS)
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 def _table():
@@ -199,6 +199,7 @@ class Expedition:
         self.boon = None           # BoonDef id active this life
         self.journal = new_journal()   # lifetime counts (journal.py); persists across lives
         self.screen_log = []       # debug only, not saved: recent admissions/rejections
+        self.roll_log = []         # debug only: bucket at the instant of each new roll
         self._region_cache = {}
         self.monster_ms = 0
         self.anchor_ms = None
@@ -249,6 +250,7 @@ class Expedition:
         self.spawned = {ident: 0 for ident in self.budget}   # total admitted this life
         self.admitted = {}             # spot / asset-target id -> encounter id, this life
         self.screened_chunks = set()   # chunk ids whose spots were screened
+        self.spot_plans = {}           # chunk id -> immutable runtime roll, saved for replay
         self.screened_targets = set()  # asset-spawned target ids screened
 
     # ----- public state -------------------------------------------------
@@ -262,8 +264,33 @@ class Expedition:
         return "take_control" in self.skills
 
     def interrupt(self):
-        """Manual input took over: drop the plan; a running punch still completes."""
-        self.task, self.goal = None, None
+        """Hand over steering without erasing an already-started encounter."""
+        if self.task and self.task["type"] in ("pause", "rest"):
+            self.task = None
+        self.goal = None
+
+    def begin_interaction(self):
+        """Use the nearest admitted opportunity beside the player in either control mode."""
+        if self.anchor_ms is not None or self.in_prologue or self.task:
+            return False
+        px, py = self._player()
+        choices = []
+        for chunk in self._resident():
+            for spot in self._live(chunk):
+                if spot.id in self.completed or BY_ID[spot.encounter].category == "fight":
+                    continue
+                sx, sy = self._global(spot.chunk, spot.x, spot.y)
+                distance = abs(px - sx) + abs(py - sy)
+                if distance <= 1:
+                    choices.append((distance, spot.id, spot))
+        if not choices:
+            return False
+        spot = min(choices)[2]
+        action = BY_ID[spot.encounter]
+        self.goal = {"kind": "spot", "id": spot.id, "x": px, "y": py}
+        self.task = {"type": "perform", "spot": spot.id, "elapsed_ms": 0,
+                     "duration_ms": scaled_ms(action.duration_ms, self.speed(action.attribute))}
+        return True
 
     @property
     def in_prologue(self):
@@ -348,6 +375,7 @@ class Expedition:
                             for i, n, limit in self.bounty()],
                 "drought": dict(self.drought), "pity_after": dict(PITY_CHUNKS),
                 "screening": list(self.screen_log[-12:]), "stats": dict(self.stats),
+                "recent_rolls": list(self.roll_log[-8:]),
                 "currencies": {"dust": self.dust, "ash": self.ash, "blessing": self.blessing}}
 
     # ----- regions, known actions, contexts -----------------------------
@@ -504,28 +532,14 @@ class Expedition:
         return f"{key.dimension}:{key.x}:{key.y}"
 
     def _spots(self, chunk):
-        """Rolled spots (known actions, region bucket) plus this life's pity spots."""
-        unlocked = frozenset(self.unlocked)
-        # Everything that can change a roll is in the key, including progress requirements
-        # (counts/levels) of spot actions, so a reload re-rolls exactly what a live run cached.
-        progress = tuple(not _requirement_reasons(a, self.spot_context(chunk.key)) for a in SPOT_REQUIREMENT_ACTIONS) \
-            if SPOT_REQUIREMENT_ACTIONS else ()
-        key = (chunk.key, self.life, unlocked, frozenset(self.knowledge),
-               frozenset(self.recipes), frozenset(self.journal_disabled),
-               tuple(sorted(self.journal_favor.items())),
-               tuple(sorted((k, v) for k, v in self.mastery.items() if k in self.journal_disabled
-                            or k in self.journal_favor)), progress)
-        cached = self._spot_cache.get(key)
-        if cached is None or cached[0] != chunk.seed:
-            if len(self._spot_cache) > 256:
-                self._spot_cache.clear()
-            cached = (chunk.seed, chunk_spots(chunk, life=self.life, context=self.spot_context(chunk.key)))
-            self._spot_cache[key] = cached
-        spots = cached[1]
+        """This life's rolled opportunities; geography itself holds no encounter map."""
+        ident = self.chunk_ident(chunk.key)
+        spots = tuple(EncounterSpot(spot_id(chunk.key, index), action, chunk.key, x, y)
+                      for index, (action, x, y) in enumerate(self.spot_plans.get(ident, ())))
         extra = self.forced.get(self.chunk_ident(chunk.key))
         if not extra:
             return spots
-        fkey = (chunk.key, self.life, unlocked, tuple(extra))
+        fkey = (chunk.key, self.life, tuple(extra), spots)
         hit = self._spot_cache.get(fkey)
         if hit is not None:
             return hit
@@ -603,12 +617,25 @@ class Expedition:
         return self._admit(spot.id, action.id, chunk_id)
 
     def _screen(self):
-        """Admit new chunks' spots under the spawn windows, then apply food/enemy pity.
+        """Roll when the player enters a chunk, then apply windows and pity.
         Asset-spawned boars are always removed: enemies come only from fight spots."""
-        for chunk in self._resident():
+        for chunk in (self.game.current_chunk(),):
             ident = self.chunk_ident(chunk.key)
             if ident in self.screened_chunks:
                 continue
+            roll_seed = derive_seed(self.game.world.world_seed, "runtime-opportunity-v1",
+                                    self.life, len(self.spot_plans), ident)
+            context = self.spot_context(chunk.key)
+            rolled = chunk_spots(chunk, life=self.life, context=context,
+                                 roll_seed=roll_seed)
+            self.spot_plans[ident] = [(s.encounter, s.x, s.y) for s in rolled]
+            self.roll_log.append({"chunk": ident, "region": context.region,
+                                  "bucket": [{"id": a.id, "base": a.weight,
+                                              "region_percent": context.region_def.multiplier(a.id)
+                                              if context.region_def else 100,
+                                              "final": w} for a, w in bucket(context)],
+                                  "result": [s.encounter for s in rolled]})
+            del self.roll_log[:-12]
             self.screened_chunks.add(ident)
             self.stats["chunks"] += 1
             admitted = set()
@@ -968,9 +995,10 @@ class Expedition:
         for index, outcome in enumerate(action.outcomes):
             if count < outcome.at_count:
                 continue
+            chance = outcome_chance(outcome, self.region(self.game.player.chunk))
             roll = derive_seed(self.game.world.world_seed, "action-outcome-v1", self.life,
                                action.id, source_id, index) % 100
-            if roll >= outcome.chance:
+            if roll >= chance:
                 continue
             if outcome.kind == "knowledge":
                 if outcome.id not in self.knowledge:
@@ -1269,6 +1297,47 @@ class Expedition:
         self.game.advance(ms, command)
         self._apply_vitals(ms)
         self.monster_ms += ms
+
+    def advance_manual(self, milliseconds, command=InputCommand()):
+        """Player chooses movement; expedition still owns time, spots, vitals and enemies."""
+        integer(milliseconds, "elapsed milliseconds", 0)
+        if self.anchor_ms is not None:
+            return self.advance(milliseconds)
+        if self.in_prologue:
+            return self.advance(milliseconds)
+        if milliseconds == 0:
+            self._settle()
+            self.game.advance(0, command)
+            return
+        remaining = milliseconds
+        while remaining:
+            self._expire_leads()
+            if self._settle():
+                continue
+            if self.anchor_ms is not None:
+                self.advance(remaining)
+                return
+            cap = min(remaining, self._vitals_limit(), MONSTER_STEP_MS - self.monster_ms)
+            if self.leads:
+                cap = min(cap, min(lead["expires_ms"] - self.total_ms for lead in self.leads))
+            task = self.task
+            if task:
+                cap = min(cap, task["duration_ms"] - task["elapsed_ms"])
+            self._run(cap, InputCommand() if task else command)
+            remaining -= cap
+            if task:
+                task["elapsed_ms"] += cap
+                if task["elapsed_ms"] == task["duration_ms"]:
+                    self.task = None
+                    if task["type"] == "perform":
+                        spot = self._spot_by_id(task["spot"])
+                        if spot is not None and spot.id not in self.completed:
+                            self._reward(spot.id, BY_ID[spot.encounter])
+                            self._after_location(spot, True)
+                    elif task["type"] in SELF_ACTIONS:
+                        self._complete_self(BY_ID[task["type"]])
+                    self.goal = None
+        self._settle()
 
     # ----- simulation ---------------------------------------------------
     def _face(self, gx, gy):
@@ -1575,6 +1644,7 @@ class Expedition:
                 "mastery": dict(sorted(self.mastery.items())), "boon": self.boon, "boon_next": self.boon_next,
                 "stats": dict(self.stats), "drought": dict(self.drought), "journal": validate_journal(self.journal),
                 "forced": {k: list(v) for k, v in sorted(self.forced.items())},
+                "spot_plans": {k: [list(row) for row in v] for k, v in sorted(self.spot_plans.items())},
                 "anchor_ms": self.anchor_ms, "anchor_wait": self.anchor_wait,
                 "monster_ms": self.monster_ms, "prayers_this_life": self.prayers_this_life,
                 "budget": dict(self.budget), "spawned": dict(self.spawned),
@@ -1593,10 +1663,11 @@ class Expedition:
                    "monster_ms", "prayers_this_life", "budget", "spawned",
                    "admitted", "screened_chunks", "screened_targets", "log", "sequence",
                    "decisions", "skills", "report", "task", "goal", "equipped", "knowledge",
-                   "recipes", "journal_disabled", "journal_favor", "leads", "lead_history")
+                   "recipes", "journal_disabled", "journal_favor", "leads", "lead_history", "spot_plans")
 
     V8_FIELDS = ("equipped", "knowledge", "recipes", "journal_disabled", "journal_favor",
                  "leads", "lead_history")
+    V9_FIELDS = ("spot_plans",)
 
     @classmethod
     def from_dict(cls, data):
@@ -1614,6 +1685,8 @@ class Expedition:
             data = cls._upgrade_v6(data)
         if isinstance(data, dict) and data.get("schema_version") == 7:
             data = cls._upgrade_v7(data)
+        if isinstance(data, dict) and data.get("schema_version") == 8:
+            data = cls._upgrade_v8(data)
         fields(data, cls.SAVE_FIELDS)
         if data["schema_version"] != SCHEMA_VERSION or data["encounters"] != ENCOUNTER_VERSION:
             raise ValueError("unsupported expedition save")
@@ -1694,6 +1767,30 @@ class Expedition:
                                                                           for e in v) for v in forced.values()):
                 raise ValueError("invalid pity spots")
             result.forced = {k: list(v) for k, v in forced.items()}
+            plans = data["spot_plans"]
+            if type(plans) is not dict or len(plans) > 100000:
+                raise ValueError("invalid spot plans")
+            result.spot_plans = {}
+            for ident, rows in plans.items():
+                if type(ident) is not str or type(rows) is not list or len(rows) > 3:
+                    raise ValueError("invalid spot plan")
+                parts = ident.split(":")
+                if len(parts) != 3 or parts[0] not in {d.id for d in result.game.world.dimensions}:
+                    raise ValueError("invalid spot plan chunk")
+                try:
+                    key = ChunkKey(parts[0], int(parts[1]), int(parts[2]))
+                except ValueError as exc:
+                    raise ValueError("invalid spot plan chunk") from exc
+                if result.chunk_ident(key) != ident:
+                    raise ValueError("noncanonical spot plan chunk")
+                spec = next(d for d in result.game.world.dimensions if d.id == key.dimension)
+                for row in rows:
+                    if (type(row) is not list or len(row) != 3 or row[0] not in BY_ID or
+                            BY_ID[row[0]].placement != "spot"):
+                        raise ValueError("invalid spot plan row")
+                    integer(row[1], "spot x", 0, spec.width - 1)
+                    integer(row[2], "spot y", 0, spec.height - 1)
+                result.spot_plans[ident] = [tuple(row) for row in rows]
             result.journal = validate_journal(data["journal"])
             result.monster_ms = min(integer(data["monster_ms"], "monster clock", 0, LEGACY_MONSTER_MAX_MS),
                                     MONSTER_STEP_MS - 1)
@@ -1729,6 +1826,8 @@ class Expedition:
                             type(v) is not str or not 1 <= len(v) <= 200 for v in values):
                         raise ValueError(f"invalid {name}")
                     setattr(result, name, set(values))
+                if set(result.spot_plans) != result.screened_chunks:
+                    raise ValueError("spot plans must match screened chunks")
             if type(data["log"]) is not list or len(data["log"]) > LOG_LIMIT:
                 raise ValueError("invalid expedition log")
             for entry in data["log"]:
@@ -1786,13 +1885,14 @@ class Expedition:
     @classmethod
     def _upgrade_v6(cls, data):
         """Schema 6 -> 7 adds the lifetime journal (empty: earlier lives were not counted)."""
-        fields(data, tuple(name for name in cls.SAVE_FIELDS if name not in ("journal", *cls.V8_FIELDS)))
+        fields(data, tuple(name for name in cls.SAVE_FIELDS if name not in ("journal", *cls.V8_FIELDS,
+                                                                            *cls.V9_FIELDS)))
         return {**data, "schema_version": 7, "journal": new_journal()}
 
     @classmethod
     def _upgrade_v7(cls, data):
         """New action pool/regions: preserve earned progress, reroll uncompleted spots."""
-        fields(data, tuple(name for name in cls.SAVE_FIELDS if name not in cls.V8_FIELDS))
+        fields(data, tuple(name for name in cls.SAVE_FIELDS if name not in (*cls.V8_FIELDS, *cls.V9_FIELDS)))
         if data["encounters"] != "encounters-v6":
             raise ValueError("unsupported expedition save")
         exploration = dict(data["exploration"])
@@ -1812,7 +1912,29 @@ class Expedition:
                 "task": task, "goal": goal, "forced": {}, "budget": None, "spawned": None,
                 "admitted": None, "screened_chunks": None, "screened_targets": None,
                 "equipped": equipped, "knowledge": [], "recipes": [], "journal_disabled": [],
-                "journal_favor": {}, "leads": [], "lead_history": []}
+                "journal_favor": {}, "leads": [], "lead_history": [], "spot_plans": {}}
+
+    @classmethod
+    def _upgrade_v8(cls, data):
+        """Existing v8 lives keep earned progress; affected encounter plans reroll on entry."""
+        fields(data, tuple(name for name in cls.SAVE_FIELDS if name not in cls.V9_FIELDS))
+        if data["encounters"] != "encounters-v7":
+            raise ValueError("unsupported expedition save")
+        exploration = dict(data["exploration"])
+        exploration["targets"] = [t for t in exploration["targets"] if not str(t["id"]).startswith("enc:")]
+        exploration["hit_targets"] = [t for t in exploration["hit_targets"] if not str(t).startswith("enc:")]
+        task = data["task"]
+        if isinstance(task, dict) and task.get("type") == "perform":
+            task = None
+        goal = data["goal"]
+        if isinstance(goal, dict) and goal.get("kind") in ("spot", "target"):
+            goal = None
+        return {**data, "schema_version": SCHEMA_VERSION, "encounters": ENCOUNTER_VERSION,
+                "exploration": exploration, "completed": [c for c in data["completed"]
+                                                        if not str(c).startswith("enc:")],
+                "task": task, "goal": goal, "forced": {}, "budget": None, "spawned": None,
+                "admitted": None, "screened_chunks": None, "screened_targets": None,
+                "spot_plans": {}}
 
     @classmethod
     def rebuilt(cls, old, game):
@@ -1840,7 +1962,8 @@ class Expedition:
     def _upgrade_v5(cls, data):
         """encounters-v5 saves keep XP, blessing, dust, vitals and inventory; spots re-roll
         under the v6 action buckets (this life's spot plans and windows are rebuilt)."""
-        fields(data, tuple(name for name in cls.SAVE_FIELDS if name not in (*cls.V6_FIELDS, *cls.V8_FIELDS)))
+        fields(data, tuple(name for name in cls.SAVE_FIELDS if name not in (*cls.V6_FIELDS, *cls.V8_FIELDS,
+                                                                            *cls.V9_FIELDS)))
         if data["encounters"] != "encounters-v5":
             raise ValueError("unsupported expedition save")
         exploration = dict(data["exploration"])
@@ -1858,13 +1981,14 @@ class Expedition:
         return {**data, **cls._v6_defaults(), **cls._v8_defaults(), "schema_version": SCHEMA_VERSION, "encounters": ENCOUNTER_VERSION,
                 "exploration": exploration, "completed": completed, "log": log, "task": task, "goal": goal,
                 "budget": None, "spawned": None, "admitted": None, "screened_chunks": None,
-                "screened_targets": None}
+                "screened_targets": None, "spot_plans": {}}
 
     @classmethod
     def _upgrade_v4(cls, data):
         """V4 locations and shrine rolls are replaced without erasing earned XP."""
         fields(data, tuple(name for name in cls.SAVE_FIELDS if name not in
-                           ("monster_ms", "prayers_this_life", *cls.V6_FIELDS, *cls.V8_FIELDS)))
+                           ("monster_ms", "prayers_this_life", *cls.V6_FIELDS, *cls.V8_FIELDS,
+                            *cls.V9_FIELDS)))
         if data["encounters"] != "encounters-v4":
             raise ValueError("unsupported expedition save")
         exploration = dict(data["exploration"])
@@ -1883,14 +2007,15 @@ class Expedition:
                 "exploration": exploration, "completed": completed, "log": log,
                 "task": task, "goal": None, "budget": None, "spawned": None,
                 "admitted": None, "screened_chunks": None, "screened_targets": None,
-                "monster_ms": 0, "prayers_this_life": 0, **cls._v6_defaults(), **cls._v8_defaults()}
+                "monster_ms": 0, "prayers_this_life": 0, **cls._v6_defaults(), **cls._v8_defaults(),
+                "spot_plans": {}}
 
     @classmethod
     def _upgrade_v3(cls, data):
         """New encounter locations change spot rolls; retain earned progress only."""
         fields(data, tuple(name for name in cls.SAVE_FIELDS if name not in
                            ("dust", "anchor_ms", "anchor_wait", "monster_ms", "prayers_this_life", *cls.V6_FIELDS,
-                            *cls.V8_FIELDS)))
+                            *cls.V8_FIELDS, *cls.V9_FIELDS)))
         if data["encounters"] != "encounters-v3":
             raise ValueError("unsupported expedition save")
         exploration = dict(data["exploration"])
@@ -1910,7 +2035,8 @@ class Expedition:
                 "budget": None, "spawned": None, "admitted": None,
                 "screened_chunks": None, "screened_targets": None,
                 "dust": 0, "anchor_ms": None, "anchor_wait": False,
-                "monster_ms": 0, "prayers_this_life": 0, **cls._v6_defaults(), **cls._v8_defaults()}
+                "monster_ms": 0, "prayers_this_life": 0, **cls._v6_defaults(), **cls._v8_defaults(),
+                "spot_plans": {}}
 
     @classmethod
     def _upgrade_v2(cls, data):
@@ -1938,7 +2064,8 @@ class Expedition:
                 "goal": None, "blessing": 0, "budget": None, "spawned": None, "admitted": None,
                 "screened_chunks": None, "screened_targets": None,
                 "dust": 0, "anchor_ms": None, "anchor_wait": False,
-                "monster_ms": 0, "prayers_this_life": 0, **cls._v6_defaults(), **cls._v8_defaults()}
+                "monster_ms": 0, "prayers_this_life": 0, **cls._v6_defaults(), **cls._v8_defaults(),
+                "spot_plans": {}}
 
     @classmethod
     def _from_v1(cls, data):

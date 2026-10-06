@@ -98,9 +98,12 @@ enemy silhouettes in browser/actors.js, with 4-way views, sword poses, slash arc
 hit flash, damage numbers, HP bar, death dissolve, depth sort, canopy occlusion,
 x-ray and 130% default zoom. 153 unittest + 13 node tests pass; headless Chromium
 1280x800 and 390x844 fight-to-defeat run with no console errors.
-2026-10-04 auto-pilot: the character explores and resolves biome encounters by
-itself; manual move/attack input is ignored until the take_control skill is
-unlocked. Frame gained spots/target_kinds/expedition fields; see
+2026-10-06 World controls: Auto and Active use one live `Expedition` and one
+ASCII-rendered canvas. An input with `control: "active"` enables persistent manual
+movement, interaction and attack; `control: "auto"` resumes autopilot from the
+current cell and ongoing encounter. The browser holds one polling loop, and its
+three skill slots are presentation placeholders for future blessings. Frame has
+spots/target_kinds/expedition fields; see
 world-autopilot.md for the additive transport contract.
 2026-10-04 movement fix: taps only turned the player (a step needed 120ms of
 continuous hold, and sub-poll taps never reached the server). Browser sessions

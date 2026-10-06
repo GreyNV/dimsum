@@ -49,7 +49,7 @@ class JournalTests(unittest.TestCase):
                 validate_journal(bad)
 
     def test_achievements_cover_catalog_and_metrics_resolve(self):
-        e = played(60_000)
+        e = played(120_000)
         rows = achievements(e)
         self.assertEqual([r["id"] for r in rows], [a.id for a in ACHIEVEMENTS])
         for a, r in zip(ACHIEVEMENTS, rows):
@@ -111,6 +111,8 @@ class UpgradeAndRebuildTests(unittest.TestCase):
         old = e.to_dict()
         old.pop("journal")
         for key in Expedition.V8_FIELDS:
+            old.pop(key)
+        for key in Expedition.V9_FIELDS:
             old.pop(key)
         old["schema_version"] = 6
         old["encounters"] = "encounters-v6"

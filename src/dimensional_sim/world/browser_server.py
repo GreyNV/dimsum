@@ -22,6 +22,8 @@ STATIC = {"/": ("index.html", "text/html"),
           "/art.js": ("art.js", "text/javascript"),
           "/actors.js": ("actors.js", "text/javascript"),
           "/hud.js": ("hud.js", "text/javascript"),
+          "/ascii.js": ("ascii.js", "text/javascript"),
+          "/world_ui.js": ("world_ui.js", "text/javascript"),
           "/pages.js": ("pages.js", "text/javascript"),
           "/view.js": ("view.js", "text/javascript")}
 
@@ -122,10 +124,7 @@ def serve(game, port=8765, expedition=None):
     worker = threading.Thread(target=tick, name="world-simulation", daemon=True)
     worker.start()
     print(f"World browser: http://127.0.0.1:{server.server_port}/", flush=True)
-    if expedition is not None and not expedition.manual_control:
-        print("Auto-pilot is exploring; manual control is a locked skill. Ctrl+C stops the server.", flush=True)
-    else:
-        print("WASD/arrows move, Space attacks. Ctrl+C stops the local server.", flush=True)
+    print("Auto explores by default; Take control switches to active movement. Ctrl+C stops the server.", flush=True)
     try:
         server.serve_forever(poll_interval=0.1)
     except KeyboardInterrupt:

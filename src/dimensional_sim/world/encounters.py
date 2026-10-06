@@ -21,7 +21,7 @@ from .models import DELTAS, ChunkKey, integer
 from .seeds import derive_seed
 from .tuning import SPOTS_PER_CHUNK
 
-ENCOUNTER_VERSION = "encounters-v7"  # v7: region weights, Journal odds, and discovery actions
+ENCOUNTER_VERSION = "encounters-v8"  # v8: roll when a chunk is entered, persist the resulting opportunities
 EncounterDef = ActionDef            # compatibility name
 KINDS = tuple(sorted({a.category for a in ACTIONS}))
 NEAR = (None, "T", "^")
@@ -131,7 +131,7 @@ def roll_window(entry, seed, mastery=0, bonus=0):
     return low + derive_seed(seed, "window", entry.id) % (high - low + 1)
 
 
-def chunk_spots(chunk, life=1, *, unlocked=frozenset(), region=None, context=None):
+def chunk_spots(chunk, life=1, *, unlocked=frozenset(), region=None, context=None, roll_seed=None):
     """Deterministic spots from the full action context (legacy unlock/region accepted).
 
     Callers with progression or Journal state pass ``context`` so roll eligibility
@@ -144,7 +144,8 @@ def chunk_spots(chunk, life=1, *, unlocked=frozenset(), region=None, context=Non
     entries = bucket(ctx)
     if not entries:
         return ()
-    seed = derive_seed(chunk.seed, ENCOUNTER_VERSION, life)
+    seed = (derive_seed(chunk.seed, ENCOUNTER_VERSION, life) if roll_seed is None else
+            integer(roll_seed, "encounter roll seed", 0, 2**64 - 1))
     reachable = _reachable(asset)
     count = SPOTS_PER_CHUNK[derive_seed(seed, "count") % len(SPOTS_PER_CHUNK)]
     total = sum(w for _, w in entries)

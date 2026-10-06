@@ -1,3 +1,8 @@
+> Historical implementation notes below. As of 2026-10-06, Auto and Active both run through
+> `Expedition`; Active is available directly from the World screen and remains active until the
+> player selects Auto. On first chunk entry, the current bucket rolls and saves spot plans
+> (expedition schema 9, `encounters-v8`). Generated chunks contain geography, not encounter plans.
+>
 > 2026-10-05: the closed-loop iteration (action registry, regions, pity, crafting, dust/ash/blessing
 > sinks, frontier) is documented in docs/design/. Sections below describe earlier states.
 

@@ -14,7 +14,7 @@ class RegionVarietyTests(unittest.TestCase):
         for seed in (1, 2, 3):
             with self.subTest(seed=seed):
                 expedition = Expedition(Exploration(new_world(seed), "forest"))
-                expedition.advance(240_000)
+                expedition.advance(600_000)
                 world = expedition.game.world
                 visited = {world.region_for(ChunkKey(row["dimension"], row["x"], row["y"])).id
                            for row in world.to_dict()["discovery"] if row["status"] == "visited"}

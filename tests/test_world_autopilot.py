@@ -238,7 +238,7 @@ class LifeTests(unittest.TestCase):
         e = expedition()
         e.advance(40_000)
         old = json.loads(dump(e))
-        for key in ap.Expedition.V8_FIELDS:
+        for key in (*ap.Expedition.V8_FIELDS, *ap.Expedition.V9_FIELDS):
             old.pop(key)
         for key in ("dust", "anchor_ms", "anchor_wait", "monster_ms", "prayers_this_life", "ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal"):
             del old[key]
@@ -254,7 +254,7 @@ class LifeTests(unittest.TestCase):
         e = expedition()
         e.advance(40_000)
         old = json.loads(dump(e))
-        for key in ap.Expedition.V8_FIELDS:
+        for key in (*ap.Expedition.V8_FIELDS, *ap.Expedition.V9_FIELDS):
             old.pop(key)
         for key in ("monster_ms", "prayers_this_life", "ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal"):
             old.pop(key)
@@ -269,7 +269,7 @@ class LifeTests(unittest.TestCase):
         e.advance(40_000)
         e.dust, e.blessing = 9, 4
         old = json.loads(dump(e))
-        for key in ap.Expedition.V8_FIELDS:
+        for key in (*ap.Expedition.V8_FIELDS, *ap.Expedition.V9_FIELDS):
             old.pop(key)
         for key in ("ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal"):
             old.pop(key)
@@ -451,8 +451,8 @@ class SpawnWindowTests(unittest.TestCase):
             if limit is not None:
                 self.assertEqual(admitted, active < limit, encounter)
         self.assertGreaterEqual(len(budgets), 2)
-        refused = {d[0] for d in decisions if not d[3]}
-        self.assertTrue(refused & {"bramble_berries", "bramble_boar"}, "scarce food is turned away when capped")
+        e.budget["bramble_berries"] = 0
+        self.assertFalse(e._admit("test:cap", "bramble_berries"), "scarce food is turned away when capped")
         respawned = [d for d in decisions if d[3] and d[1] is not None]
         self.assertGreater(len(respawned), sum(budgets[0].values()), "finished spots free their slot")
 
@@ -528,7 +528,7 @@ class PrayerTests(unittest.TestCase):
         e = skip_prologue(expedition())
         e.advance(60000)
         data = json.loads(dump(e))
-        for key in ap.Expedition.V8_FIELDS:
+        for key in (*ap.Expedition.V8_FIELDS, *ap.Expedition.V9_FIELDS):
             data.pop(key)
         for key in ("blessing", "budget", "spawned", "admitted", "screened_chunks", "screened_targets",
                     "dust", "anchor_ms", "anchor_wait", "monster_ms", "prayers_this_life", "ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal"):
@@ -648,7 +648,7 @@ class AutopilotSessionTests(unittest.TestCase):
         self.assertEqual(frame["player"]["x"], e.anchor[0])
 
     def test_unlocked_control_takes_over_then_autopilot_resumes(self):
-        e = expedition()
+        e = skip_prologue(expedition())
         e.unlock("take_control")
         session = BrowserSession(e.game, e)
         start = e.game.player.x

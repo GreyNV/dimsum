@@ -163,7 +163,7 @@ class RegionTerrainTests(unittest.TestCase):
         key = ChunkKey("forest", 0, 0)
         before = canonical(world.get(key))
         payload = json.loads(canonical_json(world.to_dict()))
-        self.assertEqual(payload["schema_version"], 2)
+        self.assertEqual(payload["schema_version"], 3)
         self.assertEqual(len(payload["region_catalog"]), 4)
         self.assertEqual(WorldRepository.from_dict(payload).region_for(key), world.region_for(key))
         self.assertEqual(canonical(WorldRepository.from_dict(payload).get(key)), before)
@@ -339,7 +339,7 @@ class RepositoryTests(unittest.TestCase):
         world.visit(ChunkKey("forest", 0, 0))
         snapshot = json.loads(canonical_json(world.to_dict()))
         changes = (
-            lambda p: p.update(schema_version=3),
+            lambda p: p.update(schema_version=4),
             lambda p: p.update(schema_version=True),
             lambda p: p.update(generator_version=3),
             lambda p: p.update(generator_version=True),

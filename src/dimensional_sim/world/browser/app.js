@@ -4,10 +4,13 @@ import {PALETTE, OBJECT_PAD, paintChunk, drawTree, terrainColor} from './art.js'
 import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawDamage, drawFloat, drawSpot, drawSpotCompletion, drawCamp, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
 import {PAGES, needsDetail, pageModel, PANELS, COLLAPSE_KEY, loadCollapsed, toggleCollapsed, defaultCollapsed} from './pages.js';
 import {debugText, shopSections, ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
+import {regionCue, skillSlots, worldMode} from './world_ui.js';
+import {drawAsciiWorld} from './ascii.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('scene'), ctx = canvas.getContext('2d'), mini = $('minimap'), map = mini.getContext('2d');
 const chunks = new Map(), pictures = new Map(), controls = new Controls();
+const asciiPictures = new Map();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 /* Design debug overlay: ?debug in the URL or the backquote key. Asks the server for its
  * debug block (seed, region, buckets, windows, pity, screening) on every poll. */
@@ -40,7 +43,8 @@ const isMobile = () => matchMedia('(max-width: 720px)').matches;
 const readUi = key => { try { return localStorage.getItem(key); } catch { return null; } };
 const writeUi = (key, value) => { try { localStorage.setItem(key, value); } catch { /* optional */ } };
 let collapsed = loadCollapsed(readUi(COLLAPSE_KEY), isMobile());
-const manualAllowed = () => !state?.expedition || state.expedition.skills.includes('take_control');
+let controlMode = 'auto', bagOpen = false, pendingInteract = false;
+const manualAllowed = () => !state?.expedition || controlMode === 'active';
 
 function status(message) { if ($('status').textContent !== message) $('status').textContent = message; }
 function resize() {
@@ -75,8 +79,10 @@ function adopt(next) {
   for (const chunk of next.chunks) {
     chunks.set(chunk.id, chunk);
     pictures.delete(chunk.id);   // painted lazily: visible now, others one per frame
+    asciiPictures.delete(chunk.id);
   }
   retainResident(chunks, next.resident); retainResident(pictures, next.resident);
+  retainResident(asciiPictures, next.resident);
   observeCombat(next);
   observeExpedition(next);
   if (next.expedition?.anchor_space && !state?.expedition?.anchor_space) {
@@ -85,6 +91,26 @@ function adopt(next) {
     setPause(false);
   }
   state = next; mapDirty = true;
+  if (next.expedition?.anchor_space || next.expedition?.prologue) controlMode = 'auto';
+  else controlMode = worldMode(next.expedition);
+  const active = controlMode === 'active';
+  document.body.classList.toggle('active-control', active);
+  document.body.classList.toggle('manual-unlocked', active);
+  $('mode-switch').textContent = active ? 'Auto explore' : 'Take control';
+  $('mode-switch').setAttribute('aria-pressed', String(active));
+  $('mode-switch').disabled = !!next.expedition?.prologue || !!next.expedition?.anchor_space;
+  $('region-tip').textContent = regionCue(next.expedition?.region);
+  const progress = next.expedition?.activity;
+  $('action-name').textContent = progress?.name || (active ? 'Choose your path' : 'Exploring');
+  $('action-percent').textContent = progress ? `${Math.floor(progress.progress / 10)}%` : '';
+  $('action-fill').style.width = `${progress ? progress.progress / 10 : 0}%`;
+  for (const [index, slot] of skillSlots(next.expedition).entries()) {
+    const button = document.querySelector(`[data-skill-slot="${index}"]`);
+    button.dataset.state = slot.state;
+    button.disabled = !slot.usable;
+    button.querySelector('span').textContent = slot.name;
+    button.setAttribute('aria-label', `Skill ${index + 1}: ${slot.name}, ${slot.state}`);
+  }
   if (firstSnapshot && $('report').hidden) setPause(false);
   hud.update(next);
   updateAnchor(next.expedition);
@@ -259,12 +285,14 @@ async function poll() {
   const started = performance.now();
   try {
     const body = controls.payload(paused, [...chunks.keys()]);
+    body.control = controlMode;
+    if (pendingInteract) body.interact = true;
     if (pendingAction) body.action = pendingAction;
     if (debugOn) body.debug = true;
     if (needsDetail(page) && (!lastDetail || started - lastDetailAt > 500)) { body.detail = true; lastDetailAt = started; }
     const attackRevision = controls.attackRevision;
     const next = await request('/api/input', body);
-    controls.acknowledge(body, attackRevision); pendingAction = null; adopt(next);
+    controls.acknowledge(body, attackRevision); pendingAction = null; pendingInteract = false; adopt(next);
     if (connection !== 'connected') { connection = 'connected'; status(''); }
   } catch {
     connection = 'disconnected';
@@ -344,11 +372,19 @@ function render(now) {
     const glow=ctx.createRadialGradient(width/2,height*.42,10,width/2,height*.42,Math.max(width,height)*.65);
     glow.addColorStop(0,'#18314a');glow.addColorStop(.45,'#0e1b2b');glow.addColorStop(1,'#060b13');
     ctx.fillStyle=glow;ctx.fillRect(0,0,width,height);
-    const scale=Math.min(2.6,width/240,height/340);
-    ctx.translate(width/2,height*.38);ctx.scale(scale,scale);
-    drawCamp(ctx,-48,-15,{clock:state.expedition.total_ms,reducedMotion});
-    drawPlayer(ctx,state.player,59,-11,null,{clock:state.expedition.total_ms});
+    ctx.fillStyle='#b4d8e7';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.font='700 76px ui-monospace,Consolas,monospace';ctx.fillText('A',width*.42,height*.35);
+    ctx.fillStyle='#f4e5bb';ctx.fillText('@',width*.62,height*.35);
     if(!stopped)requestAnimationFrame(render);
+    return;
+  }
+  if (state && actor && camera) {
+    drawAsciiWorld(ctx, state, chunks, asciiPictures, camera, actor,
+      {width, height, dpr, zoom, dt}, now, reducedMotion);
+    if(mapDirty) drawMap();
+    $('zoom').textContent=`${Math.round(zoom*100)}%`;
+    $('zoom-out').disabled=zoom<=ZOOM.min; $('zoom-in').disabled=zoom>=ZOOM.max;
+    if(!stopped) requestAnimationFrame(render);
     return;
   }
   if (state && actor && camera) {
@@ -480,6 +516,7 @@ addEventListener('keydown', event=>{
   if(event.target instanceof HTMLButtonElement && (event.code==='Space' || event.code==='Enter')) return;
   if(directions[event.code]) { event.preventDefault(); if(!paused && manualAllowed()) controls.press(event.code,directions[event.code]); }
   else if(event.code==='Space') { event.preventDefault(); if(!paused && manualAllowed()) controls.attack(true); }
+  else if(event.code==='KeyE' && !event.repeat) { event.preventDefault(); if(!paused && manualAllowed()) pendingInteract = true; }
   else if(event.code==='KeyP' && !event.repeat) { event.preventDefault(); setPause(!paused); }
   else if(event.code==='Backquote' && !event.repeat) { event.preventDefault(); toggleDebug(); }
   else if(event.code==='Escape' && page !== 'world') { event.preventDefault(); openPage('world'); }
@@ -503,6 +540,21 @@ addEventListener('pagehide',()=>{
 });
 canvas.addEventListener('pointerdown',()=>canvas.focus());
 $('pause').addEventListener('click',()=>setPause(!paused));
+$('mode-switch').addEventListener('click',()=>{
+  if ($('mode-switch').disabled) return;
+  controlMode = controlMode === 'auto' ? 'active' : 'auto';
+  controls.reset(); pendingInteract = false;
+  document.body.classList.toggle('active-control', controlMode === 'active');
+  document.body.classList.toggle('manual-unlocked', controlMode === 'active');
+  $('mode-switch').textContent = controlMode === 'active' ? 'Auto explore' : 'Take control';
+  $('mode-switch').setAttribute('aria-pressed', String(controlMode === 'active'));
+});
+$('bag-toggle').addEventListener('click',()=>{
+  bagOpen = !bagOpen;
+  document.body.classList.toggle('bag-open', bagOpen);
+  $('bag-toggle').setAttribute('aria-expanded', String(bagOpen));
+});
+$('touch-interact').addEventListener('click',()=>{ if (!paused && manualAllowed()) pendingInteract = true; });
 // Some mobile browsers still zoom on a double tap over HUD text; touch-action covers the rest.
 document.addEventListener('dblclick',event=>event.preventDefault());
 $('report-close').addEventListener('click',()=>{hud.hideReport();setPause(false);canvas.focus();});

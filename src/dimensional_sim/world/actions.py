@@ -189,6 +189,7 @@ def explain(action_id, ctx):
             "state": lifecycle_state(action, ctx, b_reasons, c_reasons, spawned),
             "bucket_eligible": not b_reasons, "context_eligible": not c_reasons,
             "eligible": eligible, "weight": w,
+            "base_weight": action.weight,
             "share_permille": w * 1000 // total if total and w else 0,
             "spawned": spawned, "admitted": ctx.admitted if action.placement == "spot" else None,
             "available": available,
@@ -248,5 +249,13 @@ def _weight_modifiers(action, ctx):
 def describe_bucket(ctx):
     entries = bucket(ctx)
     total = sum(w for _, w in entries) or 1
-    return [{"id": a.id, "name": a.name, "category": a.category, "weight": w,
+    return [{"id": a.id, "name": a.name, "category": a.category, "base_weight": a.weight,
+             "modifiers": _weight_modifiers(a, ctx), "weight": w,
              "share_permille": w * 1000 // total} for a, w in entries]
+
+
+def outcome_chance(outcome, region=None):
+    """A region can bias a temporary lead's chance without guaranteeing it."""
+    if outcome.kind != "lead" or region is None:
+        return outcome.chance
+    return min(100, outcome.chance * region.multiplier(outcome.id) // 100)

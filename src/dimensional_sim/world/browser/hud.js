@@ -17,7 +17,6 @@ export function activityText(state, paused = false) {
   if (!ex) return null;
   if (ex.anchor_space) return ex.anchor_space.waiting ? 'The anchor waits for your choice'
     : `A new life begins in ${Math.ceil(ex.anchor_space.remaining_ms / 1000)}s`;
-  if (ex.control === 'manual') return 'You have taken control';
   if (ex.prologue) {
     const p = ex.prologue;
     if (p.stage === 'listen') return 'Listening to the old man';
@@ -34,6 +33,7 @@ export function activityText(state, paused = false) {
   }
   if (ex.mode === 'home') return 'Badly hurt - heading back to the anchor camp';
   if (ex.mode === 'fight') return 'Fists up - punching a bramble boar';
+  if (ex.control === 'manual') return 'You have taken control';
   if (ex.mode === 'travel' && ex.goal) {
     const spot = state.spots?.find(s => s.x === ex.goal.x && s.y === ex.goal.y);
     if (spot) return `Heading for ${spot.name.toLowerCase()}`;
@@ -244,7 +244,8 @@ export function shopSections(shop) {
 /** Compact multi-line text for the debug overlay (backquote key or ?debug). */
 export function debugText(info) {
   if (!info) return 'debug: waiting for data...';
-  const pct = r => `${r.id} ${r.weight} (${(r.share_permille / 10).toFixed(1)}%)`;
+  const pct = r => `${r.id} ${(r.modifiers || []).length
+    ? `${r.base_weight} ${(r.modifiers || []).map(m => `x${m.percent / 100} ${m.source}`).join(' ')} = ` : ''}${r.weight} (${(r.share_permille / 10).toFixed(1)}%)`;
   return [
     `seed ${info.world_seed}  life ${info.life}  chunk ${info.chunk}  region ${info.region}`,
     `currencies dust ${info.currencies.dust} ash ${info.currencies.ash} blessing ${info.currencies.blessing}  boon ${info.boon || '-'}`,
@@ -259,5 +260,7 @@ export function debugText(info) {
     `stats: ${Object.entries(info.stats).map(([k, v]) => `${k} ${v}`).join(' ')}`,
     'not eligible:', ...info.why_not.slice(0, 10).map(r => `  ${r.id}: ${r.reasons.join('; ')}`),
     'recent screening:', ...info.screening.slice(-8).map(n => `  ${n.chunk} ${n.action || '-'}: ${n.result}`),
+    'recent runtime rolls:', ...(info.recent_rolls || []).slice(-5).map(r =>
+      `  ${r.chunk} ${r.region}: [${r.result.join(', ') || 'nothing'}] from ${r.bucket.map(b => `${b.id} ${b.base} x${b.region_percent / 100} =${b.final}`).join(' | ')}`),
   ].join('\n');
 }

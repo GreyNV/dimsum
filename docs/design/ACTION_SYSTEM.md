@@ -24,7 +24,7 @@ BIOME (dark_forest)
   -> KNOWN / UNLOCKED     unlock bought, knowledge learned, recipe discovered      actions.known()
   -> JOURNAL / MASTERY    disabled (mastery 2+) removes it; favor/suppress (3+) x1.5 / x0.5
   -> BUCKET               positive effective weight                               actions.bucket()
-  -> ROLL / SPAWN         chunk_spots: 0-3 spots per chunk from the bucket, seeded by chunk + life
+  -> ROLL / SPAWN         first entry: 0-3 spots from current bucket, seeded by life + entry order + chunk
   -> SCREENING            spawn windows (at-once caps) and pity                    autopilot._screen
   -> CONTEXT              ingredients, hunger, carried food, live play, once per life, live lead token
   -> AVAILABLE ACTION     the auto-pilot walks there / starts it
@@ -35,7 +35,7 @@ Each placement keeps its own availability semantics while sharing the same eligi
 
 | Placement | Comes from | Needs a terrain roll? | Lifetime |
 |---|---|---|---|
-| `spot` | `chunk_spots` roll in a resident chunk, then screening | yes | until completed or the life ends |
+| `spot` | `chunk_spots` roll on first entry to the current chunk, then screening | yes | until completed or the life ends |
 | `lead` | an `OutcomeDef(kind="lead")` of a completed action, placed by `lead_spot` in the source chunk | no (it is the follow-up of a real spot) | until completed, expired (`ttl_ms`) or the life ends |
 | `self` | `trigger="need"` (recipes/crafts, priority-ordered) or `trigger="after_location"` (reflection, prayer) | no | per use |
 
@@ -68,12 +68,12 @@ be turned away by its spawn window (screening log says why).
 | Recipe | permanent craft permission (`walking_staff`) | `recipes` | yes |
 | Unlock | bought permission for actions to join future buckets | `unlocked` | yes |
 | Lead | one temporary opportunity in this world/life (`follow_deer_tracks`, `hunt_deer`) | `leads`, `lead_history` | no |
-| Spawn | a rolled spot in a chunk this life | derived from seeds; `completed`, `admitted` | no |
+| Spawn | a runtime rolled spot in a chunk this life | `spot_plans`, `completed`, `admitted` | no |
 
 ## Debugging
 
 - `python -m dimensional_sim.world.cli inspect --seed S --x X --y Y [--unlock U] [--knowledge K] [--recipe R]`:
-  region and how it was chosen, its generation parameters, the resulting terrain profile, rolled spots,
+  region and how it was chosen, its generation parameters, terrain profile, hypothetical first-entry spots,
   the bucket, and every spot action's state, weight and modifiers.
 - `python -m dimensional_sim.world.cli regions --seed S`: the region layout around the anchor.
 - Browser `?debug` or backquote: states, knowledge/recipes, leads with expiry, buckets, windows, pity, screening.

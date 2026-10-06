@@ -86,6 +86,7 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual",
                 "punch_damage": expedition.punch_damage(), "report": expedition.report,
                 "anchor": {"x": expedition.anchor[0], "y": expedition.anchor[1]},
                 "skills": sorted(expedition.skills), "control": control,
+                "skill_slots": [{"name": "Empty", "state": "locked"} for _ in range(3)],
                 "prologue": expedition.prologue(),
                 "region": _region_view(expedition),
                 "meta": {"dust": expedition.dust, "ash": expedition.ash, "blessing": expedition.blessing,
@@ -121,8 +122,12 @@ def _region_view(expedition):
 
 def validate_input(data):
     base = {"move", "attack", "paused", "known"}
-    if type(data) is not dict or not base <= set(data) or not set(data) <= base | {"action", "debug", "detail"}:
+    if type(data) is not dict or not base <= set(data) or not set(data) <= base | {"action", "debug", "detail", "control", "interact"}:
         raise ValueError("invalid input fields")
+    if "control" in data and data["control"] not in ("auto", "active"):
+        raise ValueError("invalid control mode")
+    if "interact" in data and type(data["interact"]) is not bool:
+        raise ValueError("interact must be boolean")
     for flag in ("debug", "detail"):
         if flag in data and type(data[flag]) is not bool:
             raise ValueError(f"{flag} must be boolean")
@@ -170,6 +175,7 @@ class BrowserSession:
         self.paused = start_paused
         self.input_time = float("-inf")
         self.manual_until = float("-inf")
+        self.active = False
         self.debug = False
         self.detail = False
 
@@ -184,6 +190,8 @@ class BrowserSession:
     def _control(self, now):
         if self.expedition is None:
             return "manual"
+        if self.active:
+            return "manual"
         if not self.expedition.manual_control:
             return "auto"
         return "manual" if now < self.manual_until else "auto"
@@ -197,6 +205,16 @@ class BrowserSession:
     def input(self, data, now):
         command, paused, known = validate_input(data)
         with self.lock:
+            if self.expedition is not None and "control" in data:
+                requested = data["control"] == "active"
+                if requested and (self.expedition.anchor_ms is not None or self.expedition.in_prologue):
+                    requested = False
+                if requested != self.active:
+                    self.command = InputCommand()
+                    if requested:
+                        self.expedition.interrupt()
+                    self.active = requested
+                    self.manual_until = float("-inf")
             self.debug = data.get("debug", False)
             self.detail = data.get("detail", False)
             action_error = None
@@ -207,19 +225,25 @@ class BrowserSession:
                     self.expedition.anchor_action(data["action"])
                 except ValueError as exc:   # a refused purchase must not break the connection
                     action_error = str(exc)
-            if not self._manual_allowed():
+            if not self.active and not self._manual_allowed():
                 command = InputCommand()  # locked skill: the auto-pilot steers
             if self.expedition is not None and self.expedition.anchor_ms is not None:
                 command = InputCommand()
+                self.active = False
             self.command = InputCommand() if paused else command
             self.paused, self.input_time = paused, now
             if self.command.move or self.command.attack:
-                if self.expedition is not None and now >= self.manual_until:
+                if self.expedition is not None and not self.active and now >= self.manual_until:
                     self.expedition.interrupt()
-                self.manual_until = now + MANUAL_HOLD
-            if self.expedition is None or now < self.manual_until:
+                if not self.active:
+                    self.manual_until = now + MANUAL_HOLD
+            if self.active and data.get("interact"):
+                self.expedition.begin_interaction()
+            if self.expedition is None:
                 # Applying an edge at zero duration preserves even brief attack presses.
                 self.game.advance(0, self.command)
+            elif self.active or now < self.manual_until:
+                self.expedition.advance_manual(0, self.command)
             frame = self._frame(known, now)
             if frame.get("expedition") is not None:
                 frame["expedition"]["action_error"] = action_error
@@ -229,11 +253,18 @@ class BrowserSession:
         with self.lock:
             if self.paused:
                 return
-            if self.expedition is not None and (now >= self.manual_until or self.expedition.anchor_ms is not None):
+            if self.expedition is not None and (not self.active and now >= self.manual_until or self.expedition.anchor_ms is not None):
                 self.expedition.advance(TICK_MS)
+                if self.expedition.anchor_ms is not None:
+                    self.active = False
                 return
             command = self.command if now - self.input_time <= INPUT_LEASE else InputCommand()
-            self.game.advance(TICK_MS, command)
+            if self.expedition is not None:
+                self.expedition.advance_manual(TICK_MS, command)
+                if self.expedition.anchor_ms is not None:
+                    self.active = False
+            else:
+                self.game.advance(TICK_MS, command)
 
     def advance_ms(self, ms, now, *, allow_prayer=True):
         """Advance by real elapsed milliseconds (hosted mode; timers may be throttled).
@@ -242,11 +273,18 @@ class BrowserSession:
         with self.lock:
             if self.paused or ms == 0:
                 return
-            if self.expedition is not None and (now >= self.manual_until or self.expedition.anchor_ms is not None):
+            if self.expedition is not None and (not self.active and now >= self.manual_until or self.expedition.anchor_ms is not None):
                 self.expedition.advance(ms, allow_prayer=allow_prayer)
+                if self.expedition.anchor_ms is not None:
+                    self.active = False
                 return
             command = self.command if now - self.input_time <= INPUT_LEASE else InputCommand()
-            self.game.advance(ms, command)
+            if self.expedition is not None:
+                self.expedition.advance_manual(ms, command)
+                if self.expedition.anchor_ms is not None:
+                    self.active = False
+            else:
+                self.game.advance(ms, command)
 
     def state(self, now=None):
         with self.lock:
