@@ -83,7 +83,8 @@ class DetailTests(unittest.TestCase):
         self.assertEqual(set(d["multipliers"]), {"actions", "hunger_drain", "boar_hit", "punch_damage", "punch_parts"})
         self.assertEqual(set(d["rolls"]), {"life", "windows", "spots_per_chunk", "pity", "stats", "loot"})
         self.assertEqual(set(d["journal"]), {"actions", "items", "deaths", "best_life_min", "lives", "best_depth",
-                                             "achievements"})
+                                             "achievements", "knowledge", "recipes", "disabled", "favor",
+                                             "leads", "lead_history"})
         self.assertTrue({"name", "level", "into", "next", "dim_level", "dim_into", "dim_next", "speed",
                          "speed_regular_only", "speed_dimensional_only", "life_gain", "xp"} <= set(d["stats"][0]))
 
@@ -109,7 +110,10 @@ class UpgradeAndRebuildTests(unittest.TestCase):
         e = played(30_000)
         old = e.to_dict()
         old.pop("journal")
+        for key in Expedition.V8_FIELDS:
+            old.pop(key)
         old["schema_version"] = 6
+        old["encounters"] = "encounters-v6"
         migrated = Expedition.from_dict(old)
         self.assertEqual(migrated.journal, new_journal())
         self.assertEqual(migrated.dimensional, e.dimensional)

@@ -26,7 +26,7 @@ def rebirth_ash(inventory, depth):
     return burned // ASH_DIVISOR + depth * ASH_PER_RING
 
 
-MASTERABLE = tuple(a.id for a in BY_ID.values() if a.window is not None)
+MASTERABLE = tuple(a.id for a in BY_ID.values() if a.placement == "spot")
 
 
 def offers(meta):
@@ -63,8 +63,10 @@ def offers(meta):
         cost = mastery_cost(level)
         if level < MASTERY_MAX and meta.ash < cost:
             reasons.append(f"needs {cost} ash")
+        benefits = (["Wider spawn window"] if action.window is not None else []) + [
+            "Journal on/off at level 2", "Favor or suppress odds at level 3"]
         rows.append({"kind": "mastery", "id": action_id, "name": f"{action.name} mastery {level + 1}",
-                     "description": f"+1 high (and +1 low every 2nd level) on the at-once cap. Level {level}/{MASTERY_MAX}.",
+                     "description": f"{'; '.join(benefits)}. Level {level}/{MASTERY_MAX}.",
                      "currency": "ash", "cost": cost, "owned": level >= MASTERY_MAX,
                      "available": not reasons, "reasons": reasons})
     return rows

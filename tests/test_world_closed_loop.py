@@ -97,7 +97,8 @@ class ActionBucketTests(unittest.TestCase):
         self.assertGreater(glade["forest_spring"], thicket["forest_spring"])
 
     def test_self_bucket_checks_ingredients_gear_and_live_play(self):
-        ctx = Context(placement="self", trigger="need", inventory={"stick": 2})
+        ctx = Context(placement="self", trigger="need", inventory={"stick": 2},
+                      knowledge=frozenset({"primitive_crafting"}), recipes=frozenset({"walking_staff"}))
         self.assertIn("needs 3 stick", explain("craft_staff", ctx)["reasons"][0])
         ok = replace(ctx, inventory={"stick": 3})
         self.assertTrue(explain("craft_staff", ok)["eligible"])
@@ -147,15 +148,21 @@ class PlayableWorldTests(unittest.TestCase):
         self.assertTrue(forced)
         self.assertEqual(e.stats["pity"], before + 1)
         self.assertIn("pity enemy", e.screen_log[-2]["result"])
-        self.assertTrue(any(s.encounter == "bramble_boar" and s.id.endswith(":10") for s in e._spots(chunk)))
+        # Forced spots use indices from 10 up (a food pity may already hold :10 in this chunk).
+        self.assertTrue(any(s.encounter == "bramble_boar" and int(s.id.rsplit(":", 1)[1]) >= 10
+                            for s in e._spots(chunk)))
 
     def test_new_run_reaches_eating_crafting_and_the_anchor(self):
         e = fresh(2)
-        while e.anchor_ms is None and e.total_ms < 40 * 60_000:
+        self.assertNotIn("walking_staff", e.recipes, "crafting is discovered, not a starting capability")
+        while e.anchor_ms is None and e.total_ms < 60 * 60_000:
             e.advance(2000)
-        self.assertIsNotNone(e.anchor_ms, "a life ends within 40 minutes")
+        self.assertIsNotNone(e.anchor_ms, "a life ends within 60 minutes")
         self.assertGreater(e.stats["completed"], 3)
         self.assertGreater(e.stats["eaten"], 0)
+        # Branch gathering discovered primitive crafting and the staff recipe during this life.
+        self.assertIn("primitive_crafting", e.knowledge)
+        self.assertIn("walking_staff", e.recipes)
         self.assertGreater(e.stats["crafted"], 0)
         self.assertEqual(e.report["title"], "Life 1 ends")
 
@@ -165,6 +172,8 @@ class CraftingTests(unittest.TestCase):
         e = past_prologue(fresh())
         damage, frontier = e.punch_damage(), e.frontier()
         e.inventory = {"stick": 3}
+        e.knowledge.add("primitive_crafting")
+        e.recipes.add("walking_staff")
         e._start_self(BY_ID["craft_staff"])
         e.advance(e.task["duration_ms"])
         self.assertEqual(e.inventory, {"walking_staff": 1})
@@ -172,6 +181,7 @@ class CraftingTests(unittest.TestCase):
         self.assertGreaterEqual(e.frontier(), frontier)
         hit = e.boar_hit(ChunkKey("forest", 2, 0))
         e.inventory["hide_wrap"] = 1
+        e.equipped = ap.equip_item(e.equipped, e.inventory, "hide_wrap")
         self.assertEqual(e.boar_hit(ChunkKey("forest", 2, 0)), hit * 70 // 100)
 
     def test_snare_turns_materials_into_food_only_when_needed(self):

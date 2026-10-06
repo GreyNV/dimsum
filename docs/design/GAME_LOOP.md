@@ -4,16 +4,19 @@ Every arrow names the mechanic that implements it. "Before" marks what was missi
 
 ```
 EXPLORE   auto-pilot walks to unvisited chunks inside its frontier (autopilot.frontier)
-  -> DISCOVER  each new chunk rolls spots from the region's action bucket (actions.py, regions.py)
+  -> DISCOVER  each new chunk belongs to a generated region (terrain + action pool); it rolls spots from that
+               region's bucket (actions.py, regions.py); some spots leave temporary leads (deer tracks)
   -> INTERACT  perform spot actions; boars pursue and fight; prayer/thought after a location
   -> ACQUIRE   loot items (food, materials), XP (regular + dimensional), heal, blessing
-  -> SPEND     eat food (auto, cooldown); craft: staff (3 sticks), snare (2 sticks + thorn), wrap (2 hides)
+  -> SPEND     eat food (auto, cooldown); craft once learned: staff (recipe from 10 branch gathers, 3 sticks),
+               snare (unlock, 2 sticks + thorn), wrap (unlock, 2 hides); crafted gear is equipped in a slot
   -> SURVIVE   gear raises damage / lowers hits -> frontier moves outward -> deeper rings, better XP
   -> DIE       starvation inside the frontier, or a boar
   -> ANCHOR    offer stacks -> dust (diminishing) | keep -> burned to ash at rebirth (+1 ash per ring)
   -> META      dust buys unlocks (new spot / craft actions); blessing buys the shrine unlock or a boon;
-               ash buys mastery (wider spawn windows)
-  -> NEXT RUN  unlocked actions join the buckets; mastery/boon change spawn windows; dimensional XP speeds work
+               ash buys mastery (wider spawn windows; Journal on/off at 2, favor/suppress odds at 3)
+  -> NEXT RUN  unlocked / known actions join the buckets (still rolled, never guaranteed); knowledge and recipes
+               persist; mastery/boon/Journal change odds and windows; dimensional XP speeds work
 ```
 
 | Arrow | Before | Now |

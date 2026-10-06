@@ -677,7 +677,10 @@ export const AMBUSH = Object.freeze({
   plank: {paint: ['bbbbb'], glyph: ['=-==-']},
   plankShort: {paint: ['bbb'], glyph: ['==-']},
   plankTilted: {paint: ['   bb', ' bb  ', 'b    '], glyph: ['   /=', ' /=  ', '/    ']},
-  spoke: {paint: ['uu'], glyph: ['-o']}
+  spoke: {paint: ['uu'], glyph: ['-o']},
+  arrow: {paint: ['uuuuub'], glyph: ['----->']},
+  sack: {paint: [' lll ', 'lllll'], glyph: [' /_\\ ', '(ooo)']},
+  tornCloth: {paint: ['rrrrrr', ' r rrr'], glyph: ['\\~/~~/', ' \\ /~/']}
 });
 export function drawAmbushSite(ctx, x, y) {
   setupText(ctx);
@@ -692,6 +695,9 @@ export function drawAmbushSite(ctx, x, y) {
   part('crate', -44, 17); part('crateDark', -24, 30); part('crate', 44, 22); part('crateDark', 62, 38);
   part('plank', -152, 28); part('plankShort', -12, 40); part('plankTilted', 30, -38);
   part('plank', 150, 32); part('spoke', 92, 28); part('plankShort', -96, 30);
+  // Arrows and spilled cargo identify the wreck as a violent caravan ambush.
+  part('arrow', -83, -28); part('arrow', 125, -48);
+  part('sack', -78, 35); part('sack', 19, 34); part('tornCloth', 115, 39);
 }
 
 /** Spot at tile center (x, y); a sparkle marks it, brighter when it is the goal. */

@@ -238,6 +238,8 @@ class LifeTests(unittest.TestCase):
         e = expedition()
         e.advance(40_000)
         old = json.loads(dump(e))
+        for key in ap.Expedition.V8_FIELDS:
+            old.pop(key)
         for key in ("dust", "anchor_ms", "anchor_wait", "monster_ms", "prayers_this_life", "ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal"):
             del old[key]
         for entry in old["log"]:
@@ -252,6 +254,8 @@ class LifeTests(unittest.TestCase):
         e = expedition()
         e.advance(40_000)
         old = json.loads(dump(e))
+        for key in ap.Expedition.V8_FIELDS:
+            old.pop(key)
         for key in ("monster_ms", "prayers_this_life", "ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal"):
             old.pop(key)
         old.update(schema_version=4, encounters="encounters-v4", task=None, goal=None, blessing=23)
@@ -265,6 +269,8 @@ class LifeTests(unittest.TestCase):
         e.advance(40_000)
         e.dust, e.blessing = 9, 4
         old = json.loads(dump(e))
+        for key in ap.Expedition.V8_FIELDS:
+            old.pop(key)
         for key in ("ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal"):
             old.pop(key)
         old.update(schema_version=5, encounters="encounters-v5")
@@ -301,11 +307,10 @@ class LifeTests(unittest.TestCase):
     def test_death_returns_to_anchor_keeping_dimensional_progress(self):
         e = skip_prologue(expedition())
         e.advance(60_000)
-        e.hunger, e.health = 0, 40 * P   # starve soon: the test is about what survives death
+        e.hunger, e.health, e.cause = 0, 0, "starvation"  # test the transition directly
         old_game = e.game
-        while e.life == 1:
-            e.advance(20)
-            before = (dict(e.dimensional), e.depth, e.best_depth)
+        before = (dict(e.dimensional), e.depth, e.best_depth)
+        e.advance(ap.ANCHOR_COUNTDOWN_MS)
         self.assertIsNot(e.game, old_game)
         self.assertEqual(e.report["title"], "Life 1 ends")
         self.assertIn("Returning to anchor...", e.report["lines"])
@@ -330,7 +335,7 @@ class LifeTests(unittest.TestCase):
         self.assertEqual(migrated.life, 1)
         for mutate in (lambda d: d.update(schema_version=99), lambda d: d.update(encounters="v0"),
                        lambda d: d.update(ash=-1), lambda d: d.update(unlocked=["flying"]),
-                       lambda d: d.update(mastery={"fallen_branches": 1}), lambda d: d.update(boon="wealth"),
+                       lambda d: d.update(mastery={"think": 1}), lambda d: d.update(boon="wealth"),
                        lambda d: d.update(forced={"forest:0:0": ["think"]}), lambda d: d["stats"].pop("pity"),
                        lambda d: d.update(blessing=-1), lambda d: d.update(dust=-1),
                        lambda d: d.update(anchor_ms=-1), lambda d: d.update(anchor_wait=True),
@@ -523,6 +528,8 @@ class PrayerTests(unittest.TestCase):
         e = skip_prologue(expedition())
         e.advance(60000)
         data = json.loads(dump(e))
+        for key in ap.Expedition.V8_FIELDS:
+            data.pop(key)
         for key in ("blessing", "budget", "spawned", "admitted", "screened_chunks", "screened_targets",
                     "dust", "anchor_ms", "anchor_wait", "monster_ms", "prayers_this_life", "ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal"):
             del data[key]

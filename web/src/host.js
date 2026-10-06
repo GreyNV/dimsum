@@ -7,7 +7,7 @@
  */
 import {SUPABASE_URL, SUPABASE_KEY, LOCAL_SAVE_MS, CLOUD_SAVE_MS} from './config.js';
 
-const LOCAL_KEY = 'dimsum.save.v1', IDENTITY_KEY = 'dimsum.identity.v1';
+const LOCAL_KEY = 'dimsum.save.v1', IDENTITY_KEY = 'dimsum.identity.v1', BACKUP_KEY = 'dimsum.backup.v1';
 const store = {
   get(key) { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } },
   set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; } },
@@ -33,6 +33,7 @@ const pending = new Map();
 worker.onmessage = ({data}) => {
   if (data.type === 'progress') return bootProgress(data);
   if (data.type === 'fatal') return showFatal(data.error);
+  if (data.type === 'catchup') return catchUpProgress(data);
   const entry = pending.get(data.id);
   if (!entry) return;
   pending.delete(data.id);
@@ -49,7 +50,24 @@ function call(type, payload = {}) {
 function showFatal(message) {
   boot.hidden = false;
   boot.classList.add('failed');
-  bootProgress({stage: 'Something went wrong while loading the world.', fraction: null, detail: String(message).slice(0, 400)});
+  bootProgress({stage: 'Something went wrong while loading the world.', fraction: null, detail: String(message).slice(0, 1200)});
+  if (boot.querySelector('.boot-actions')) return;
+  // Never leave the player stuck: retry, or start fresh while keeping the old save as a backup.
+  const actions = document.createElement('div');
+  actions.className = 'boot-actions';
+  actions.innerHTML = '<button type="button" data-boot="retry">Try again</button>'
+    + '<button type="button" data-boot="fresh">Start a new game (keep a backup)</button><p class="boot-note"></p>';
+  boot.append(actions);
+  actions.addEventListener('click', event => {
+    const what = event.target.closest('button')?.dataset.boot;
+    if (what === 'retry') location.reload();
+    if (what !== 'fresh') return;
+    const old = store.get(IDENTITY_KEY);
+    store.set(BACKUP_KEY, {at: Date.now(), identity: old, save: store.get(LOCAL_KEY)});
+    store.remove(LOCAL_KEY); store.remove(IDENTITY_KEY); store.remove('dimsum.report.seen');
+    actions.querySelector('.boot-note').textContent = old ? `Old save code (paste it in Pause -> Load to go back): ${old.id}.${old.secret}` : '';
+    setTimeout(() => location.reload(), old ? 6000 : 0);
+  });
 }
 
 // ---------- identity + saves ----------
@@ -141,6 +159,33 @@ function installSavePanel() {
   renderCloudStatus();
 }
 
+// ---------- offline fast-forward banner ----------
+let catchUpBanner = null;
+function catchUpProgress({done, doneMs = 0, totalMs, failed, before, after}) {
+  if (!catchUpBanner) {
+    catchUpBanner = document.createElement('div');
+    catchUpBanner.className = 'catchup';
+    catchUpBanner.setAttribute('role', 'status');
+    catchUpBanner.innerHTML = '<span></span><i><s></s></i>';
+    document.body.append(catchUpBanner);
+  }
+  const min = ms => Math.round(ms / 60000);
+  window.DIMSUM_FASTFORWARD = !done;
+  if (!done) {
+    catchUpBanner.querySelector('span').textContent = `Fast-forwarding your time away: ${min(doneMs)} / ${min(totalMs)} min`;
+    catchUpBanner.querySelector('s').style.width = `${Math.round(100 * doneMs / Math.max(1, totalMs))}%`;
+    return;
+  }
+  catchUpBanner.remove();
+  catchUpBanner = null;
+  if (failed) return toast(`Could not replay your time away; resumed where you left off. (${failed})`);
+  if (totalMs < 60000 || !before || !after) return;
+  const lives = after.life - before.life;
+  toast(`While you were away: ${min(totalMs)} min explored`
+    + (lives ? `, ${lives} life${lives > 1 ? 'ves' : ''} ended` : '')
+    + `, best ring ${after.best_depth}.`);
+}
+
 function toast(text) {
   const el = document.createElement('div');
   el.className = 'toast';
@@ -196,14 +241,7 @@ async function start() {
   await import('./app.js');
   installSavePanel();
   boot.hidden = true;
-  if (result.caughtUpMs >= 60000) {
-    const b = result.before, a = result.after;
-    const lives = a.life - b.life;
-    toast(`While you were away: ${Math.round(result.caughtUpMs / 60000)} min explored`
-      + (lives ? `, ${lives} life${lives > 1 ? 'ves' : ''} ended` : '')
-      + `, best ring ${a.best_depth}.`);
-  }
-  await saveLocal();
+  await saveLocal().catch(error => toast(`Could not save: ${error.message}`));
   setInterval(() => saveLocal().catch(() => {}), LOCAL_SAVE_MS);
   setInterval(saveCloud, CLOUD_SAVE_MS);
   saveCloud();
@@ -213,4 +251,5 @@ async function start() {
   });
   addEventListener('pagehide', () => { if (latest && !resetting) store.set(LOCAL_KEY, latest); });
 }
-start().catch(error => showFatal(error && error.stack || error));
+start().catch(error => showFatal(!error || !error.message ? error
+  : error.stack && error.stack.includes(error.message) ? error.stack : `${error.message}\n${error.stack || ''}`));

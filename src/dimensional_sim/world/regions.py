@@ -19,14 +19,15 @@ def region_cell(key):
     return key.x // REGION_CELL, key.y // REGION_CELL
 
 
-def region_for(world_seed, biome, key):
+def region_for(world_seed, biome, key, catalog=None):
     """The RegionDef for a chunk key in `biome` (None if the biome has no regions)."""
-    options = sorted((r for r in REGIONS.values() if r.biome == biome), key=lambda r: r.id)
+    definitions = REGIONS if catalog is None else catalog
+    options = sorted((r for r in definitions.values() if r.biome == biome), key=lambda r: r.id)
     if not options:
         return None
     cx, cy = region_cell(key)
     if (cx, cy) == (0, 0) and ORIGIN_REGION in {r.id for r in options}:
-        return REGIONS[ORIGIN_REGION]
+        return definitions[ORIGIN_REGION]
     roll = derive_seed(world_seed, REGION_VERSION, biome, cx, cy) % sum(r.weight for r in options)
     for region in options:
         if roll < region.weight:

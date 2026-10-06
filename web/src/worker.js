@@ -3,8 +3,8 @@
  * Messages in:  {id, type: 'init', save|null, seed, awayMs}
  *               {id, type: 'input', body}      -> frame JSON text
  *               {id, type: 'save'}             -> save JSON text
- * Messages out: {id, ok, result|error} replies, plus {type: 'progress', ...} while
- *               booting/catching up. Time between messages is real time: the worker
+ * Messages out: {id, ok, result|error} replies, {type: 'progress', ...} while booting, and
+ *               {type: 'catchup', doneMs, totalMs, done} while offline time fast-forwards. Time between messages is real time: the worker
  *               advances the expedition by measured elapsed milliseconds (the Python
  *               auto-pilot is partition-independent, so throttled timers are harmless).
  */
@@ -40,6 +40,29 @@ async function boot() {
 
 function now() { return performance.now() / 1000; }
 
+/* Offline time is fast-forwarded in the background after the world is shown: each tick
+ * spends at most CATCH_UP_BUDGET_MS of wall time on it, so input stays responsive and the
+ * player watches the expedition race through the time they were away. */
+const CATCH_UP_BUDGET_MS = 30;
+let owed = 0, owedTotal = 0, owedBefore = null, savedText = null, catchUpSeed = 0;
+
+function catchUpTick() {
+  if (owed <= 0) return;
+  const start = performance.now();
+  try {
+    while (owed > 0 && performance.now() - start < CATCH_UP_BUDGET_MS) owed -= game.catch_up(Math.min(owed, 1000));
+  } catch (error) {
+    // Offline catch-up must never brick a save: resume exactly where it was saved instead.
+    const WebGame = py.globals.get('WebGame');
+    game = WebGame(savedText, catchUpSeed, false);
+    owed = 0;
+    postMessage({type: 'catchup', done: true, failed: String(error).slice(0, 300), totalMs: owedTotal});
+    return;
+  }
+  if (owed > 0) postMessage({type: 'catchup', done: false, doneMs: owedTotal - owed, totalMs: owedTotal});
+  else postMessage({type: 'catchup', done: true, totalMs: owedTotal, before: owedBefore, after: JSON.parse(game.summary())});
+}
+
 function loop() {
   const t = performance.now();
   const ms = Math.min(MAX_STEP_MS, Math.max(0, Math.round(t - last)));
@@ -47,7 +70,8 @@ function loop() {
   if (game && ms) {
     try { game.advance(ms, t / 1000, active); } catch (error) { postMessage({type: 'fatal', error: String(error)}); return; }
   }
-  loopTimer = setTimeout(loop, 50);
+  if (game && owed > 0) catchUpTick();
+  loopTimer = setTimeout(loop, owed > 0 ? 0 : 50);
 }
 
 async function init({save, seed, awayMs}) {
@@ -61,19 +85,15 @@ async function init({save, seed, awayMs}) {
     game = WebGame(null, seed, true);
     save = null;
   }
-  let owed = save ? WebGame.offline_ms(awayMs | 0) : 0;
-  const total = owed;
-  const before = JSON.parse(game.summary());
-  while (owed > 0) {
-    owed -= game.catch_up(owed);
-    progress('Catching up while you were away', 0.7 + 0.3 * (1 - owed / total), `${Math.round((total - owed) / 60000)} of ${Math.round(total / 60000)} min`);
-    await new Promise(resolve => setTimeout(resolve, 0));
-  }
-  const after = JSON.parse(game.summary());
+  owed = save ? WebGame.offline_ms(awayMs | 0) : 0;
+  owedTotal = owed;
+  owedBefore = JSON.parse(game.summary());
+  savedText = save;
+  catchUpSeed = seed;
   last = performance.now();
   clearTimeout(loopTimer);
   loop();
-  return {manifest, caughtUpMs: total, before, after, worldSeed: game.world_seed()};
+  return {manifest, owedMs: owedTotal, worldSeed: game.world_seed()};
 }
 
 const handlers = {
@@ -82,7 +102,7 @@ const handlers = {
   input: ({body}) => game.input(JSON.stringify(body), now()),
   save: () => game.save(),
   // New world, same soul: keeps dimensional XP, currencies, unlocks, mastery and journal.
-  rebuild: ({seed}) => game.rebuild(seed | 0),
+  rebuild: ({seed}) => { owed = 0; return game.rebuild(seed | 0); },
 };
 
 onmessage = async ({data}) => {
@@ -90,6 +110,8 @@ onmessage = async ({data}) => {
     const result = await handlers[data.type](data);
     postMessage({id: data.id, ok: true, result});
   } catch (error) {
-    postMessage({id: data.id, ok: false, error: String(error && error.message || error).slice(0, 2000)});
+    // Name the step and keep Python's traceback tail: Safari's JS stacks carry no message.
+    const text = String(error && error.message || error);
+    postMessage({id: data.id, ok: false, error: `${data.type}: ${text.length > 1500 ? '...' + text.slice(-1500) : text}`});
   }
 };

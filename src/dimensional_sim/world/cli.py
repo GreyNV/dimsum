@@ -84,6 +84,11 @@ def main(argv=None):
     ins.add_argument("--y", type=int, default=0)
     ins.add_argument("--life", type=int, default=1)
     ins.add_argument("--unlock", action="append", default=[], help="unlock id (repeatable)")
+    ins.add_argument("--knowledge", action="append", default=[], help="knowledge id (repeatable)")
+    ins.add_argument("--recipe", action="append", default=[], help="recipe id (repeatable)")
+    reg = subs.add_parser("regions", help="print the Forest region layout around the anchor")
+    reg.add_argument("--seed", type=int, default=482910)
+    reg.add_argument("--radius", type=int, default=2)
     for name in ("chunk", "demo", "play", "browser"):
         sub = subs.add_parser(name)
         sub.add_argument("--seed", type=int, default=482910)
@@ -121,11 +126,15 @@ def main(argv=None):
             print(canonical_json({"counts": dict(Counter(j["status"] for j in report["jobs"])),
                                   "manifest": str(pipeline.manifest_path(request)), **report}))
             return 1 if any(j["status"] != "accepted" for j in report["jobs"]) else 0
-        if args.mode in ("simulate", "inspect"):
+        if args.mode in ("simulate", "inspect", "regions"):
             import json
             from . import simulate
             if args.mode == "inspect":
-                print(json.dumps(simulate.inspect_chunk(args.seed, args.x, args.y, args.life, args.unlock), indent=1))
+                print(json.dumps(simulate.inspect_chunk(args.seed, args.x, args.y, args.life, args.unlock,
+                                                        args.knowledge, args.recipe), indent=1))
+                return 0
+            if args.mode == "regions":
+                print(json.dumps(simulate.region_map(args.seed, args.radius), indent=1))
                 return 0
             results = [simulate.run(seed, args.minutes, args.policy) for seed in simulate.parse_seeds(args.seeds)]
             out = {"summary": simulate.summarize(results)}

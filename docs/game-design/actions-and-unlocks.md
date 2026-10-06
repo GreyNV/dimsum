@@ -1,5 +1,9 @@
 # Actions, locations, and unlocks
 
+> **Status: design proposal / history.** The implemented Forest expedition differs: actions come from procedural
+> region buckets and leads (docs/design/ACTION_SYSTEM.md), and the Journal only shapes odds; it never bypasses rolls.
+
+
 ## Action definition
 
 Every action should specify:

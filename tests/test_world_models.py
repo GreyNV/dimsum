@@ -81,3 +81,19 @@ class ModelTests(unittest.TestCase):
         for build in (lambda: DimensionSpec("x", width=2), lambda: DimensionSpec("x", danger=101), lambda: DimensionSpec("x", biomes=({},)),
                       lambda: ChunkKey("x", True, 0), lambda: ChunkKey("../x", 0, 0)):
             with self.assertRaises(ValueError): build()
+
+
+class FastSeedTests(unittest.TestCase):
+    def test_derive_seed_equals_canonical_json_hash(self):
+        import hashlib
+        import random
+        from dimensional_sim.world.seeds import SEED_VERSION, canonical_json, derive_seed
+        rng = random.Random(7)
+        labels = ["tree", "detail", "a\"b", "back\\slash", "", "enc:forest:-1:3:10", "☃", "\n\t"]
+        for _ in range(3000):
+            parent = rng.randrange(2**64)
+            parts = [rng.choice([rng.randint(-10**12, 10**12), rng.choice(labels)]) for _ in range(rng.randint(0, 6))]
+            raw = canonical_json([SEED_VERSION, parent, parts]).encode("ascii")
+            self.assertEqual(derive_seed(parent, *parts), int.from_bytes(hashlib.sha256(raw).digest()[:8], "big"))
+        with self.assertRaises(ValueError):
+            derive_seed(1, True)

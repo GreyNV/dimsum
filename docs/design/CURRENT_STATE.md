@@ -1,5 +1,8 @@
 # Current state audit (before the closed-loop iteration, 2026-10-05)
 
+> Historical baseline. Current architecture and action inventory:
+> [ACTION_ARCHITECTURE_AUDIT.md](ACTION_ARCHITECTURE_AUDIT.md).
+
 Source of truth: the code at commit `373ea93` (main) plus local Codex edits up to 2026-10-04 23:04 UTC.
 Docs were not trusted; every statement below was checked in code or by running seeded simulations.
 

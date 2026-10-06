@@ -39,8 +39,9 @@ def crossing(g, direction):
 
 class OpenWorldTests(unittest.TestCase):
     def test_legacy_asset_and_chunk_canonical_bytes_unchanged(self):
-        # Recorded from the built 0.6.0 wheel before this slice.
-        world = WorldRepository(482910)
+        # Recorded from the built 0.6.0 wheel before this slice. Generator v1 stays pinned for
+        # existing worlds; new worlds use region-shaped generator v2 (test_world_generation).
+        world = WorldRepository(482910, generator_version=1)
         self.assertEqual(world.catalog_digest, "95c179d257ff6051703df2d430b910f7cb449a95ebedfb133ddc4e26d567895e")
         self.assertEqual(content_digest(chunk_to_dict(world.get(ChunkKey("forest", 4, -7)))),
                          "73b71e69f1e68b53c17b993812f70b3f6bf8d9babdf1f75cae7b080e477db536")

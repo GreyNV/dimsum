@@ -19,6 +19,8 @@ const detail = {
     loot: [{id: 'bramble_berries', name: 'Bramble berries', drops: [{item: 'Wild berries', min: 2, max: 4, chance: 100}]}]},
   journal: {actions: [['Bramble berries', 'forage', 12], ['Fallen branches', 'gather', 3]], items: [['Wild berries', 30]],
     deaths: {starvation: 2}, best_life_min: 7.5, lives: 3, best_depth: 5,
+    knowledge: ['deer_sign'], recipes: [], disabled: [], favor: {}, leads: [],
+    lead_history: [{action: 'follow_deer_tracks', source: 'enc:forest:1:0:2', status: 'expired'}],
     achievements: [{id: 'first_steps', name: 'First steps', description: 'Complete an action.', progress: 1, threshold: 1, done: true},
       {id: 'woodsman', name: 'Woodsman', description: 'Gather 25 times.', progress: 3, threshold: 25, done: false}]},
 };
@@ -46,6 +48,8 @@ test('pages: journal counts by type, rolls flag max, multipliers multiply', () =
   const journal = pageModel('journal', state).sections;
   assert.match(journal[0].title, /1 \/ 2/);
   assert.deepEqual(journal.find(s => s.title === 'Actions by type').rows, [['Forage', 12], ['Gather', 3]]);
+  assert.deepEqual(journal.find(s => s.title === 'Discoveries').rows[0], ['Knowledge', 'Deer sign']);
+  assert.deepEqual(journal.find(s => s.title === 'Recent leads').rows, [['Follow deer tracks', 'enc:forest:1:0:2', 'expired']]);
   const life = pageModel('life', state).sections;
   assert.equal(life[0].rows[0][3], 'max');
   assert.equal(life[1].title, 'Rolled but not yet known');

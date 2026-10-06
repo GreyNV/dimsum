@@ -9,3 +9,8 @@
 .save-panel button{padding:6px 10px;margin:0}.code-note{color:#d3b575;word-break:break-all;max-width:360px;margin:6px auto 0}
 .toast{position:fixed;top:118px;left:50%;transform:translateX(-50%);z-index:15;background:rgba(8,12,8,.86);border:1px solid #9f8050;color:#e9dcb8;padding:10px 16px;font:12px ui-monospace,Consolas,monospace;max-width:90vw;text-align:center}
 @media(max-width:720px){.toast{top:auto;bottom:300px}}
+.boot-actions{display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:10px}.boot-actions button{padding:8px 14px;background:#232a1d}
+.boot-note{color:#d3b575;word-break:break-all;max-width:420px}#boot .boot-detail{white-space:pre-wrap;text-align:left}
+.catchup{position:fixed;z-index:14;top:58px;left:50%;transform:translateX(-50%);width:min(380px,calc(100vw - 24px));padding:7px 12px;background:rgba(8,12,8,.88);border:1px solid #9f8050;color:#e9dcb8;font:11px ui-monospace,Consolas,monospace;text-align:center}
+.catchup i{display:block;height:4px;margin-top:5px;background:rgba(255,255,255,.08)}.catchup s{display:block;height:100%;width:0;background:linear-gradient(90deg,#b9862f,#f0c56a);text-decoration:none}
+@media(max-width:720px){.catchup{top:10px}}

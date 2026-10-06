@@ -1,10 +1,11 @@
-"""Opt-in open-terrain-v1 layout. Global integer fields cross storage boundaries.
+"""Open terrain with a preserved v1 recipe and region-shaped v2 layout.
 
 Room catalogs never enter this path. The catalog digest pins this recipe's palette
 and identity. No float noise, shared RNG, neighbors, access order, or provider calls.
 Path centers vary within each chunk band; all four paths intersect. Unreachable
 floor pockets are filled before exits/spawns are derived, preserving validation.
-To revise terrain rules create another versioned recipe, do not edit v1 in place.
+The optional region is supplied only by generator v2. With no region, this function
+retains the exact v1 decisions for worlds pinned to generator v1.
 """
 from collections import deque
 from dataclasses import replace
@@ -59,7 +60,7 @@ def open_assets(width=32, height=16):
     return tuple(result)
 
 
-def compose_open(source, spec, key, seed):
+def compose_open(source, spec, key, seed, *, region=None):
     if "open-terrain-v1" not in source.tags:
         raise ValueError("open generation requires a supported versioned recipe")
     w, h = source.width, source.height
@@ -74,7 +75,11 @@ def compose_open(source, spec, key, seed):
             cy = h // 2 + (_noise(seed, gx, key.y * 41, 12, "horizontal-path") - 50) * max(1, h // 4) // 50
             path = abs(y - cy) <= 1 or abs(x - cx) <= 1
             density = _noise(seed, gx, gy, 5, "canopy")
-            block = not path and density > 49 and derive_seed(seed, "tree", gx, gy) % 100 < 76
+            if region is None:
+                block = not path and density > 49 and derive_seed(seed, "tree", gx, gy) % 100 < 76
+            else:
+                block = (not path and density > 100 - region.canopy and
+                         derive_seed(seed, "tree", gx, gy) % 100 < region.canopy)
             path_row.append(path)
             block_row.append(block)
         paths.append(path_row)
@@ -82,6 +87,13 @@ def compose_open(source, spec, key, seed):
     # Start on the central trail, choose a stable reachable point near the center.
     origin = min(((x, y) for y in range(h) for x in range(w) if paths[y][x]),
                  key=lambda p: (abs(p[0] - w // 2) + abs(p[1] - h // 2), p[1], p[0]))
+    ambush = region is not None and source.biome == "dark_forest" and key.x == key.y == 0
+    if ambush:
+        # A clear place to wake among the wreckage. v1 never enters this branch.
+        for y in range(max(0, origin[1] - 1), min(h, origin[1] + 2)):
+            for x in range(max(0, origin[0] - 1), min(w, origin[0] + 2)):
+                collision[y][x] = False
+                paths[y][x] = True
     seen, queue = {origin}, deque([origin])
     while queue:
         x, y = queue.popleft()
@@ -94,16 +106,39 @@ def compose_open(source, spec, key, seed):
     env, objects = [], []
     forest = source.biome == "dark_forest"
     floor = source.environment[0][0]
+    # Equal immutable cells are shared instead of rebuilt per tile (same values, much faster).
+    trail, ground = replace(floor, glyph="="), replace(floor, glyph=".")
+    tree, rock, brush = (Cell(g, floor.fg, floor.bg) for g in ("T", "^", ";"))
     for y in range(h):
         env_row, obj_row = [], []
         for x in range(w):
             collision[y][x] = (x, y) not in seen
             roll = derive_seed(seed, "detail", key.x * w + x, key.y * h + y)
-            env_row.append(replace(floor, glyph="=" if paths[y][x] else "."))
+            if region is None or paths[y][x]:
+                env_row.append(trail if paths[y][x] else ground)
+            else:
+                # Region identity is visible in the floor as well as its tree cover.
+                # Terrain marks are walkable; path, exits and combat cells stay valid.
+                if region.landmark == "grove" and roll % 4 == 0:
+                    env_row.append(replace(ground, glyph="o"))
+                elif region.landmark == "thicket" and roll % 3 == 0:
+                    env_row.append(replace(ground, glyph=";"))
+                elif region.landmark == "glade" and roll % 3 == 0:
+                    env_row.append(replace(ground, glyph="~"))
+                else:
+                    env_row.append(ground)
+            if ambush and not collision[y][x]:
+                distance = abs(x - origin[0]) + abs(y - origin[1])
+                if 2 <= distance <= 7:
+                    remnant = derive_seed(seed, "ambush-ground", x, y) % 7
+                    if remnant < 2:
+                        env_row[-1] = replace(ground, glyph="x")  # scattered wagon debris
+                    elif remnant == 2:
+                        env_row[-1] = replace(ground, glyph=":")  # scorched earth
             if collision[y][x]:
-                obj_row.append(Cell("T" if forest and roll % 11 else "^", floor.fg, floor.bg))
-            elif not paths[y][x] and roll % 9 == 0:
-                obj_row.append(Cell(";", floor.fg, floor.bg))
+                obj_row.append(tree if forest and roll % 11 else rock)
+            elif not paths[y][x] and (roll % 9 == 0 if region is None else roll % 100 < region.brush):
+                obj_row.append(brush)
             else:
                 obj_row.append(None)
         env.append(tuple(env_row))

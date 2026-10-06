@@ -30,7 +30,14 @@ Supabase stores cloud saves. Python remains the single source of truth.
 - Identity lives in the browser; Pause -> "Copy save code" moves a save to
   another device ("Paste a save code" -> Load).
 - Offline progress: real time away x 0.65 (idle offline efficiency), capped at
-  30 simulated minutes per return, then a "While you were away" note.
+  30 simulated minutes per return. Since 2026-10-06 the world shows first (about 3.5 s) and the
+  worker fast-forwards the owed time in the background (at most 30 ms of work per tick, so
+  input stays responsive), with a progress banner and a "While you were away" note at the end.
+  Reward pop-ups are muted while it runs. If the replay fails, the save resumes as saved.
+- Speed work (same results, checked by tests): cached per-chunk move graphs, partial
+  distance fields for walking and spot choice, a quick range check before boars path-find,
+  a 256-chunk reuse cache for chunks walked back into, a direct derive_seed encoder and
+  shared terrain cells. 30 simulated minutes: about 30 s -> 5 s in CPython.
 
 ## Resetting (Settings tab)
 - "New world, keep progress": the worker calls `WebGame.rebuild(seed)` (`Expedition.rebuilt`): a new random

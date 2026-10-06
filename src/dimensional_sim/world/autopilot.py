@@ -45,18 +45,24 @@ Manual control is the locked skill "take_control"; adapters must ignore player
 movement/attack input until it is unlocked.
 """
 from collections import deque
+from dataclasses import replace
 
 from ..core import _softcapped_level
 from . import economy
-from .actions import Context, bucket, reasons_against
-from .catalog import BOONS, REGIONS, UNLOCKS
+from .actions import Context, _requirement_reasons, bucket, reasons_against
+from .catalog import (BOONS, REGIONS, UNLOCKS, JOURNAL_TOGGLE_MASTERY,
+                      JOURNAL_FAVOR_MASTERY)
+from .equipment import equip_item, is_equipped, validate_equipped
+from .generation import GENERATOR_VERSION
+from .repository import WorldRepository
 from .journal import new_journal, record_action, record_death, record_items, validate_journal
-from .encounters import (ATTRIBUTES, BY_ID, ENCOUNTER_VERSION, ITEMS, chunk_spots, forced_spot, roll_loot,
-                         roll_window)
-from .regions import region_for
-from .tuning import (BOUNTY_WINDOW_BONUS, COMFORT_DAMAGE_PERCENT, IRON_SKIN_HIT_PERCENT, PITY_CHUNKS, SNARE_WHEN_HUNGER_BELOW,
+from .encounters import (ATTRIBUTES, BY_ID, ENCOUNTER_VERSION, ITEMS, EncounterSpot, chunk_spots,
+                         forced_spot, lead_spot, roll_loot, roll_window)
+from .tuning import (BOUNTY_WINDOW_BONUS, COMFORT_DAMAGE_PERCENT, IRON_SKIN_HIT_PERCENT, PITY_CHUNKS,
                      STAFF_PUNCH_BONUS, WRAP_HIT_PERCENT)
 from .models import DELTAS, DIRECTIONS, ChunkKey, fields, identifier, integer
+
+DIRECTION_DELTAS = tuple(DELTAS[d] for d in DIRECTIONS)
 from .progression import CONFIG, DIMENSIONAL_DIVISOR, dimensional_level, regular_level, scaled_ms, speed_permille
 from .runtime import Exploration, InputCommand, Target
 from .seeds import derive_seed
@@ -92,6 +98,7 @@ STACK_LIMIT = 20
 BOAR_ENCOUNTER = "bramble_boar"    # rare spot monsters use this spawn window
 MONSTER_STEP_MS = 300             # boars take one step this often while they chase
 BOAR_AGGRO_RADIUS = 9             # a live boar this close (in steps) charges the avatar
+BOAR_PATH_LIMIT = 2 * BOAR_AGGRO_RADIUS + 2        # chasing boars path-find this far (steps) around obstacles
 CAMP_SAFE_RADIUS = 5              # boars stop at the edge of the anchor camp
 LEGACY_MONSTER_MAX_MS = 999       # saves before 2026-10-05 used a 1000 ms monster clock
 PRAYER_MS = BY_ID["pray"].duration_ms
@@ -99,7 +106,9 @@ REFLECTION_MS = {"think": BY_ID["think"].duration_ms, "contemplate": BY_ID["cont
 AFTER_LOCATION_REST_WEIGHT = 26   # weight of "just pause" inside the after-location bucket
 REGION_IDS = tuple(REGIONS)
 SELF_ACTIONS = tuple(a.id for a in BY_ID.values() if a.placement == "self")
-NEED_PRIORITY = ("craft_wrap", "craft_staff", "craft_snare")
+SPOT_REQUIREMENT_ACTIONS = tuple(a for a in BY_ID.values() if a.placement == "spot" and a.requirements)
+NEED_ACTIONS = tuple(sorted((a for a in BY_ID.values() if a.trigger == "need"),
+                            key=lambda action: (action.need_priority, action.id)))
 SCREEN_LOG_LIMIT = 40
 STAT_KEYS = ("chunks", "food_spots", "enemy_spots", "pity", "rejected", "completed", "eaten",
              "crafted", "fights", "prayers")
@@ -125,7 +134,7 @@ ELDER_LINES = (
 LOG_TYPES = ("encounter", "eat", "rest", "life", "blessing", "lore", "trade", "ambush",
              "craft", "reflect", "purchase", "rebirth")
 TASK_TYPES = ("perform", "pause", "rest", *SELF_ACTIONS, *PROLOGUE_MS)
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 def _table():
@@ -134,6 +143,31 @@ def _table():
 
 def _ceil_div(a, b):
     return -(-a // b)
+
+
+def _validated_lead(row, world, *, history=False):
+    required = ("id", "action", "source", "dimension", "chunk_x", "chunk_y",
+                "chunk", "x", "y", "expires_ms")
+    fields(row, required, ("status",) if history else ())
+    if type(row["id"]) is not str or not row["id"].startswith("lead:") or len(row["id"]) > 200:
+        raise ValueError("invalid lead id")
+    if row["action"] not in BY_ID or BY_ID[row["action"]].placement != "lead":
+        raise ValueError("invalid lead action")
+    if type(row["source"]) is not str or not 1 <= len(row["source"]) <= 200:
+        raise ValueError("invalid lead source")
+    key = ChunkKey(row["dimension"], integer(row["chunk_x"], "lead chunk x"),
+                   integer(row["chunk_y"], "lead chunk y"))
+    if row["chunk"] != f"{key.dimension}:{key.x}:{key.y}":
+        raise ValueError("invalid lead chunk")
+    spec = next((s for s in world.dimensions if s.id == key.dimension), None)
+    if spec is None:
+        raise ValueError("invalid lead dimension")
+    integer(row["x"], "lead x", 0, spec.width - 1)
+    integer(row["y"], "lead y", 0, spec.height - 1)
+    integer(row["expires_ms"], "lead expiry", 1)
+    if history and row["status"] not in ("created", "completed", "expired"):
+        raise ValueError("invalid lead status")
+    return dict(row)
 
 
 class Expedition:
@@ -157,6 +191,10 @@ class Expedition:
         self.ash = 0
         self.unlocked = set()      # UnlockDef ids bought with dust/blessing
         self.mastery = {}          # action id -> mastery level bought with ash
+        self.knowledge = set()     # discoveries persist across lives
+        self.recipes = set()       # learned recipes persist across lives
+        self.journal_disabled = set()
+        self.journal_favor = {}
         self.boon_next = None      # BoonDef id for the next life
         self.boon = None           # BoonDef id active this life
         self.journal = new_journal()   # lifetime counts (journal.py); persists across lives
@@ -169,6 +207,8 @@ class Expedition:
         self.report = {"seq": 0, "life": 0, "clock_ms": 0, "title": "", "lines": []}
         self._spot_cache = {}
         self._field_cache = {}
+        self._graph_cache = None
+        self._chunk_moves_cache = {}
         self.strikes = {}          # presentation only, not saved: boar attacks landed per target id
         self._new_life_state()
         self.anchor = self._anchor()
@@ -182,6 +222,9 @@ class Expedition:
         self.life_gain = _table()     # dimensional XP gained this life (report)
         self.completed = set()
         self.inventory = {}
+        self.equipped = {}
+        self.leads = []
+        self.lead_history = []
         self.hunger = VITAL_MAX
         self.health = VITAL_MAX
         self.food_cooldown_ms = 0
@@ -248,12 +291,12 @@ class Expedition:
         soft = CONFIG.base_softcap
         level = (_softcapped_level(regular_level(self.regular["strength"]), soft, CONFIG.softcap_softness)
                  + _softcapped_level(dimensional_level(self.dimensional["strength"]), soft, CONFIG.softcap_softness))
-        return 1 + int(level) // 5 + (STAFF_PUNCH_BONUS if "walking_staff" in self.inventory else 0)
+        return 1 + int(level) // 5 + (STAFF_PUNCH_BONUS if is_equipped(self.equipped, "walking_staff") else 0)
 
     def boar_hit(self, key):
         ring = min(self.ring(key), DANGER_RING_CAP)
         hit = BOAR_HIT * 3 ** ring // 2 ** ring * 1000 // self.speed("endurance")
-        if "hide_wrap" in self.inventory:
+        if is_equipped(self.equipped, "hide_wrap"):
             hit = hit * WRAP_HIT_PERCENT // 100
         if self.boon == "iron_skin":
             hit = hit * IRON_SKIN_HIT_PERCENT // 100
@@ -264,15 +307,39 @@ class Expedition:
         from .actions import describe_bucket, explain
         key = self.game.player.chunk
         spot_ctx, self_ctx = self.spot_context(key), self.self_context("after_location")
+        lead_ctx = Context(biome=spot_ctx.biome, region=spot_ctx.region, region_def=spot_ctx.region_def,
+                           placement="lead", unlocked=frozenset(self.unlocked),
+                           knowledge=frozenset(self.knowledge), recipes=frozenset(self.recipes),
+                           active_leads=frozenset(lead["action"] for lead in self.leads),
+                           action_counts=self.journal["actions"], item_counts=self.journal["items"])
         region = self.region(key)
+        current = self.game.world.peek(key)
+        rolled = {spot.encounter for spot in self._spots(current)} if current is not None else set()
+        admitted = {spot.encounter for spot in self._live(current)} if current is not None else set()
         return {"world_seed": str(self.game.world.world_seed), "life": self.life,
                 "chunk": self.chunk_ident(key), "region": region.id if region else None,
+                "generator_version": self.game.world.generator_version,
+                "region_parameters": {"canopy": region.canopy, "brush": region.brush,
+                                      "landmark": region.landmark} if region else None,
+                "knowledge": sorted(self.knowledge), "recipes": sorted(self.recipes),
+                "journal": {"disabled": sorted(self.journal_disabled), "favor": dict(self.journal_favor)},
+                "states": [{"id": r["id"], "state": r["state"], "admitted": r["id"] in admitted}
+                           for r in (explain(a.id, replace(spot_ctx, spawned=a.id in rolled)
+                                             if a.placement == "spot" else
+                                             lead_ctx if a.placement == "lead" else
+                                             self.self_context("need" if a.trigger == "need" else "after_location"))
+                                     for a in BY_ID.values())],
                 "unlocked": sorted(self.unlocked), "boon": self.boon, "mastery": dict(self.mastery),
                 "spot_bucket": describe_bucket(spot_ctx),
+                "spot_explanations": [explain(a.id, replace(spot_ctx, spawned=a.id in rolled))
+                                      for a in BY_ID.values() if a.placement == "spot"],
+                "leads": [dict(lead) for lead in self.leads],
+                "lead_history": [dict(lead) for lead in self.lead_history[-12:]],
                 "self_bucket": describe_bucket(self_ctx),
                 "need": getattr(self._need_action(), "id", None),
                 "why_not": [{"id": r["id"], "reasons": r["reasons"]}
-                            for r in (explain(a.id, spot_ctx if a.placement == "spot" else self_ctx)
+                            for r in (explain(a.id, spot_ctx if a.placement == "spot" else
+                                               lead_ctx if a.placement == "lead" else self_ctx)
                                       for a in BY_ID.values()) if not r["eligible"]],
                 "windows": [{"id": i, "limit": limit, "active": self._active(i), "spawned": n}
                             for i, n, limit in self.bounty()],
@@ -287,7 +354,7 @@ class Expedition:
         if cached is None:
             chunk = self.game.world.peek(key)
             biome = chunk.asset.biome if chunk is not None else self.game.world.biome_for(key)
-            cached = region_for(self.game.world.world_seed, biome, key)
+            cached = self.game.world.region_for(key)
             if len(self._region_cache) > 512:
                 self._region_cache.clear()
             self._region_cache[key] = cached
@@ -298,11 +365,19 @@ class Expedition:
         region = self.region(key)
         return Context(biome=chunk.asset.biome if chunk is not None else "dark_forest",
                        region=region.id if region else None, placement="spot",
-                       unlocked=frozenset(self.unlocked))
+                       region_def=region, unlocked=frozenset(self.unlocked),
+                       knowledge=frozenset(self.knowledge), recipes=frozenset(self.recipes),
+                       action_counts=self.journal["actions"], item_counts=self.journal["items"],
+                       mastery=self.mastery, journal_disabled=frozenset(self.journal_disabled),
+                       journal_favor=self.journal_favor)
 
     def self_context(self, trigger=None, visible=True):
-        return Context(placement="self", unlocked=frozenset(self.unlocked), inventory=dict(self.inventory),
+        return Context(placement="self", unlocked=frozenset(self.unlocked),
+                       knowledge=frozenset(self.knowledge), recipes=frozenset(self.recipes),
+                       action_counts=self.journal["actions"], item_counts=self.journal["items"],
+                       mastery=self.mastery, inventory=dict(self.inventory),
                        gear=frozenset(i for i in self.inventory if ITEMS[i].kind == "gear"),
+                       hunger=self.hunger // POINT, food_carried=self._has_food(),
                        trigger=trigger, visible=visible,
                        flags=frozenset({"done:pray"} if self.prayers_this_life else ()))
 
@@ -359,7 +434,9 @@ class Expedition:
 
     def inventory_rows(self):
         return [{"id": item, "name": ITEMS[item].name, "kind": ITEMS[item].kind,
-                 "glyph": ITEMS[item].glyph, "food": ITEMS[item].food, "count": count}
+                 "glyph": ITEMS[item].glyph, "food": ITEMS[item].food, "count": count,
+                 "slot": ITEMS[item].slot, "equipped": is_equipped(self.equipped, item)
+                 if ITEMS[item].kind == "gear" else False}
                 for item, count in self.inventory.items()]
 
     def visible_spots(self):
@@ -426,14 +503,20 @@ class Expedition:
     def _spots(self, chunk):
         """Rolled spots (known actions, region bucket) plus this life's pity spots."""
         unlocked = frozenset(self.unlocked)
-        key = (chunk.key, self.life, unlocked)
+        # Everything that can change a roll is in the key, including progress requirements
+        # (counts/levels) of spot actions, so a reload re-rolls exactly what a live run cached.
+        progress = tuple(not _requirement_reasons(a, self.spot_context(chunk.key)) for a in SPOT_REQUIREMENT_ACTIONS) \
+            if SPOT_REQUIREMENT_ACTIONS else ()
+        key = (chunk.key, self.life, unlocked, frozenset(self.knowledge),
+               frozenset(self.recipes), frozenset(self.journal_disabled),
+               tuple(sorted(self.journal_favor.items())),
+               tuple(sorted((k, v) for k, v in self.mastery.items() if k in self.journal_disabled
+                            or k in self.journal_favor)), progress)
         cached = self._spot_cache.get(key)
         if cached is None or cached[0] != chunk.seed:
             if len(self._spot_cache) > 256:
                 self._spot_cache.clear()
-            region = self.region(chunk.key)
-            cached = (chunk.seed, chunk_spots(chunk, life=self.life, unlocked=unlocked,
-                                              region=region.id if region else None))
+            cached = (chunk.seed, chunk_spots(chunk, life=self.life, context=self.spot_context(chunk.key)))
             self._spot_cache[key] = cached
         spots = cached[1]
         extra = self.forced.get(self.chunk_ident(chunk.key))
@@ -453,7 +536,11 @@ class Expedition:
 
     def _live(self, chunk):
         """Spots this life's spawn windows admitted."""
-        return [spot for spot in self._spots(chunk) if spot.id in self.admitted]
+        result = [spot for spot in self._spots(chunk) if spot.id in self.admitted]
+        for lead in self.leads:
+            if lead["chunk"] == self.chunk_ident(chunk.key) and lead["expires_ms"] > self.total_ms:
+                result.append(EncounterSpot(lead["id"], lead["action"], chunk.key, lead["x"], lead["y"]))
+        return result
 
     def _active(self, encounter):
         """Admitted, unfinished instances of an encounter around the avatar now."""
@@ -558,6 +645,13 @@ class Expedition:
         return ax, ay
 
     def _spot_by_id(self, spot_id):
+        if isinstance(spot_id, str) and spot_id.startswith("lead:"):
+            for lead in self.leads:
+                if lead["id"] == spot_id and lead["expires_ms"] > self.total_ms:
+                    key = ChunkKey(lead["dimension"], lead["chunk_x"], lead["chunk_y"])
+                    if self.game.world.peek(key) is not None:
+                        return EncounterSpot(spot_id, lead["action"], key, lead["x"], lead["y"])
+            return None
         parts = (spot_id or "").split(":")
         if len(parts) != 5 or parts[0] != "enc":
             return None
@@ -575,10 +669,15 @@ class Expedition:
         return self._global(p.chunk, p.x, p.y)
 
     def _grid(self):
+        resident = self._resident()
+        memo = getattr(self, "_grid_memo", None)
+        if memo is not None and memo[0] is resident:   # same memoized resident list
+            return memo[1]
         w, h = self._dims()
-        chunks = {(c.key.x, c.key.y): c for c in self._resident()}
+        chunks = {(c.key.x, c.key.y): c for c in resident}
         exits = {k: {(e.x, e.y, e.direction) for e in c.asset.exits} for k, c in chunks.items()}
-        return w, h, chunks, exits
+        self._grid_memo = (resident, (w, h, chunks, exits))
+        return self._grid_memo[1]
 
     def _can_move(self, grid, blocked, gx, gy, direction):
         w, h, chunks, exits = grid
@@ -606,14 +705,71 @@ class Expedition:
         return frozenset(self._global(t.chunk, t.x, t.y) for t in self.game.targets.values()
                          if t.hp > 0 and t.chunk.dimension == self.game.player.chunk.dimension)
 
-    def _field(self, goals):
-        """Distance-to-goal field over resident chunks (pure, memoized)."""
+    def _chunk_moves(self, chunk, w, h):
+        """Reverse moves inside one chunk (cached per chunk object: assets are immutable)."""
+        cache = self._chunk_moves_cache
+        hit = cache.get(chunk.key)
+        if hit is not None and hit[0] is chunk:
+            return hit[1]
+        collision = chunk.asset.collision
+        ox, oy = chunk.key.x * w, chunk.key.y * h
+        rev = {}
+        for ly in range(h):
+            row = collision[ly]
+            for lx in range(w):
+                if row[lx]:
+                    continue
+                for dx, dy in DIRECTION_DELTAS:
+                    nx, ny = lx + dx, ly + dy
+                    if 0 <= nx < w and 0 <= ny < h and not collision[ny][nx]:
+                        rev.setdefault((ox + nx, oy + ny), []).append((ox + lx, oy + ly))
+        if len(cache) > 64:
+            cache.clear()
+        cache[chunk.key] = (chunk, rev)
+        return rev
+
+    def _graph(self):
+        """Static reverse moves over the resident chunks: rev[cell] = cells that can step
+        into `cell` (collision and chunk exits only; live targets are checked per search).
+        Same rule as _can_move with nothing blocked; cached by the resident set."""
         grid = self._grid()
+        if self._graph_cache is not None and self._graph_cache[0] is grid:
+            return grid, self._graph_cache[1]
+        w, h, chunks, exits = grid
+        rev = {}
+        for chunk in chunks.values():
+            rev.update(self._chunk_moves(chunk, w, h))
+        none = frozenset()
+        for (cx, cy), chunk_exits in exits.items():   # chunk crossings: only through exits
+            for lx, ly, direction in chunk_exits:
+                gx, gy = cx * w + lx, cy * h + ly
+                if chunks[(cx, cy)].asset.collision[ly][lx]:
+                    continue
+                dx, dy = DELTAS[direction]
+                if (gx + dx) // w == cx and (gy + dy) // h == cy:
+                    continue   # an exit that stays inside its chunk is already an inner move
+                if self._can_move(grid, none, gx, gy, direction):
+                    cell = (gx + dx, gy + dy)
+                    rev[cell] = rev.get(cell, []) + [(gx, gy)]
+        self._graph_cache = (grid, rev)
+        return grid, rev
+
+    def _field(self, goals, limit=None, until=None):
+        """Distance-to-goal field over resident chunks (pure, memoized). With `limit`,
+        only cells at most that many steps away are filled in (exact distances).
+        With `until` (the walker's cell), the search stops once every cell up to one step
+        farther than `until` is settled: exact for `until` and all its neighbours, which is
+        all a step decision reads. As the walker closes in, the same partial field stays
+        valid, so one search serves the whole walk."""
+        grid, rev = self._graph()
         blocked = self._blocked()
-        key = (tuple(sorted(goals)), tuple(sorted(grid[2])), self.game.player.chunk, blocked)
+        key = (tuple(sorted(goals)), tuple(sorted(grid[2])), self.game.player.chunk, blocked, limit,
+               until is not None)
         cached = self._field_cache.get(key)
         if cached is not None:
-            return cached
+            dist, reach = cached
+            if reach is None or (until in dist and dist[until] + 1 <= reach):
+                return dist
         if len(self._field_cache) > 32:
             self._field_cache.clear()
         dist, queue = {}, deque()
@@ -621,17 +777,49 @@ class Expedition:
             if self._walkable(grid, *g) and g not in blocked:
                 dist[g] = 0
                 queue.append(g)
+        empty = ()
+        reach = None
         while queue:
-            x, y = queue.popleft()
-            for direction in DIRECTIONS:
-                dx, dy = DELTAS[direction]
-                px, py = x - dx, y - dy
-                if (px, py) in dist or (px, py) in blocked:
-                    continue
-                if self._walkable(grid, px, py) and self._can_move(grid, blocked, px, py, direction):
-                    dist[(px, py)] = dist[(x, y)] + 1
-                    queue.append((px, py))
-        self._field_cache[key] = dist
+            cell = queue.popleft()
+            d = dist[cell] + 1
+            if limit is not None and d > limit:
+                continue
+            if until is not None and until in dist and d > dist[until] + 1:
+                reach = dist[until] + 1   # every cell at distance <= reach is already settled
+                break
+            for prev in rev.get(cell, empty):
+                if prev not in dist and prev not in blocked:
+                    dist[prev] = d
+                    queue.append(prev)
+        self._field_cache[key] = (dist, reach)
+        return dist
+
+    def _candidate_field(self):
+        """Distances to the avatar for just the cells next to visible spots: the same BFS as
+        _field({player}), stopped once every such cell is settled (BFS distances are final
+        when first assigned, so the values that matter are identical, at a fraction of the cost)."""
+        wanted = set()
+        for kind, _, _, gx, gy in self._candidates():
+            if kind != "target":
+                wanted |= self._approach(gx, gy)
+        grid, rev = self._graph()
+        blocked = self._blocked()
+        start = self._player()
+        dist, queue = {}, deque()
+        if self._walkable(grid, *start) and start not in blocked:
+            dist[start] = 0
+            queue.append(start)
+        left = len(wanted - {start}) if start in dist else 0
+        empty = ()
+        while queue and left > 0:
+            cell = queue.popleft()
+            d = dist[cell] + 1
+            for prev in rev.get(cell, empty):
+                if prev not in dist and prev not in blocked:
+                    dist[prev] = d
+                    queue.append(prev)
+                    if prev in wanted:
+                        left -= 1
         return dist
 
     def _approach(self, gx, gy):
@@ -771,6 +959,63 @@ class Expedition:
             self.inventory[item] = (have or 0) + kept
         return max(0, kept)
 
+    def _apply_outcomes(self, action, source_id):
+        """Resolve catalog outcomes after the journal count has advanced."""
+        count = self.journal["actions"].get(action.id, 0)
+        for index, outcome in enumerate(action.outcomes):
+            if count < outcome.at_count:
+                continue
+            roll = derive_seed(self.game.world.world_seed, "action-outcome-v1", self.life,
+                               action.id, source_id, index) % 100
+            if roll >= outcome.chance:
+                continue
+            if outcome.kind == "knowledge":
+                if outcome.id not in self.knowledge:
+                    self.knowledge.add(outcome.id)
+                    self._entry("lore", f"Learned {outcome.id.replace('_', ' ')}.", encounter=action.id)
+            elif outcome.kind == "recipe":
+                if outcome.id not in self.recipes:
+                    self.recipes.add(outcome.id)
+                    self._entry("lore", f"Discovered the {outcome.id.replace('_', ' ')} recipe.", encounter=action.id)
+            elif outcome.kind == "lead":
+                source = self._spot_by_id(source_id)
+                if source is None:
+                    key = self.game.player.chunk
+                    sx, sy = self.game.player.x, self.game.player.y
+                else:
+                    key, sx, sy = source.chunk, source.x, source.y
+                chunk = self.game.world.peek(key)
+                if chunk is None:
+                    continue
+                spot = lead_spot(chunk, outcome.id, self.life, source_id, index, (sx, sy))
+                if spot is None:
+                    continue
+                if any(row["id"] == spot.id for row in self.leads):
+                    continue
+                lead = {"id": spot.id, "action": outcome.id, "source": source_id,
+                        "dimension": key.dimension, "chunk_x": key.x, "chunk_y": key.y,
+                        "chunk": self.chunk_ident(key), "x": spot.x, "y": spot.y,
+                        "expires_ms": self.total_ms + outcome.ttl_ms}
+                self.leads.append(lead)
+                self.lead_history.append({**lead, "status": "created"})
+                self.lead_history = self.lead_history[-100:]
+                self._entry("lore", f"A fresh {BY_ID[outcome.id].name.lower()} lead appeared.",
+                            encounter=action.id)
+
+    def _expire_leads(self):
+        expired = [lead for lead in self.leads if lead["expires_ms"] <= self.total_ms]
+        if not expired:
+            return
+        self.leads = [lead for lead in self.leads if lead["expires_ms"] > self.total_ms]
+        for lead in expired:
+            self.lead_history.append({**lead, "status": "expired"})
+            self._entry("lore", f"The {BY_ID[lead['action']].name.lower()} lead went cold.")
+        self.lead_history = self.lead_history[-100:]
+        if self.task and self.task["type"] == "perform" and self.task["spot"] in {v["id"] for v in expired}:
+            self.task = None
+        if self.goal and self.goal.get("id") in {v["id"] for v in expired}:
+            self.goal = None
+
     def _reward(self, ident, entry):
         self.completed.add(ident)
         dim = entry.xp // DIMENSIONAL_DIVISOR
@@ -784,6 +1029,13 @@ class Expedition:
             self.health = min(VITAL_MAX, self.health + entry.heal * POINT)
         self.blessing += entry.blessing
         record_action(self.journal, entry.id)
+        self._apply_outcomes(entry, ident)
+        if ident.startswith("lead:"):
+            for lead in self.leads:
+                if lead["id"] == ident:
+                    self.lead_history.append({**lead, "status": "completed"})
+            self.leads = [lead for lead in self.leads if lead["id"] != ident]
+            self.lead_history = self.lead_history[-100:]
         record_items(self.journal, items)
         self.stats["completed"] += 1
         if entry.category == "fight":
@@ -837,15 +1089,36 @@ class Expedition:
         config = {name: getattr(self.game, name) for name in (
             "movement_interval_ms", "animation_rate_percent", "attack_rate_percent", "attack_damage")}
         press = self.game.step_on_press
-        self.game = Exploration(self.game.world, self.dimension, animations=self.game.animations, **config)
+        previous_world = self.game.world
+        world = self._current_generator_world(self.game.world)
+        self.game = Exploration(world, self.dimension, animations=self.game.animations, **config)
         self.game.step_on_press = press
+        if world is not previous_world:
+            self.anchor = self._anchor()
+            self._entry("rebirth", "While the anchor held you, the forest grew back in a new shape.")
         self.anchor_ms = ANCHOR_COUNTDOWN_MS
         self.anchor_wait = False
+        self.leads = []
         self.task = None
         self.goal = None
         self._field_cache.clear()
 
-    ANCHOR_ACTIONS = ("trade", "begin_life", "unlock", "boon", "mastery")
+    def _current_generator_world(self, world):
+        """Worlds pinned to an older generator (homogeneous v1 Forest) are regenerated
+        from the same seed with the current region-shaped generator between lives.
+        Mid-life the pinned world never changes, so a save always replays exactly."""
+        if world.generator_version >= GENERATOR_VERSION:
+            return world
+        fresh = WorldRepository(world.world_seed, world.dimensions, world.catalog, world.cache_limit)
+        for cache in (self._region_cache, self._spot_cache, self._field_cache):
+            cache.clear()
+        self._graph_cache = None
+        self._grid_memo = None
+        self._resident_memo = None
+        return fresh
+
+    ANCHOR_ACTIONS = ("trade", "begin_life", "unlock", "boon", "mastery",
+                      "journal_toggle", "journal_favor")
 
     def anchor_offers(self):
         """Anchor shop rows (economy.offers) for the UI and debugging."""
@@ -859,6 +1132,31 @@ class Expedition:
         if kind == "begin_life" and set(action) == {"type"}:
             self._begin_life()
             return
+        if kind == "journal_toggle" and set(action) == {"type", "id", "enabled"}:
+            ident, enabled = action["id"], action["enabled"]
+            if ident not in BY_ID or BY_ID[ident].placement != "spot" or type(enabled) is not bool \
+                    or self.mastery.get(ident, 0) < JOURNAL_TOGGLE_MASTERY:
+                raise ValueError("journal toggle requires spot mastery 2")
+            if enabled:
+                self.journal_disabled.discard(ident)
+            else:
+                self.journal_disabled.add(ident)
+            self.anchor_wait = True
+            self._entry("purchase", f"Journal: {BY_ID[ident].name} {'enabled' if enabled else 'disabled'}.")
+            return
+        if kind == "journal_favor" and set(action) == {"type", "id", "mode"}:
+            ident, mode = action["id"], action["mode"]
+            if ident not in BY_ID or BY_ID[ident].placement != "spot" \
+                    or mode not in ("normal", "favor", "suppress") \
+                    or self.mastery.get(ident, 0) < JOURNAL_FAVOR_MASTERY:
+                raise ValueError("journal odds require spot mastery 3")
+            if mode == "normal":
+                self.journal_favor.pop(ident, None)
+            else:
+                self.journal_favor[ident] = mode
+            self.anchor_wait = True
+            self._entry("purchase", f"Journal: {BY_ID[ident].name} odds set to {mode}.")
+            return
         if kind in ("unlock", "boon", "mastery") and set(action) == {"type", "id"} and type(action["id"]) is str:
             row = economy.purchase(self, kind, action["id"])
             self.anchor_wait = True
@@ -869,6 +1167,7 @@ class Expedition:
         item = action["item"]
         count = self.inventory.pop(item, 0)
         if count:
+            self.equipped = {slot: gear for slot, gear in self.equipped.items() if gear != item}
             gained = economy.offer_value(item, count)
             self.dust += gained
             self.anchor_wait = True
@@ -916,7 +1215,7 @@ class Expedition:
         if not self._goal_valid():
             self.goal = None
         if self.goal and self.goal["kind"] == "wander" and not self.task and self._candidates():
-            found = self._best_candidate(self._field({self._player()}))
+            found = self._best_candidate(self._candidate_field())
             if found:
                 self.goal = found
         return False
@@ -1003,8 +1302,13 @@ class Expedition:
         if self.in_prologue:
             return
         px, py = self._player()
+        if self._near_camp(px, py) or not any(   # cheap check first: most steps nothing is close
+                t.hp > 0 and t.id in self.admitted and t.chunk.dimension == self.dimension
+                and sum(map(abs, (a - b for a, b in zip(self._global(t.chunk, t.x, t.y), (px, py))))) <= BOAR_AGGRO_RADIUS
+                for t in self.game.targets.values()):
+            return
         grid = self._grid()
-        field = self._field({(px, py)})
+        field = self._field({(px, py)}, limit=BOAR_PATH_LIMIT)
         for target in sorted(self.game.targets.values(), key=lambda t: t.id):
             if target.hp == 0 or target.id not in self.admitted or target.chunk.dimension != self.dimension:
                 continue
@@ -1028,8 +1332,15 @@ class Expedition:
                     target.chunk, target.x, target.y = key, tx % w, ty % h
                     self._field_cache.clear()
                     distance = abs(tx - px) + abs(ty - py)
-            # A second boar waits its turn; a badly hurt avatar running home is chased, not stopped.
-            if distance == 1 and (self.goal or {}).get("kind") not in ("target", "home"):
+            # A boar that catches a fleeing avatar gores it in passing but does not stop it;
+            # retreat is safer than a losing fight, never free.
+            if distance == 1 and (self.goal or {}).get("kind") == "home":
+                self._boar_bites(target)
+                if self.health == 0:
+                    break
+                continue
+            # A second boar waits its turn.
+            if distance == 1 and (self.goal or {}).get("kind") != "target":
                 self.task = None
                 self._boar_bites(target)
                 if self.health > self.fight_damage(self.ring(target.chunk)):
@@ -1052,11 +1363,8 @@ class Expedition:
         if not self.crafting_enabled:
             return None
         ctx = self.self_context("need", visible)
-        for action_id in NEED_PRIORITY:
-            action = BY_ID[action_id]
+        for action in NEED_ACTIONS:
             if reasons_against(action, ctx):
-                continue
-            if action_id == "craft_snare" and (self._has_food() or self.hunger >= SNARE_WHEN_HUNGER_BELOW * POINT):
                 continue
             return action
         return None
@@ -1091,9 +1399,11 @@ class Expedition:
         if action.effect:
             if self._add_item(action.effect, 1):
                 items.append((action.effect, 1))
+                self.equipped = equip_item(self.equipped, self.inventory, action.effect)
         seed = derive_seed(self.game.world.world_seed, "self-loot", self.life, action.id, self.sequence)
         items += [(item, kept) for item, count in roll_loot(action, seed) if (kept := self._add_item(item, count))]
         record_action(self.journal, action.id)
+        self._apply_outcomes(action, f"self:{self.sequence}")
         record_items(self.journal, [(i, n) for i, n in items if n > 0])
         dim = action.xp // DIMENSIONAL_DIVISOR
         if action.xp:
@@ -1133,6 +1443,7 @@ class Expedition:
                     if self.anchor_ms == 0:
                         self._begin_life()
                     continue
+                self._expire_leads()
                 if self._settle():
                     self.game.step_on_press = False
                     continue
@@ -1140,6 +1451,8 @@ class Expedition:
                     break
                 game = self.game
                 cap = min(remaining, self._vitals_limit(), MONSTER_STEP_MS - self.monster_ms)
+                if self.leads:
+                    cap = min(cap, min(lead["expires_ms"] - self.total_ms for lead in self.leads))
                 if game.player.animation == "attack":
                     clip = game.animations["attack"].duration_ms * 100
                     done = game.player.animation_elapsed_ms * game.attack_rate_percent
@@ -1216,7 +1529,7 @@ class Expedition:
                         game.attack_damage = self.punch_damage()
                         game.advance(0, InputCommand(attack=True))  # rising edge: punch
                     continue
-                field = self._field(goals)
+                field = self._field(goals, until=here)
                 grid, blocked = self._grid(), self._blocked()
                 best = None
                 for direction in DIRECTIONS:
@@ -1247,6 +1560,11 @@ class Expedition:
                 "regular": dict(self.regular), "dimensional": dict(self.dimensional),
                 "life_gain": dict(self.life_gain), "completed": sorted(self.completed),
                 "inventory": [[item, count] for item, count in self.inventory.items()],
+                "equipped": dict(self.equipped), "knowledge": sorted(self.knowledge),
+                "recipes": sorted(self.recipes), "journal_disabled": sorted(self.journal_disabled),
+                "journal_favor": dict(sorted(self.journal_favor.items())),
+                "leads": [dict(lead) for lead in self.leads],
+                "lead_history": [dict(lead) for lead in self.lead_history],
                 "hunger": self.hunger, "health": self.health,
                 "food_cooldown_ms": self.food_cooldown_ms, "cause": self.cause,
                 "depth": self.depth, "best_depth": self.best_depth, "blessing": self.blessing,
@@ -1271,7 +1589,11 @@ class Expedition:
                    "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal", "anchor_ms", "anchor_wait",
                    "monster_ms", "prayers_this_life", "budget", "spawned",
                    "admitted", "screened_chunks", "screened_targets", "log", "sequence",
-                   "decisions", "skills", "report", "task", "goal")
+                   "decisions", "skills", "report", "task", "goal", "equipped", "knowledge",
+                   "recipes", "journal_disabled", "journal_favor", "leads", "lead_history")
+
+    V8_FIELDS = ("equipped", "knowledge", "recipes", "journal_disabled", "journal_favor",
+                 "leads", "lead_history")
 
     @classmethod
     def from_dict(cls, data):
@@ -1287,6 +1609,8 @@ class Expedition:
             data = cls._upgrade_v5(data)
         if isinstance(data, dict) and data.get("schema_version") == 6:
             data = cls._upgrade_v6(data)
+        if isinstance(data, dict) and data.get("schema_version") == 7:
+            data = cls._upgrade_v7(data)
         fields(data, cls.SAVE_FIELDS)
         if data["schema_version"] != SCHEMA_VERSION or data["encounters"] != ENCOUNTER_VERSION:
             raise ValueError("unsupported expedition save")
@@ -1312,6 +1636,28 @@ class Expedition:
                     raise ValueError("invalid inventory row")
                 inventory[row[0]] = integer(row[1], "item count", 1, STACK_LIMIT)
             result.inventory = inventory
+            result.equipped = validate_equipped(data["equipped"], inventory)
+            for name in ("knowledge", "recipes", "journal_disabled"):
+                values = data[name]
+                if type(values) is not list or len(values) != len(set(values)) or any(
+                        type(value) is not str for value in values):
+                    raise ValueError(f"invalid {name}")
+                setattr(result, name, set(values))
+            if type(data["journal_favor"]) is not dict or any(
+                    key not in BY_ID or value not in ("favor", "suppress")
+                    for key, value in data["journal_favor"].items()):
+                raise ValueError("invalid journal favor")
+            result.journal_favor = dict(data["journal_favor"])
+            if any(key not in BY_ID or BY_ID[key].placement != "spot" for key in result.journal_disabled):
+                raise ValueError("invalid journal disabled")
+            for name in ("leads", "lead_history"):
+                values = data[name]
+                if type(values) is not list or len(values) > 1000 or any(type(v) is not dict for v in values):
+                    raise ValueError(f"invalid {name}")
+                if name == "leads" and len({v.get("id") for v in values}) != len(values):
+                    raise ValueError("duplicate leads")
+                setattr(result, name, [_validated_lead(v, result.game.world, history=name == "lead_history")
+                                       for v in values])
             result.hunger = integer(data["hunger"], "hunger", 0, VITAL_MAX)
             result.health = integer(data["health"], "health", 0, VITAL_MAX)
             result.food_cooldown_ms = integer(data["food_cooldown_ms"], "food cooldown", 0, FOOD_COOLDOWN_MS)
@@ -1430,10 +1776,40 @@ class Expedition:
                 "journal": new_journal()}
 
     @classmethod
+    def _v8_defaults(cls):
+        return {"equipped": {}, "knowledge": [], "recipes": [], "journal_disabled": [],
+                "journal_favor": {}, "leads": [], "lead_history": []}
+
+    @classmethod
     def _upgrade_v6(cls, data):
         """Schema 6 -> 7 adds the lifetime journal (empty: earlier lives were not counted)."""
-        fields(data, tuple(name for name in cls.SAVE_FIELDS if name != "journal"))
-        return {**data, "schema_version": SCHEMA_VERSION, "journal": new_journal()}
+        fields(data, tuple(name for name in cls.SAVE_FIELDS if name not in ("journal", *cls.V8_FIELDS)))
+        return {**data, "schema_version": 7, "journal": new_journal()}
+
+    @classmethod
+    def _upgrade_v7(cls, data):
+        """New action pool/regions: preserve earned progress, reroll uncompleted spots."""
+        fields(data, tuple(name for name in cls.SAVE_FIELDS if name not in cls.V8_FIELDS))
+        if data["encounters"] != "encounters-v6":
+            raise ValueError("unsupported expedition save")
+        exploration = dict(data["exploration"])
+        exploration["targets"] = [t for t in exploration["targets"] if not str(t["id"]).startswith("enc:")]
+        exploration["hit_targets"] = [t for t in exploration["hit_targets"] if not str(t).startswith("enc:")]
+        task = data["task"]
+        if isinstance(task, dict) and task.get("type") == "perform":
+            task = None
+        goal = data["goal"]
+        if isinstance(goal, dict) and goal.get("kind") in ("spot", "target"):
+            goal = None
+        inventory = dict(data["inventory"])
+        equipped = {ITEMS[item].slot: item for item in inventory if ITEMS[item].kind == "gear"}
+        return {**data, "schema_version": SCHEMA_VERSION, "encounters": ENCOUNTER_VERSION,
+                "exploration": exploration, "completed": [c for c in data["completed"]
+                                                        if not str(c).startswith("enc:")],
+                "task": task, "goal": goal, "forced": {}, "budget": None, "spawned": None,
+                "admitted": None, "screened_chunks": None, "screened_targets": None,
+                "equipped": equipped, "knowledge": [], "recipes": [], "journal_disabled": [],
+                "journal_favor": {}, "leads": [], "lead_history": []}
 
     @classmethod
     def rebuilt(cls, old, game):
@@ -1446,6 +1822,8 @@ class Expedition:
         for name in ("blessing", "dust", "ash", "best_depth", "total_ms", "sequence", "decisions"):
             setattr(new, name, getattr(old, name))
         new.unlocked, new.mastery = set(old.unlocked), dict(old.mastery)
+        new.knowledge, new.recipes = set(old.knowledge), set(old.recipes)
+        new.journal_disabled, new.journal_favor = set(old.journal_disabled), dict(old.journal_favor)
         new.journal = validate_journal(old.journal)
         new.log = [dict(e) for e in old.log]
         new.life = old.life + 1
@@ -1459,7 +1837,7 @@ class Expedition:
     def _upgrade_v5(cls, data):
         """encounters-v5 saves keep XP, blessing, dust, vitals and inventory; spots re-roll
         under the v6 action buckets (this life's spot plans and windows are rebuilt)."""
-        fields(data, tuple(name for name in cls.SAVE_FIELDS if name not in cls.V6_FIELDS))
+        fields(data, tuple(name for name in cls.SAVE_FIELDS if name not in (*cls.V6_FIELDS, *cls.V8_FIELDS)))
         if data["encounters"] != "encounters-v5":
             raise ValueError("unsupported expedition save")
         exploration = dict(data["exploration"])
@@ -1474,7 +1852,7 @@ class Expedition:
         if isinstance(task, dict) and task.get("type") == "perform":
             task = None
         goal = data["goal"] if isinstance(data["goal"], dict) and data["goal"].get("kind") in ("wander", "home") else None
-        return {**data, **cls._v6_defaults(), "schema_version": SCHEMA_VERSION, "encounters": ENCOUNTER_VERSION,
+        return {**data, **cls._v6_defaults(), **cls._v8_defaults(), "schema_version": SCHEMA_VERSION, "encounters": ENCOUNTER_VERSION,
                 "exploration": exploration, "completed": completed, "log": log, "task": task, "goal": goal,
                 "budget": None, "spawned": None, "admitted": None, "screened_chunks": None,
                 "screened_targets": None}
@@ -1483,7 +1861,7 @@ class Expedition:
     def _upgrade_v4(cls, data):
         """V4 locations and shrine rolls are replaced without erasing earned XP."""
         fields(data, tuple(name for name in cls.SAVE_FIELDS if name not in
-                           ("monster_ms", "prayers_this_life", *cls.V6_FIELDS)))
+                           ("monster_ms", "prayers_this_life", *cls.V6_FIELDS, *cls.V8_FIELDS)))
         if data["encounters"] != "encounters-v4":
             raise ValueError("unsupported expedition save")
         exploration = dict(data["exploration"])
@@ -1502,13 +1880,14 @@ class Expedition:
                 "exploration": exploration, "completed": completed, "log": log,
                 "task": task, "goal": None, "budget": None, "spawned": None,
                 "admitted": None, "screened_chunks": None, "screened_targets": None,
-                "monster_ms": 0, "prayers_this_life": 0, **cls._v6_defaults()}
+                "monster_ms": 0, "prayers_this_life": 0, **cls._v6_defaults(), **cls._v8_defaults()}
 
     @classmethod
     def _upgrade_v3(cls, data):
         """New encounter locations change spot rolls; retain earned progress only."""
         fields(data, tuple(name for name in cls.SAVE_FIELDS if name not in
-                           ("dust", "anchor_ms", "anchor_wait", "monster_ms", "prayers_this_life", *cls.V6_FIELDS)))
+                           ("dust", "anchor_ms", "anchor_wait", "monster_ms", "prayers_this_life", *cls.V6_FIELDS,
+                            *cls.V8_FIELDS)))
         if data["encounters"] != "encounters-v3":
             raise ValueError("unsupported expedition save")
         exploration = dict(data["exploration"])
@@ -1528,7 +1907,7 @@ class Expedition:
                 "budget": None, "spawned": None, "admitted": None,
                 "screened_chunks": None, "screened_targets": None,
                 "dust": 0, "anchor_ms": None, "anchor_wait": False,
-                "monster_ms": 0, "prayers_this_life": 0, **cls._v6_defaults()}
+                "monster_ms": 0, "prayers_this_life": 0, **cls._v6_defaults(), **cls._v8_defaults()}
 
     @classmethod
     def _upgrade_v2(cls, data):
@@ -1556,7 +1935,7 @@ class Expedition:
                 "goal": None, "blessing": 0, "budget": None, "spawned": None, "admitted": None,
                 "screened_chunks": None, "screened_targets": None,
                 "dust": 0, "anchor_ms": None, "anchor_wait": False,
-                "monster_ms": 0, "prayers_this_life": 0, **cls._v6_defaults()}
+                "monster_ms": 0, "prayers_this_life": 0, **cls._v6_defaults(), **cls._v8_defaults()}
 
     @classmethod
     def _from_v1(cls, data):

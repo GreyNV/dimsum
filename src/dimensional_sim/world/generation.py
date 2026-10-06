@@ -1,4 +1,4 @@
-"""Pure version-1 chunk composition; no provider, runtime state or shared RNG.
+"""Pure versioned chunk composition; no provider, runtime state or shared RNG.
 
 A world's identity includes seed, sorted dimension specs, generator version and
 catalog digest. All cell decisions use labeled SHA-derived seeds. Paths connecting
@@ -14,7 +14,8 @@ from .models import (
 )
 from .seeds import canonical_json, content_digest, derive_seed
 
-GENERATOR_VERSION = 1
+GENERATOR_VERSION = 2
+SUPPORTED_GENERATOR_VERSIONS = (1, 2)
 
 
 def validated_dimensions(dimensions):
@@ -81,12 +82,30 @@ class ChunkGenerator:
     catalog fallback belongs to WorldRepository construction, never generation.
     """
 
-    def __init__(self, world_seed: int, dimensions: tuple, assets: tuple):
+    def __init__(self, world_seed: int, dimensions: tuple, assets: tuple,
+                 generator_version: int = GENERATOR_VERSION, region_catalog=None):
         integer(world_seed, "world seed", 0, 2**64 - 1)
+        if type(generator_version) is not int or generator_version not in SUPPORTED_GENERATOR_VERSIONS:
+            raise ValueError("unsupported generator version")
         self.world_seed = world_seed
+        self.generator_version = generator_version
         self.dimensions = validated_dimensions(dimensions)
         self.catalog = validated_catalog(assets)
         self.catalog_digest = content_digest([asset_to_dict(asset) for asset in self.catalog])
+        self.region_catalog = None
+        self.region_catalog_digest = None
+        if self.generator_version >= 2:
+            from .catalog import REGIONS, RegionDef
+            definitions = REGIONS if region_catalog is None else region_catalog
+            if type(definitions) is not dict or not definitions:
+                raise ValueError("region catalog must be a nonempty mapping")
+            if any(type(key) is not str or not isinstance(value, RegionDef) or
+                   value.id != key for key, value in definitions.items()):
+                raise ValueError("invalid region catalog")
+            self.region_catalog = {key: RegionDef(**asdict(value))
+                                   for key, value in sorted(definitions.items())}
+            self.region_catalog_digest = content_digest(
+                [asdict(value) for value in self.region_catalog.values()])
         self._specs = {spec.id: spec for spec in self.dimensions}
         self._pools = {}
         for spec in self.dimensions:
@@ -105,9 +124,14 @@ class ChunkGenerator:
 
     def _seed(self, key):
         spec = self._spec(key)
-        dimension_seed = derive_seed(
-            self.world_seed, "generator", GENERATOR_VERSION, "catalog",
-            self.catalog_digest, "dimension", canonical_json(asdict(spec)))
+        if self.generator_version == 1:
+            dimension_seed = derive_seed(
+                self.world_seed, "generator", 1, "catalog",
+                self.catalog_digest, "dimension", canonical_json(asdict(spec)))
+        else:
+            dimension_seed = derive_seed(
+                self.world_seed, "generator", 2, "catalog", self.catalog_digest,
+                "regions", self.region_catalog_digest, "dimension", canonical_json(asdict(spec)))
         return derive_seed(dimension_seed, "chunk", key.x, key.y)
 
     def _source(self, key):
@@ -130,7 +154,12 @@ class ChunkGenerator:
             from .open_terrain import compose_open
             landscape_seed = derive_seed(self.world_seed, "open-terrain-v1", self.catalog_digest,
                                          canonical_json(asdict(spec)))
-            return Chunk(key, seed, source.id, compose_open(source, spec, key, landscape_seed))
+            region = None
+            if self.generator_version >= 2:
+                from .regions import region_for
+                region = region_for(self.world_seed, source.biome, key, self.region_catalog)
+            return Chunk(key, seed, source.id, compose_open(source, spec, key, landscape_seed,
+                                                             region=region))
         terrain = derive_seed(seed, "terrain")
         decoration = derive_seed(seed, "decoration")
         encounter = derive_seed(seed, "encounter")

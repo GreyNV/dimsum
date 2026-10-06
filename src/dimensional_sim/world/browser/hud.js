@@ -248,7 +248,10 @@ export function debugText(info) {
   return [
     `seed ${info.world_seed}  life ${info.life}  chunk ${info.chunk}  region ${info.region}`,
     `currencies dust ${info.currencies.dust} ash ${info.currencies.ash} blessing ${info.currencies.blessing}  boon ${info.boon || '-'}`,
-    `unlocked: ${info.unlocked.join(', ') || 'none'}`,
+    `unlocked: ${info.unlocked.join(', ') || 'none'}  knowledge: ${(info.knowledge || []).join(', ') || 'none'}  recipes: ${(info.recipes || []).join(', ') || 'none'}`,
+    `region params: ${info.region_parameters ? `canopy ${info.region_parameters.canopy} brush ${info.region_parameters.brush} ${info.region_parameters.landmark}` : '-'}  generator v${info.generator_version ?? '?'}`,
+    `states: ${(info.states || []).map(r => `${r.id}=${r.state}${r.admitted ? '*' : ''}`).join(' ')}`,
+    `leads: ${(info.leads || []).map(l => `${l.action}@${l.chunk} until ${Math.round(l.expires_ms / 1000)}s`).join(' | ') || 'none'}`,
     `spot bucket: ${info.spot_bucket.map(pct).join(' | ')}`,
     `self bucket: ${info.self_bucket.map(pct).join(' | ')}  need: ${info.need || '-'}`,
     `windows: ${info.windows.map(w => `${w.id} ${w.active}/${w.limit} (${w.spawned})`).join(' | ')}`,

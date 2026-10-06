@@ -8,12 +8,13 @@ This module has no dependency on the offline pipeline or any generation provider
 from collections import OrderedDict
 from dataclasses import asdict
 
-from .generation import ChunkGenerator, GENERATOR_VERSION, validated_dimensions
+from .generation import (ChunkGenerator, GENERATOR_VERSION,
+                         SUPPORTED_GENERATOR_VERSIONS, validated_dimensions)
 from .models import (
     ChunkKey, DimensionSpec, asset_from_dict, asset_to_dict, fields, integer,
 )
 
-WORLD_SCHEMA_VERSION = 1
+WORLD_SCHEMA_VERSION = 2
 MAX_MAP_RADIUS = 32
 
 
@@ -39,7 +40,8 @@ class WorldRepository:
     retains the center as most recently used. Radius inputs are bounded to 0..32.
     """
 
-    def __init__(self, world_seed=1, dimensions=None, assets=None, cache_limit=9):
+    def __init__(self, world_seed=1, dimensions=None, assets=None, cache_limit=9,
+                 generator_version=GENERATOR_VERSION, region_catalog=None):
         integer(cache_limit, "cache limit", 1, 4096)
         self._world_seed = integer(world_seed, "world seed", 0, 2**64 - 1)
         self._dimensions = validated_dimensions(
@@ -47,7 +49,9 @@ class WorldRepository:
         if assets is not None and type(assets) is not tuple:
             raise ValueError("assets must be a tuple or None")
         catalog = _bundled(self.dimensions) if assets is None or assets == () else assets
-        self._generator = ChunkGenerator(self.world_seed, self.dimensions, catalog)
+        self._generator = ChunkGenerator(self.world_seed, self.dimensions, catalog,
+                                         generator_version=generator_version,
+                                         region_catalog=region_catalog)
         self._catalog = self._generator.catalog
         self._cache_limit = cache_limit
         self._resident = OrderedDict()
@@ -83,6 +87,20 @@ class WorldRepository:
     def catalog_digest(self):
         return self._generator.catalog_digest
 
+    @property
+    def generator_version(self):
+        return self._generator.generator_version
+
+    @property
+    def region_catalog_digest(self):
+        return self._generator.region_catalog_digest
+
+    def region_for(self, key):
+        """Read this world's pinned region without generating or residing a chunk."""
+        from .regions import region_for
+        biome = self.biome_for(key)
+        return region_for(self.world_seed, biome, key, self._generator.region_catalog)
+
     def _key(self, key):
         self._generator._spec(key)
         return key
@@ -100,7 +118,7 @@ class WorldRepository:
             self._resident.move_to_end(key)
         return self._resident[key]
 
-    RECYCLE_LIMIT = 48
+    RECYCLE_LIMIT = 256
 
     def _recycle(self, key, chunk):
         """Chunks are pure functions of seed/spec/catalog/key; keeping a few evicted ones
@@ -154,9 +172,9 @@ class WorldRepository:
         return result
 
     def to_dict(self):
-        return {
-            "schema_version": WORLD_SCHEMA_VERSION,
-            "generator_version": GENERATOR_VERSION,
+        data = {
+            "schema_version": 1 if self.generator_version == 1 else WORLD_SCHEMA_VERSION,
+            "generator_version": self.generator_version,
             "world_seed": self.world_seed,
             "cache_limit": self.cache_limit,
             "dimensions": [{**asdict(spec), "biomes": list(spec.biomes)} for spec in self.dimensions],
@@ -167,15 +185,27 @@ class WorldRepository:
                 for key in sorted(self._discovery, key=lambda key: (key.dimension, key.x, key.y))
             ],
         }
+        if self.generator_version >= 2:
+            data["region_catalog"] = [asdict(value) for value in self._generator.region_catalog.values()]
+            data["region_catalog_digest"] = self.region_catalog_digest
+        return data
 
     @classmethod
     def from_dict(cls, data):
-        """Validate pinned schema1 data before adoption; never silently repair it."""
-        fields(data, ("schema_version", "generator_version", "world_seed", "cache_limit",
-                      "dimensions", "catalog", "catalog_digest", "discovery"))
-        if type(data["schema_version"]) is not int or data["schema_version"] != WORLD_SCHEMA_VERSION:
+        """Load v1 worlds unchanged and require pinned regions in v2 worlds."""
+        if type(data) is not dict or type(data.get("schema_version")) is not int:
             raise ValueError("unsupported world schema")
-        if type(data["generator_version"]) is not int or data["generator_version"] != GENERATOR_VERSION:
+        schema = data["schema_version"]
+        if schema not in (1, WORLD_SCHEMA_VERSION):
+            raise ValueError("unsupported world schema")
+        required = ("schema_version", "generator_version", "world_seed", "cache_limit",
+                    "dimensions", "catalog", "catalog_digest", "discovery")
+        if schema == WORLD_SCHEMA_VERSION:
+            required += ("region_catalog", "region_catalog_digest")
+        fields(data, required)
+        if (type(data["generator_version"]) is not int or
+                data["generator_version"] not in SUPPORTED_GENERATOR_VERSIONS or
+                data["generator_version"] != schema):
             raise ValueError("unsupported generator version")
         if any(type(data[name]) is not list for name in ("dimensions", "catalog", "discovery")):
             raise ValueError("world collections must be arrays")
@@ -188,9 +218,24 @@ class WorldRepository:
                 raise ValueError("dimension biomes must be an array")
             dimensions.append(DimensionSpec(**{**raw, "biomes": tuple(raw["biomes"])}))
         catalog = tuple(asset_from_dict(raw) for raw in data["catalog"])
-        result = cls(data["world_seed"], tuple(dimensions), catalog, data["cache_limit"])
+        region_catalog = None
+        if schema == WORLD_SCHEMA_VERSION:
+            from .catalog import RegionDef
+            if type(data["region_catalog"]) is not list or not data["region_catalog"]:
+                raise ValueError("region catalog must be a nonempty array")
+            try:
+                regions = [RegionDef(**raw) for raw in data["region_catalog"]]
+            except (TypeError, ValueError) as exc:
+                raise ValueError("invalid pinned region catalog") from exc
+            region_catalog = {r.id: r for r in regions}
+            if len(region_catalog) != len(regions):
+                raise ValueError("duplicate pinned region")
+        result = cls(data["world_seed"], tuple(dimensions), catalog, data["cache_limit"],
+                     generator_version=data["generator_version"], region_catalog=region_catalog)
         if data["catalog_digest"] != result.catalog_digest:
             raise ValueError("world catalog digest mismatch")
+        if schema == WORLD_SCHEMA_VERSION and data["region_catalog_digest"] != result.region_catalog_digest:
+            raise ValueError("world region catalog digest mismatch")
         for raw in data["discovery"]:
             fields(raw, ("dimension", "x", "y", "status", "biome"))
             key = result._key(ChunkKey(raw["dimension"], raw["x"], raw["y"]))

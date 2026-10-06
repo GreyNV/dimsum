@@ -79,6 +79,11 @@ function adopt(next) {
   retainResident(chunks, next.resident); retainResident(pictures, next.resident);
   observeCombat(next);
   observeExpedition(next);
+  if (next.expedition?.anchor_space && !state?.expedition?.anchor_space) {
+    if (page !== 'world') openPage('world');
+    hud.hideReport();
+    setPause(false);
+  }
   state = next; mapDirty = true;
   if (firstSnapshot && $('report').hidden) setPause(false);
   hud.update(next);
@@ -139,6 +144,23 @@ function updateAnchor(ex) {
       return button;
     })];
   }));
+  const journal = ex.meta?.journal || [];
+  if (journal.length) {
+    const heading = document.createElement('h3'); heading.textContent = 'Journal · shape future encounters';
+    shop.append(heading);
+    for (const row of journal) {
+      const toggle = document.createElement('button'); toggle.type = 'button';
+      toggle.dataset.journalToggle = row.id;
+      toggle.textContent = `${row.name}: ${row.enabled ? 'enabled' : 'disabled'} (mastery ${row.mastery})`;
+      shop.append(toggle);
+      if (row.mastery >= 3) {
+        const odds = document.createElement('button'); odds.type = 'button';
+        odds.dataset.journalFavor = row.id;
+        odds.textContent = `Appearance odds: ${row.mode} · select to cycle`;
+        shop.append(odds);
+      }
+    }
+  }
 }
 function observeCombat(next) {
   const now = performance.now();
@@ -150,7 +172,8 @@ function observeCombat(next) {
     }
     hpSeen.set(target.id, target.hp);
     const struck = strikesSeen.get(target.id);
-    if (struck !== undefined && (target.strikes || 0) > struck && next.expedition?.life === state?.expedition?.life) {
+    if (struck !== undefined && (target.strikes || 0) > struck && next.expedition?.life === state?.expedition?.life
+        && !window.DIMSUM_FASTFORWARD) {
       lunges.set(target.id, {at: now});
       const lost = Math.round(((state?.expedition?.vitals?.health ?? 0) - (next.expedition?.vitals?.health ?? 0)) / 100);
       rewards.push({text: lost > 0 ? `-${lost} health` : 'Gored!', color: '#ff7a63', at: now});
@@ -168,7 +191,8 @@ function observeExpedition(next) {
   const now = performance.now();
   if (!next.expedition) return;
   const seq = Math.max(0, ...next.expedition.log.map(e => e.seq));
-  if (lastRewardSeq !== null && next.expedition.life === state?.expedition?.life)
+  // No reward popups while host.js fast-forwards offline time: they would pile up unreadably.
+  if (lastRewardSeq !== null && next.expedition.life === state?.expedition?.life && !window.DIMSUM_FASTFORWARD)
     for (const entry of newRewards(next, lastRewardSeq))
       rewardTexts(entry).forEach((r, i) => rewards.push({...r, at: now + i * 180}));
   lastRewardSeq = Math.max(lastRewardSeq ?? 0, seq);
@@ -322,8 +346,8 @@ function render(now) {
     ctx.fillStyle=glow;ctx.fillRect(0,0,width,height);
     const scale=Math.min(2.6,width/240,height/340);
     ctx.translate(width/2,height*.38);ctx.scale(scale,scale);
-    drawCamp(ctx,-48,22,{clock:state.expedition.total_ms,reducedMotion});
-    drawPlayer(ctx,state.player,59,26,null,{clock:state.expedition.total_ms});
+    drawCamp(ctx,-48,-15,{clock:state.expedition.total_ms,reducedMotion});
+    drawPlayer(ctx,state.player,59,-11,null,{clock:state.expedition.total_ms});
     if(!stopped)requestAnimationFrame(render);
     return;
   }
@@ -488,6 +512,19 @@ $('anchor-offers').addEventListener('click',event=>{
 });
 $('anchor-begin').addEventListener('click',()=>{ if(!pendingAction) pendingAction={type:'begin_life'}; });
 $('anchor-shop').addEventListener('click',event=>{
+  const toggle=event.target.closest('button[data-journal-toggle]')?.dataset.journalToggle;
+  if (toggle && !pendingAction) {
+    const row=state?.expedition?.meta?.journal?.find(entry=>entry.id===toggle);
+    if (row) pendingAction={type:'journal_toggle',id:toggle,enabled:!row.enabled};
+    return;
+  }
+  const favor=event.target.closest('button[data-journal-favor]')?.dataset.journalFavor;
+  if (favor && !pendingAction) {
+    const row=state?.expedition?.meta?.journal?.find(entry=>entry.id===favor);
+    const modes=['normal','favor','suppress'];
+    if (row) pendingAction={type:'journal_favor',id:favor,mode:modes[(modes.indexOf(row.mode)+1)%modes.length]};
+    return;
+  }
   const value=event.target.closest('button[data-buy]')?.dataset.buy;
   if(!value || pendingAction) return;
   const [type,id]=value.split(':');

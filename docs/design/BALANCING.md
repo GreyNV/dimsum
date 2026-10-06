@@ -40,3 +40,49 @@ then mastery. `hoard` = same, but never crafts. `idle` = never acts at the ancho
 - Snares and the hide wrap only matter after their unlocks; measure again once players own them.
 - Boar damage x1.5 per ring is steep; the frontier currently sits at ring 2-6.
 - Life length 10-15 min may be long for mobile sessions; shorten via `HUNGER_DRAIN` or food windows.
+
+## 2026-10-06: regions, discovery chains, gated crafting, equipped gear
+
+Reproduce: `python -m dimensional_sim.world.cli simulate --seeds 1-8 --minutes 60 --lives` (spend policy) and
+`python -B tests/world_life_cohorts.py --seeds 1-12` (paired first lives, crafting off, only the weapon slot differs).
+
+### Whole expeditions, seeds 1-8, 60 simulated minutes (completed lives only)
+
+| | lives | life min mean | first life | starved / boar | eaten | boar fights | depth | regions visited / life |
+|---|---|---|---|---|---|---|---|---|
+| before (pushed `main` + speed work) | 17 | 18.3 | 13.5 | 16 / 1 | 30.0 | 6.4 | 5.4 | (labels only; terrain identical) |
+| after (this iteration) | 14 | 18.5 | 17.4 | 8 / 6 | 31.9 | 6.6 | 5.3 | 3.9 of 4 |
+
+After: 13 of 14 lives crafted and equipped a staff; deer chain: 50 follow leads created (2 expired), 29 hunt leads
+(1 expired), 27 hunts. Intermediate tuning (55% lead, guaranteed hunt, 1-2 venison) gave 44-minute lives and
+~13 hunts per life, which is why the chain was cut back (ACTION_ARCHITECTURE_AUDIT.md, follow-up decisions).
+
+### Unarmed vs staff, paired first lives, seeds 1-12 (45 min cap, crafting off, same world and staff item)
+
+| cohort | life min | boar bite encounters | boar kills | kills per encounter | boar deaths | starvation | depth |
+|---|---|---|---|---|---|---|---|
+| unarmed | 12.9 | 67 | 52 | 0.78 | 1 | 11 | 3.8 |
+| staff equipped | 24.4 | 129 | 106 | 0.82 | 3 | 9 | 5.6 |
+
+Reading: the staff roughly doubles the first life and lets the frontier policy go two rings deeper, where boars
+hit harder; it therefore *raises* boar exposure and boar deaths rather than erasing them. Unarmed, the policy
+mostly avoids fights it would lose (retreat now costs passing bites). Duel regression guard:
+`tests/test_world_combat_balance.py` (staff leaves the avatar below 80 health at ring 2 and below 50 at ring 3,
+where an unarmed avatar refuses the fight).
+
+### World diversity (terrain per region, seeds 1-4, chunks -6..6)
+
+| region | v1 blocked / brush / floor marks | v2 blocked / brush / floor marks |
+|---|---|---|
+| Old Road | 35% / 4% / none | 5% / 8% / debris near the ambush |
+| Deep Woods | 35% / 5% / none | 62% / 2% / 18% moss `o` |
+| Bramble Thicket | 35% / 4% / none | 51% / 12% / 24% bramble `;` |
+| Still Glade | 35% / 5% / none | 0% / 5% / 24% water `~` |
+
+Root cause of "forest, forest, forest": regions existed but only changed action weights and a 28% tint; terrain
+generation (v1) never read them. Layouts per seed (`cli regions --seed N`, radius 2, O/D/B/G):
+seed 1 `O D O O B | O B G G O | O D O O G | ...`, seed 2 `B G D O D | O D B G O | ...`, seed 3 `O O G O D | B D G B B | ...`.
+
+### Offline catch-up cost
+30 simulated minutes in CPython: 5.4 s before, 6.7 s after (denser Deep Woods/Thicket terrain means longer
+routes). The hosted build shows the world first and fast-forwards in the background.

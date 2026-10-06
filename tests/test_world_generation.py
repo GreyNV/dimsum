@@ -10,11 +10,14 @@ from unittest.mock import patch
 
 from dimensional_sim.world.assets import AssetRegistry, builtin_assets
 from dimensional_sim.world.generation import ChunkGenerator
+from dimensional_sim.world.open_terrain import open_assets
+from dimensional_sim.world.regions import region_for
+from dimensional_sim.world.catalog import REGIONS
 from dimensional_sim.world.models import (
     ChunkKey, DimensionSpec, Spawn, chunk_to_dict, validate_asset,
 )
 from dimensional_sim.world.repository import WorldRepository
-from dimensional_sim.world.seeds import canonical_json
+from dimensional_sim.world.seeds import canonical_json, content_digest
 
 
 def make_world(seed=482910, cache_limit=3, danger=25):
@@ -138,6 +141,98 @@ class GenerationTests(unittest.TestCase):
         with self.assertRaises(ValueError): ChunkGenerator(1, dims, assets).generate(ChunkKey("nope", 0, 0))
 
 
+class RegionTerrainTests(unittest.TestCase):
+    def test_generator_versions_are_pinned_and_v1_worlds_still_replay(self):
+        dimensions = (DimensionSpec("forest"),)
+        assets = open_assets()
+        old = WorldRepository(482910, dimensions, assets, generator_version=1)
+        key = ChunkKey("forest", 4, -7)
+        before = canonical(old.visit(key))
+        self.assertEqual(content_digest(chunk_to_dict(old.get(key))),
+                         "3226bb566c0c912eb4a38c7f24d493670a4c3c134645d1976c08e3febb4b6f3a")
+        payload = json.loads(canonical_json(old.to_dict()))
+        self.assertEqual(payload["generator_version"], 1)
+        restored = WorldRepository.from_dict(payload)
+        self.assertEqual(restored.generator_version, 1)
+        self.assertEqual(canonical(restored.get(key)), before)
+        self.assertEqual(json.loads(canonical_json(restored.to_dict())), payload)
+        self.assertEqual(WorldRepository(482910, dimensions, assets).generator_version, 2)
+
+    def test_v2_region_catalog_is_pinned_and_tampering_is_rejected(self):
+        world = WorldRepository(91, (DimensionSpec("forest"),), open_assets())
+        key = ChunkKey("forest", 0, 0)
+        before = canonical(world.get(key))
+        payload = json.loads(canonical_json(world.to_dict()))
+        self.assertEqual(payload["schema_version"], 2)
+        self.assertEqual(len(payload["region_catalog"]), 4)
+        self.assertEqual(WorldRepository.from_dict(payload).region_for(key), world.region_for(key))
+        self.assertEqual(canonical(WorldRepository.from_dict(payload).get(key)), before)
+        with patch.dict(REGIONS, old_road=replace(REGIONS["old_road"], canopy=99)):
+            restored = WorldRepository.from_dict(payload)
+            self.assertEqual(restored.region_for(key), world.region_for(key))
+            self.assertEqual(canonical(restored.get(key)), before)
+        payload["region_catalog"][0]["canopy"] += 1
+        with self.assertRaisesRegex(ValueError, "region catalog digest"):
+            WorldRepository.from_dict(payload)
+
+    def test_region_profiles_make_distinct_walkable_terrain(self):
+        world = WorldRepository(482910, (DimensionSpec("forest"),), open_assets())
+        first_by_region = {}
+        for y in range(-9, 10):
+            for x in range(-9, 10):
+                key = ChunkKey("forest", x, y)
+                region = region_for(world.world_seed, "dark_forest", key)
+                first_by_region.setdefault(region.id, key)
+        self.assertEqual(set(first_by_region), {"old_road", "deep_woods", "bramble_thicket", "still_glade"})
+        glyphs = {}
+        for region_id, key in first_by_region.items():
+            chunk = world.get(key)
+            validate_asset(chunk.asset)
+            self.assertEqual(chunk, world.get(key))
+            glyphs[region_id] = "".join(cell.glyph for row in chunk.asset.environment for cell in row)
+        self.assertIn("o", glyphs["deep_woods"])
+        self.assertIn(";", glyphs["bramble_thicket"])
+        self.assertIn("~", glyphs["still_glade"])
+        self.assertNotIn("~", glyphs["old_road"])
+
+    def test_origin_ambush_marks_are_unique_safe_and_deterministic(self):
+        dimensions = (DimensionSpec("forest"),)
+        assets = open_assets()
+        world = WorldRepository(482910, dimensions, assets)
+        origin_key = ChunkKey("forest", 0, 0)
+        origin = world.get(origin_key)
+        validate_asset(origin.asset)
+        marks = "".join(cell.glyph for row in origin.asset.environment for cell in row)
+        self.assertIn("x", marks)
+        self.assertIn(":", marks)
+        spawn = next(s for s in origin.asset.spawns if s.kind == "player")
+        for y in range(spawn.y - 1, spawn.y + 2):
+            for x in range(spawn.x - 1, spawn.x + 2):
+                self.assertFalse(origin.asset.collision[y][x])
+        self.assertNotIn("@", marks)
+        neighboring_road = world.get(ChunkKey("forest", 1, 0))
+        other_marks = "".join(cell.glyph for row in neighboring_road.asset.environment for cell in row)
+        self.assertNotIn("x", other_marks)
+        self.assertNotIn(":", other_marks)
+        legacy = WorldRepository(482910, dimensions, assets, generator_version=1).get(origin_key)
+        legacy_marks = "".join(cell.glyph for row in legacy.asset.environment for cell in row)
+        self.assertNotIn("x", legacy_marks)
+        self.assertNotIn(":", legacy_marks)
+        self.assertEqual(canonical(WorldRepository.from_dict(world.to_dict()).get(origin_key)),
+                         canonical(origin))
+
+    def test_new_region_layouts_change_with_seed_and_survive_reload(self):
+        keys = [ChunkKey("forest", x, y) for y in range(-9, 10, 3) for x in range(-9, 10, 3)]
+        layout = lambda seed: tuple(region_for(seed, "dark_forest", key).id for key in keys)
+        self.assertEqual(layout(482910), layout(482910))
+        self.assertNotEqual(layout(482910), layout(482911))
+        world = WorldRepository(482910, (DimensionSpec("forest"),), open_assets(), cache_limit=1)
+        first = canonical(world.get(keys[0]))
+        for key in keys[1:]:
+            world.get(key)
+        self.assertEqual(canonical(WorldRepository.from_dict(world.to_dict()).get(keys[0])), first)
+
+
 class RepositoryTests(unittest.TestCase):
     def test_new_world_empty_optional_catalog_uses_builtins_and_supports_multiple_sizes(self):
         default, empty = WorldRepository(), WorldRepository(assets=())
@@ -244,9 +339,9 @@ class RepositoryTests(unittest.TestCase):
         world.visit(ChunkKey("forest", 0, 0))
         snapshot = json.loads(canonical_json(world.to_dict()))
         changes = (
-            lambda p: p.update(schema_version=2),
+            lambda p: p.update(schema_version=3),
             lambda p: p.update(schema_version=True),
-            lambda p: p.update(generator_version=2),
+            lambda p: p.update(generator_version=3),
             lambda p: p.update(generator_version=True),
             lambda p: p.update(world_seed=True),
             lambda p: p.update(cache_limit=0),

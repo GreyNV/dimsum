@@ -73,11 +73,11 @@ function character(d) {
 function stats(d) {
   const rows = d.stats;
   return [
-    {title: 'Levels', kind: 'progress', items: rows.flatMap(r => [
-      {label: `${label(r.name)} · level ${r.level}`, value: r.into, max: r.next, text: `${r.into} / ${r.next} xp`},
-      {label: `${label(r.name)} · dimensional ${r.dim_level}`, value: r.dim_into, max: r.dim_next,
+    {title: 'Levels', kind: 'progress', items: rows.map(r => ({label: label(r.name), bars: [
+      {label: `level ${r.level}`, value: r.into, max: r.next, text: `${r.into} / ${r.next} xp`},
+      {label: `dimensional ${r.dim_level}`, value: r.dim_into, max: r.dim_next,
         text: `${r.dim_into} / ${r.dim_next} xp`, dim: true},
-    ])},
+    ]}))},
     {title: 'Breakdown', kind: 'table', head: ['Attribute', 'Lv', 'Dim', 'Total XP', 'This life', 'Speed'],
       rows: rows.map(r => [label(r.name), r.level, r.dim_level, r.xp, `+${r.life_gain}`, times(r.speed)]),
       note: 'Speed multiplies every action using that attribute. Regular levels reset each life; dimensional levels stay.'},
@@ -121,6 +121,14 @@ function journal(d) {
     {title: 'Actions', kind: 'table', head: ['Action', 'Type', 'Done'],
       rows: j.actions.map(([name, category, n]) => [name, title(category), n]), empty: 'Nothing completed yet.'},
     {title: 'Items gathered', kind: 'table', head: ['Item', 'Total'], rows: j.items, empty: 'Nothing gathered yet.'},
+    {title: 'Discoveries', kind: 'rows', rows: [
+      ['Knowledge', j.knowledge.map(title).join(', ') || 'none yet'],
+      ['Recipes', j.recipes.map(title).join(', ') || 'none yet'],
+      ['Active leads', String(j.leads.length)],
+    ]},
+    {title: 'Recent leads', kind: 'table', head: ['Lead', 'Source', 'State'],
+      rows: j.lead_history.slice(-10).reverse().map(row => [title(row.action), row.source, row.status]),
+      empty: 'No leads yet.'},
   ];
 }
 

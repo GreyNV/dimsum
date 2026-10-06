@@ -7,8 +7,9 @@ NEVER: change state or roll anything here.
 TESTS: tests/test_world_pages.py.
 """
 from . import autopilot as ap
-from .actions import known
+from .actions import Context, known
 from .catalog import ACTIONS, BOONS, BY_ID, ITEMS, UNLOCKS
+from .equipment import is_equipped
 from .encounters import spawn_window
 from .journal import achievements
 from .progression import attribute_report, scaled_ms, speed_permille
@@ -21,9 +22,16 @@ def _pts(micro):
     return round(micro / POINTS, 1)
 
 
+def _known_context(e):
+    """Use the same permanent permission state as action generation."""
+    return Context(unlocked=frozenset(e.unlocked),
+                   knowledge=frozenset(getattr(e, "knowledge", ())),
+                   recipes=frozenset(getattr(e, "recipes", ())))
+
+
 def character(e):
     frontier = e.frontier()
-    gear = [ITEMS[i].name for i in e.inventory if ITEMS[i].kind == "gear"]
+    gear = [ITEMS[i].name for i in e.equipped.values()]
     return {
         "life": e.life, "depth": e.depth, "best_depth": e.best_depth, "frontier": frontier,
         "health": _pts(e.health), "hunger": _pts(e.hunger),
@@ -53,9 +61,10 @@ def stats(e):
 
 def multipliers(e):
     """Effective durations for every known action, plus combat/vital multipliers."""
+    known_ctx = _known_context(e)
     actions = []
     for a in ACTIONS:
-        if a.category in ("fight",) or not known(a, e.unlocked):
+        if a.category in ("fight",) or not known(a, known_ctx):
             continue
         speed = e.speed(a.attribute)
         base = a.duration_ms
@@ -64,7 +73,7 @@ def multipliers(e):
                         "base_ms": base, "effective_ms": effective})
     endurance = e.speed("endurance")
     hit_parts = [["Endurance", round(1000 / endurance, 3)]]
-    if "hide_wrap" in e.inventory:
+    if is_equipped(e.equipped, "hide_wrap"):
         hit_parts.append(["Hide wrap", 0.7])
     if e.boon == "iron_skin":
         hit_parts.append(["Iron skin boon", 0.75])
@@ -72,12 +81,13 @@ def multipliers(e):
             "hunger_drain": round(1000 / endurance, 3),
             "boar_hit": hit_parts,
             "punch_damage": e.punch_damage(),
-            "punch_parts": [["Base", 1], ["Strength levels", e.punch_damage() - 1 - (1 if "walking_staff" in e.inventory else 0)],
-                            *([["Walking staff", 1]] if "walking_staff" in e.inventory else [])]}
+            "punch_parts": [["Base", 1], ["Strength levels", e.punch_damage() - 1 - (1 if is_equipped(e.equipped, "walking_staff") else 0)],
+                            *([["Walking staff", 1]] if is_equipped(e.equipped, "walking_staff") else [])]}
 
 
 def rolls(e):
     """This life's rolled caps against the possible range, spot counts and pity."""
+    known_ctx = _known_context(e)
     bonus = BOUNTY_WINDOW_BONUS if e.boon == "bountiful_path" else 0
     windows = []
     for ident, spawned, limit in e.bounty():
@@ -85,10 +95,10 @@ def rolls(e):
         low, high = spawn_window(action, e.mastery.get(ident, 0), bonus if action.feeds else 0)
         windows.append({"id": ident, "name": action.name, "rolled": limit, "min": low, "max": high,
                         "active": e._active(ident), "spawned": spawned, "mastery": e.mastery.get(ident, 0),
-                        "known": known(action, e.unlocked)})
+                        "known": known(action, known_ctx)})
     loot = []
     for a in ACTIONS:
-        if a.loot and known(a, e.unlocked):
+        if a.loot and known(a, known_ctx):
             loot.append({"id": a.id, "name": a.name,
                          "drops": [{"item": ITEMS[l.item].name, "min": l.low, "max": l.high, "chance": l.chance}
                                    for l in a.loot]})
@@ -104,7 +114,11 @@ def journal(e):
             "items": sorted(([ITEMS[i].name, n] for i, n in j["items"].items()), key=lambda r: (-r[1], r[0])),
             "deaths": dict(j["deaths"]), "best_life_min": round(j["best_life_ms"] / 60000, 1),
             "lives": e.life, "best_depth": e.best_depth,
-            "achievements": achievements(e)}
+            "achievements": achievements(e),
+            "knowledge": sorted(e.knowledge), "recipes": sorted(e.recipes),
+            "disabled": sorted(e.journal_disabled), "favor": dict(e.journal_favor),
+            "leads": [dict(row) for row in e.leads],
+            "lead_history": [dict(row) for row in e.lead_history[-20:]]}
 
 
 def detail(e):

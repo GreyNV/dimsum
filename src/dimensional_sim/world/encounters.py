@@ -13,7 +13,7 @@ Spawn windows and pity are applied later by the auto-pilot's screening. No
 providers, wall clock, hash() or shared RNG.
 """
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .actions import Context, bucket
 from .catalog import ACTIONS, ATTRIBUTES, BY_ID, ITEMS, ITEM_KINDS, ActionDef, ItemDef, Loot  # noqa: F401 (re-exports)
@@ -21,7 +21,7 @@ from .models import DELTAS, ChunkKey, integer
 from .seeds import derive_seed
 from .tuning import SPOTS_PER_CHUNK
 
-ENCOUNTER_VERSION = "encounters-v6"  # v6: action registry buckets, regions, unlocks, pity
+ENCOUNTER_VERSION = "encounters-v7"  # v7: region weights, Journal odds, and discovery actions
 EncounterDef = ActionDef            # compatibility name
 KINDS = tuple(sorted({a.category for a in ACTIONS}))
 NEAR = (None, "T", "^")
@@ -131,10 +131,17 @@ def roll_window(entry, seed, mastery=0, bonus=0):
     return low + derive_seed(seed, "window", entry.id) % (high - low + 1)
 
 
-def chunk_spots(chunk, life=1, *, unlocked=frozenset(), region=None):
-    """Deterministic encounter spots for one chunk in one life (possibly none)."""
+def chunk_spots(chunk, life=1, *, unlocked=frozenset(), region=None, context=None):
+    """Deterministic spots from the full action context (legacy unlock/region accepted).
+
+    Callers with progression or Journal state pass ``context`` so roll eligibility
+    is identical to the explanation shown to the player. The chunk's pinned biome
+    is authoritative even if a caller supplies a stale context.
+    """
     asset, key = chunk.asset, chunk.key
-    entries = bucket(Context(biome=asset.biome, region=region, placement="spot", unlocked=frozenset(unlocked)))
+    ctx = (replace(context, biome=asset.biome, placement="spot") if context is not None else
+           Context(biome=asset.biome, region=region, placement="spot", unlocked=frozenset(unlocked)))
+    entries = bucket(ctx)
     if not entries:
         return ()
     seed = derive_seed(chunk.seed, ENCOUNTER_VERSION, life)
@@ -173,3 +180,35 @@ def forced_spot(chunk, encounter, index, taken=()):
         return None
     x, y = options[derive_seed(chunk.seed, ENCOUNTER_VERSION, "forced", encounter, index) % len(options)]
     return EncounterSpot(spot_id(key, FORCED_BASE + index), encounter, key, x, y)
+
+
+def lead_spot(chunk, action_id, life, source_id, index, source_xy):
+    """Place a temporary follow-up on a reachable cell of its source chunk.
+
+    This does not consult or alter the global procedural bucket. The caller owns
+    the lead's expiry and resolution; its identity and position are deterministic
+    for this life and source, including after save/reload or cache regeneration.
+    """
+    if action_id not in BY_ID or BY_ID[action_id].placement != "lead":
+        raise ValueError("lead action required")
+    integer(life, "life", 1)
+    integer(index, "lead index", 0)
+    if not isinstance(source_id, str) or not source_id:
+        raise ValueError("lead source id required")
+    if (type(source_xy) is not tuple or len(source_xy) != 2 or
+            any(type(v) is not int for v in source_xy)):
+        raise ValueError("lead source cell must be an (x, y) tuple")
+    asset, key = chunk.asset, chunk.key
+    sx, sy = source_xy
+    if not 0 <= sx < asset.width or not 0 <= sy < asset.height:
+        raise ValueError("lead source cell outside chunk")
+    reachable = _reachable(asset)
+    options = _candidates(asset, reachable, None)
+    if not options:
+        return None
+    distant = [cell for cell in options if abs(cell[0] - sx) + abs(cell[1] - sy) >= 2]
+    options = distant or [cell for cell in options if cell != source_xy] or options
+    seed = derive_seed(chunk.seed, ENCOUNTER_VERSION, "lead", life, action_id, source_id, index)
+    x, y = options[seed % len(options)]
+    ident = f"lead:{key.dimension}:{key.x}:{key.y}:{action_id}:{index}:{seed}"
+    return EncounterSpot(ident, action_id, key, x, y)

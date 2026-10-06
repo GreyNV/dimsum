@@ -8,7 +8,9 @@ export const PALETTE = Object.freeze({
   grass: ['#334824', '#405930', '#59713b', '#748648'],
   leaves: ['#314822', '#44602b', '#5c7935', '#839545', '#abb65a'],
   bark: ['#645033', '#9b7944', '#b59050'], stone: ['#536057', '#788278', '#a3a490'],
-  pathInk: ['#695b36', '#8e7445', '#b19459']
+  pathInk: ['#695b36', '#8e7445', '#b19459'],
+  ash: ['#4d4940', '#696055', '#867264'], debris: ['#775538', '#a07548', '#c09660'],
+  wet: ['#416b68', '#5a8d85', '#8db1a0']
 });
 export const TREE = Object.freeze([
   '     .v.     ', '   .vYvYv.   ', '  vYvYvYvYv  ', ' .YvYvYvYvY. ',
@@ -26,8 +28,15 @@ export function groundMarks(glyph, x, y, seed) {
   for (let row = 0; row < 4; row++) for (let col = 0; col < 6; col++) {
     const h = visualHash(x * 6 + col, y * 4 + row, seed);
     if (glyph === '=') marks.push({col, row, glyph: '.,:.'[h % 4], color: PALETTE.pathInk[h % 3]});
+    else if (glyph === 'x' && h % 3 !== 0) marks.push({col, row,
+      glyph: ['/', '=', '\\', 'x', '_'][h % 5], color: PALETTE.debris[h % 3]});
+    else if (glyph === ':' && h % 3 !== 0) marks.push({col, row,
+      glyph: ['.', ':', ',', '~'][h % 4], color: PALETTE.ash[h % 3]});
+    else if (glyph === '~' && h % 3 !== 0) marks.push({col, row,
+      glyph: ['~', '.', '~', ','][h % 4], color: PALETTE.wet[h % 3]});
     else if (h % 5 !== 0) marks.push({col, row,
-      glyph: glyph === ';' ? ",;v'"[h % 4] : ".,':"[h % 4], color: PALETTE.grass[h % 4]});
+      glyph: glyph === ';' ? ",;v'"[h % 4] : glyph === 'o' ? "o.,'"[h % 4] : ".,':"[h % 4],
+      color: PALETTE.grass[h % 4]});
   }
   return marks;
 }
@@ -60,8 +69,10 @@ function stamp(key, width, height, draw, createCanvas = defaultCanvas) {
 export function clearStamps() { stamps.clear(); }
 export function stampCount() { return stamps.size; }
 function tileStamp(glyph, variant, createCanvas) {
-  return stamp(`tile:${glyph === '=' ? '=' : glyph === ';' ? ';' : '.'}:${variant}`, TILE_W, TILE_H, ctx => {
-    ctx.fillStyle = glyph === '=' ? PALETTE.path : PALETTE.floor;
+  const terrain = '=;o~x:'.includes(glyph) ? glyph : '.';
+  return stamp(`tile:${terrain}:${variant}`, TILE_W, TILE_H, ctx => {
+    ctx.fillStyle = terrain === '=' ? PALETTE.path : terrain === '~' ? '#1b302b'
+      : terrain === ':' ? '#292a25' : terrain === 'x' ? '#30271f' : PALETTE.floor;
     ctx.fillRect(0, 0, TILE_W, TILE_H);
     for (const mark of groundMarks(glyph, variant, 0, STAMP_SEED)) {
       ctx.fillStyle = mark.color; ctx.fillText(mark.glyph, mark.col * CELL_W, mark.row * CELL_H);
@@ -100,5 +111,7 @@ export function paintChunk(chunk, createCanvas = defaultCanvas) {
   return {ground, objects};
 }
 export function terrainColor(glyph) {
-  return glyph === '=' ? '#b29a5b' : glyph === 'T' ? '#718347' : glyph === '^' ? '#959582' : '#3d512b';
+  return glyph === '=' ? '#b29a5b' : glyph === 'T' ? '#718347' : glyph === '^' ? '#959582'
+    : glyph === 'x' ? '#a07548' : glyph === ':' ? '#696055' : glyph === '~' ? '#5a8d85'
+    : glyph === 'o' ? '#789658' : '#3d512b';
 }

@@ -13,14 +13,16 @@ P0 food/enemy fix could be expressed without hard-coded conditions, so the fix s
 | B5 | Observability: `cli inspect`, `cli simulate`, snapshot `debug`, browser overlay | Observability tests, screenshots | done |
 | B6 (P4) | Visual: walk artifacts, crouch frame, wagons as cell sprites, style spec | pixel-player tests, contact sheets | done (parallel agent, merged) |
 | B7 | Balancing runs and documentation | BALANCING.md tables | done |
-| Next (P5) | ash_plain biome via RegionDefs + pool; pixel-tier equipment overlays; journal | - | not started |
+| B8 (2026-10-06) | Region-shaped terrain (generator v2), knowledge/recipe/lead outcomes, deer chain, gated staff, equipment slots, Journal roll controls, lifecycle states, schema 8 | DEFINITION_OF_DONE.md (2026-10-06) | done |
+| Next | ash_plain biome via RegionDefs + pool; pixel-tier equipment overlays; region adjacency rules; more chains | - | not started |
 
 ## Architectural decisions
 1. **Content as validated data (catalog.py).** EncounterDef became ActionDef with placement/trigger/unlock;
    `encounters.EncounterDef` remains as an alias for compatibility.
 2. **Eligibility is pure (actions.py).** Generators and the auto-pilot never test content ids for rules.
-3. **Regions are a layer over chunks, not terrain.** Variation without a new terrain recipe; adding regions
-   is data. Terrain recipes stay frozen (AGENTS.md invariant).
+3. **Regions are a layer over chunks.** (2026-10-05) They first only changed action weights, which left every
+   run looking the same. Since 2026-10-06 the versioned generator v2 reads the pinned RegionDef (canopy, brush,
+   landmark); v1 worlds replay unchanged and regrow with v2 at the next rebirth. Adding a region is still data.
 4. **Pity over probability hikes.** Starvation of a category is fixed with an explicit, logged, saved forced
    spot, so balance stays scarce but never broken.
 5. **Two death currencies with different sinks.** Offer -> dust (possibilities), keep -> ash (mastery).

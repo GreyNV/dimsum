@@ -1,5 +1,9 @@
 # Core loops
 
+> **Status: design proposal / history.** The implemented Forest expedition differs: actions come from procedural
+> region buckets and leads (docs/design/ACTION_SYSTEM.md), and the Journal only shapes odds; it never bypasses rolls.
+
+
 ## Moment-to-moment loop
 
 1. Begin a life at the current act and stage.
