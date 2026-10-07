@@ -1,7 +1,7 @@
 """Central balance values for the forest expedition's newer systems.
 
-Older vitals/combat constants still live at the top of autopilot.py (and are
-re-exported there for tests); everything added by the closed-loop iteration lives
+Older vitals/combat constants live in autopilot/constants.py (and are
+re-exported by autopilot/__init__.py for tests); everything added by the closed-loop iteration lives
 here so a designer can rebalance without reading rules. Integers only.
 See docs/design/BALANCING.md for measured effects and the simulate command.
 """

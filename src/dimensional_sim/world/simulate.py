@@ -18,9 +18,12 @@ from statistics import mean
 
 from .actions import Context, describe_bucket, explain
 from .autopilot import Expedition
-from .catalog import BY_ID, ITEMS
+from .catalog import BY_ID, ITEMS, REGION_CELL, REGIONS
+from .encounters import chunk_spots
 from .models import ChunkKey
+from .regions import region_cell
 from .runtime import Exploration
+from .seeds import derive_seed
 from .web import new_world
 
 POLICIES = ("spend", "hoard", "idle")
@@ -124,15 +127,12 @@ def _terrain_profile(chunk):
 
 def inspect_chunk(seed, x, y, life=1, unlocked=(), knowledge=(), recipes=()):
     """Inspect geography and a hypothetical first-entry roll; no event map is generated."""
-    from .encounters import chunk_spots
-    from .regions import REGION_VERSION, region_cell
     world = new_world(seed)
     key = ChunkKey("forest", x, y)
     chunk = world.get(key)
     region = world.region_for(key)
     ctx = Context(biome=chunk.asset.biome, region=region.id, region_def=region, placement="spot",
                   unlocked=frozenset(unlocked), knowledge=frozenset(knowledge), recipes=frozenset(recipes))
-    from .seeds import derive_seed
     sample_seed = derive_seed(seed, "runtime-opportunity-v1", life, 0, f"forest:{x}:{y}")
     spots = chunk_spots(chunk, life, context=ctx, roll_seed=sample_seed)
     rolled = {s.encounter for s in spots}
@@ -157,7 +157,6 @@ def inspect_chunk(seed, x, y, life=1, unlocked=(), knowledge=(), recipes=()):
 
 def region_map(seed, radius=2):
     """Region layout around the anchor, one letter per 3x3-chunk region cell (row = y)."""
-    from .catalog import REGION_CELL, REGIONS
     world = new_world(seed)
     letters = {rid: rid[0].upper() if rid != "still_glade" else "G" for rid in REGIONS}
     rows = []

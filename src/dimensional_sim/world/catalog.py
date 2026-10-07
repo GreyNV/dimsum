@@ -5,7 +5,7 @@ WHY: adding an item, action, recipe, unlock, boon or region must be a data edit,
 not a change to generation, the auto-pilot or the client.
 OWNS: definitions only. Rules that read them live in actions.py (eligibility and
 buckets), regions.py (region per chunk), encounters.py (spot placement),
-economy.py (currency conversion and anchor purchases) and autopilot.py (execution).
+economy.py (currency conversion and anchor purchases) and autopilot/ (execution).
 NEVER: reorder or rename ids that existing saves reference without bumping
 encounters.ENCOUNTER_VERSION; use floats, wall clock or shared RNG in rules.
 TESTS: tests/test_world_catalog.py validates every table and cross-reference.

@@ -6,11 +6,23 @@ export const CELL_H = 7;
 /** Default zoom frames a fight legibly; players can zoom out to survey terrain. */
 export const ZOOM = Object.freeze({min: .7, initial: 1.3, max: 2.4});
 export const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
-/** A touch stick chooses one of the four movement directions used by the runtime. */
+/** Eight movement directions (screen y grows south), in 45-degree sectors from east. */
+export const MOVES = Object.freeze(['east', 'southeast', 'south', 'southwest', 'west', 'northwest', 'north', 'northeast']);
+/** A touch stick chooses one of the eight movement directions the runtime accepts. */
 export function stickDirection(dx, dy, deadZone = 10) {
   if (Math.hypot(dx, dy) < deadZone) return null;
-  return Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'east' : 'west')
-    : (dy >= 0 ? 'south' : 'north');
+  const sector = Math.round(Math.atan2(dy, dx) / (Math.PI / 4));
+  return MOVES[(sector + 8) % 8];
+}
+const COMBINE = {'north+east': 'northeast', 'east+north': 'northeast', 'south+east': 'southeast',
+  'east+south': 'southeast', 'south+west': 'southwest', 'west+south': 'southwest',
+  'north+west': 'northwest', 'west+north': 'northwest'};
+/** Two held perpendicular keys (W + D) move diagonally; the newest key wins otherwise. */
+export function combineHeld(directions) {
+  const [newest, ...older] = directions;
+  if (!newest || !['north', 'south', 'east', 'west'].includes(newest)) return newest ?? null;
+  for (const other of older) if (COMBINE[`${newest}+${other}`]) return COMBINE[`${newest}+${other}`];
+  return newest;
 }
 /** Stable uint32 visual noise. Never used for gameplay or terrain selection. */
 export function visualHash(x, y, seed = 0) {
@@ -67,7 +79,7 @@ export class Controls {
     else this.held.get(key).direction = direction;
   }
   nextMove() {
-    const held = [...this.held.values()].sort((a, b) => b.order - a.order)[0]?.direction;
+    const held = combineHeld([...this.held.values()].sort((a, b) => b.order - a.order).map(h => h.direction));
     if (held) return held;
     if (!this.taps.length) return null;
     return this.taps[0] === this.lastSentMove ? null : this.taps[0];

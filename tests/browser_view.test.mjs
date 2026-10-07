@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {visualHash, residentBounds, cameraView, follow, retainResident, tileAt, stickDirection, Controls, TILE_W, TILE_H} from '../src/dimensional_sim/world/browser/view.js';
 import {groundMarks, paintChunk, TREE, terrainColor, OBJECT_PAD, clearStamps, stampCount, TILE_VARIANTS, TREE_VARIANTS, ROCK_VARIANTS} from '../src/dimensional_sim/world/browser/art.js';
-import {playerSprite, playerSpriteLayers, PLAYER_SLOTS, ENEMY, ROLE, spriteSize, mirrorSprite, paintSprite, punchReach, hiddenBehind, occludingTreeTiles, SPOTS, POSE, crouchSprite, drawSpot, CAMP, ELDER} from '../src/dimensional_sim/world/browser/actors.js';
+import {ENEMY, ROLE, spriteSize, paintSprite, punchReach, hiddenBehind, occludingTreeTiles, SPOTS, POSE, drawSpot, CAMP, ELDER} from '../src/dimensional_sim/world/browser/actors.js';
 import {activityText, newRewards, ATTRIBUTES, rewardTexts, reportIsFresh, reportStorageKey, ExpeditionHud, prologueView, shopSections, debugText} from '../src/dimensional_sim/world/browser/hud.js';
 const pose = (facing, animation='idle', animation_ms=0) => ({facing, animation, animation_ms, active:false});
 const chunk = (x=0,y=0) => ({id:'forest:'+x+':'+y,x,y,width:32,height:16,seed:1234,
@@ -56,10 +56,10 @@ test('short attack press remains queued across polling gap until acknowledged',(
   input.acknowledge(sent);
   assert.equal(input.payload(false,[]).attack,false);
 });
-test('movement prioritizes latest held key; pause and reset release all input',()=>{
+test('two perpendicular held keys move diagonally; pause and reset release all input',()=>{
   const input=new Controls();
   input.press('w','north'); input.press('d','east');input.press('w','north');
-  assert.equal(input.payload(false,[]).move,'east');
+  assert.equal(input.payload(false,[]).move,'northeast');
   input.release('d');assert.equal(input.payload(false,[]).move,'north');
   input.attack(true);
   assert.deepEqual(input.payload(true,['x']),{move:null,attack:false,paused:true,known:['x']});
@@ -121,10 +121,8 @@ test('a second tap during an in-flight attack survives acknowledgement and sends
   assert.equal(input.payload(false,[]).attack,false);
 });
 
-test('actor sprites are well-formed rectangles with defined color roles in every pose',()=>{
-  const sprites=[ENEMY];
-  for(const f of ['north','east','south','west']) for(const [a,ms] of [['idle',0],['walk',0],['walk',130],['attack',100]]) sprites.push(playerSprite(pose(f,a,ms)));
-  for(const s of sprites) {
+test('enemy sprites are well-formed rectangles with defined color roles',()=>{
+  for(const s of [ENEMY]) {
     assert.equal(s.paint.length,s.glyph.length);
     const w=s.paint[0].length;
     s.paint.forEach((row,r)=>{assert.equal(row.length,w);assert.equal(s.glyph[r].length,w);
@@ -132,18 +130,17 @@ test('actor sprites are well-formed rectangles with defined color roles in every
   }
 });
 test('actors are large enough to read against terrain (size regression guard)',()=>{
-  for(const f of ['north','east','south','west']) {
-    const {width,height}=spriteSize(playerSprite(pose(f)));
-    assert.ok(width>=TILE_W*1.5 && height>=TILE_H*2,`player ${f} ${width}x${height}`);
-  }
+  const player=pixelPlayerFrame(false);
+  assert.ok(player.width>=TILE_W && player.height>=TILE_H,`player ${player.width}x${player.height}`);
   const enemy=spriteSize(ENEMY);
   assert.ok(enemy.width>=TILE_W*1.5 && enemy.height>=TILE_H*1.5);
   const filled=ENEMY.paint.join('').replace(/ /g,'').length;
   assert.ok(filled>=40,'enemy silhouette must be solid, not sparse glyphs');
 });
 test('west view mirrors east; walking changes legs; attack poses differ by phase',()=>{
-  assert.deepEqual(playerSprite(pose('west')),mirrorSprite(playerSprite(pose('east'))));
-  assert.notDeepEqual(playerSprite(pose('south','walk',0)),playerSprite(pose('south','walk',130)));
+  const mirrored=pixelPlayerArt(pose('east')).rects.map(([c,x,y,w,h])=>[c,16-x-w,y,w,h]);
+  assert.deepEqual(pixelPlayerArt(pose('west')).rects,mirrored);
+  assert.notDeepEqual(pixelPlayerArt(pose('south','walk',0)),pixelPlayerArt(pose('south','walk',130)));
   const attack={...pose('east','attack',100)};
   const reach=['windup','strike','recover'].map(p=>punchReach(attack,p));
   assert.equal(new Set(reach).size,3);
@@ -188,28 +185,10 @@ test('encounter spot sprites are well-formed and activity poses crouch the body'
     s.paint.forEach((row,r)=>{assert.equal(row.length,s.paint[0].length,id);assert.equal(s.glyph[r].length,row.length,id);});
   }
   for(const id of ['bramble_berries','fallen_branches','animal_tracks','gnarled_tree','forest_spring','mossy_stone','old_carvings']) assert.ok(SPOTS[id],id);
-  const standing=playerSprite(pose('south')), crouched=crouchSprite(standing);
-  assert.ok(spriteSize(crouched).height<spriteSize(standing).height);
-  assert.equal(crouched.paint.at(-1),standing.paint.at(-1),'boots stay on the ground');
+  assert.ok(pixelPlayerFrame(true).height<pixelPlayerFrame(false).height,'working poses crouch');
   for(const kind of ['forage','gather','observe','climb','drink','meditate','study']) assert.ok(POSE[kind],kind);
   const calls=[];const ctx=new Proxy({},{get:(_,k)=>k==='save'||k==='restore'||k==='fillRect'||k==='fillText'?(...a)=>calls.push(k):undefined,set:()=>true});
   drawSpot(ctx,{encounter:'unknown',x:0,y:0},0,0); assert.equal(calls.length,0,'unknown spots draw nothing');
-});
-test('equipment layers preserve every base character pixel in each facing and walk pose',()=>{
-  assert.deepEqual(PLAYER_SLOTS,['body','pants','boots','chest','helmet']);
-  for(const facing of ['south','north','east','west']) for(const animation of ['idle','walk','attack']) {
-    const player=pose(facing,animation,130), original=playerSprite(player), layers=playerSpriteLayers(player);
-    for(let r=0;r<original.paint.length;r++)for(let c=0;c<original.paint[r].length;c++) {
-      const occupied=PLAYER_SLOTS.filter(slot=>layers[slot].paint[r][c]!==' ');
-      assert.equal(occupied.length,original.paint[r][c]===' '?0:1,`${facing}/${animation} ${r}:${c}`);
-      if(occupied.length) assert.equal(layers[occupied[0]].paint[r][c],original.paint[r][c]);
-    }
-    const compact=playerSpriteLayers(player,true);
-    assert.equal(compact.boots.paint.length,7,'working pose keeps the equipment anchor at the feet');
-    assert.equal(compact.boots.paint.at(-1),original.paint.at(-1),'boots survive the compact pose');
-  }
-  const front=playerSpriteLayers(pose('south'));
-  assert.ok(front.body.paint[2].includes('s'),'face stays in the body layer under a helmet overlay');
 });
 test('HUD describes the auto-pilot from snapshot fields only',()=>{
   const base={spots:[{x:3,y:4,name:'Bramble berries'}],expedition:{mode:'travel',goal:{x:3,y:4},activity:null,control:'auto',log:[],xp:{},skills:[]}};
@@ -412,4 +391,19 @@ test('anchor shop groups server rows and the debug overlay explains buckets',()=
   for(const needle of ['seed 7','bramble_berries 13 (22.4%)','bramble_boar 1/1','food 1/5','gnarled_tree: locked','window full'])
     assert.ok(text.includes(needle),needle);
   assert.match(activityText({expedition:{control:'auto',activity:{kind:'craft',name:'Carve a walking staff',progress:500}}}),/^Carve a walking staff - 50%/);
+});
+
+test('stick and keys move in eight directions', async () => {
+  const {stickDirection: stick, combineHeld, Controls: C} = await import('../src/dimensional_sim/world/browser/view.js');
+  assert.equal(stick(20, -20), 'northeast');
+  assert.equal(stick(-20, 20), 'southwest');
+  assert.equal(stick(30, 4), 'east');
+  assert.equal(stick(3, 3), null);
+  assert.equal(combineHeld(['east', 'north']), 'northeast');
+  assert.equal(combineHeld(['west', 'east']), 'west', 'opposite keys: newest wins');
+  const input = new C();
+  input.press('KeyW', 'north'); input.press('KeyD', 'east');
+  assert.equal(input.payload(false, []).move, 'northeast');
+  input.release('KeyW');
+  assert.equal(input.payload(false, []).move, 'east');
 });

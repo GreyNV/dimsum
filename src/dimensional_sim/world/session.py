@@ -10,8 +10,8 @@ from .animation import rotate
 from .autopilot import INVENTORY_SLOTS, Expedition
 from . import details, economy
 from .catalog import BOONS, UNLOCKS
-from .encounters import BY_ID
-from .models import ChunkKey, fields, integer
+from .catalog import BY_ID
+from .models import ChunkKey, chunk_ident, integer
 from .progression import attribute_report
 from .runtime import InputCommand
 from .seeds import derive_seed
@@ -23,8 +23,21 @@ MANUAL_HOLD = 2.5  # seconds of manual control before auto-pilot resumes
 LOG_ENTRIES = 6
 
 
-def chunk_id(key):
-    return f"{key.dimension}:{key.x}:{key.y}"
+def _tile_tints(world, key, asset):
+    """Per-tile region tints (generator v3 borders run through chunks): one code letter per
+    tile plus a small legend, so the client can wash each tile in its own region's colour."""
+    grid = world.region_grid(key) if hasattr(world, "region_grid") else None
+    if grid is None:
+        return None, None
+    legend, rows = {}, []
+    for y in range(asset.height):
+        row = []
+        for x in range(asset.width):
+            region = grid[y][x]
+            code = legend.setdefault(region.tint if region else "", "abcdefghijklmnop"[len(legend)])
+            row.append(code)
+        rows.append("".join(row))
+    return rows, {code: tint for tint, code in legend.items() if tint}
 
 
 def snapshot(game, known=(), *, paused=False, expedition=None, control="manual", debug=False, detail=False):
@@ -39,24 +52,14 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual",
             chunk = game.world.peek(key)
             if chunk is None:
                 continue
-            identity = chunk_id(key)
-            resident.append(identity)
-            if identity in known:
-                continue
-            a = chunk.asset
-            region = expedition.region(key) if expedition is not None else None
-            chunks.append({"id": identity, "x": x, "y": y,
-                "region": region.id if region else None, "tint": region.tint if region else None,
-                "width": a.width, "height": a.height, "biome": a.biome,
-                "seed": derive_seed(chunk.seed, "browser-art-v1") % 2**32,
-                "tiles": ["".join((obj or env).glyph for obj, env in zip(orow, erow))
-                          for orow, erow in zip(a.objects, a.environment)],
-                "collision": ["".join("1" if c else "0" for c in row) for row in a.collision]})
+            resident.append(chunk_ident(key))
+            if chunk_ident(key) not in known:
+                chunks.append(_chunk_view(game.world, chunk, expedition))
     in_anchor = expedition is not None and expedition.anchor_ms is not None
     strikes = expedition.strikes if expedition is not None else {}
     targets = [] if in_anchor else [{"id": t.id, "x": t.chunk.x * w + t.x, "y": t.chunk.y * h + t.y, "hp": t.hp,
                                      "strikes": strikes.get(t.id, 0)}
-               for t in game.targets.values() if chunk_id(t.chunk) in resident]
+               for t in game.targets.values() if chunk_ident(t.chunk) in resident]
     p = game.player
     rate = game.attack_rate_percent if p.animation == "attack" else game.animation_rate_percent
     frame = game.animations[p.animation].sample(p.animation_elapsed_ms, rate)
@@ -68,47 +71,9 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual",
     frame_extra = {}
     if expedition is not None:
         kinds = expedition.target_kinds()
-        unarmed_target = expedition.unarmed_target() if control == "manual" and not in_anchor else None
-        frame_extra = {"spots": [] if in_anchor else expedition.visible_spots(), "target_kinds": {
-            t["id"]: kinds.get(t["id"], "bramble_boar") for t in targets},
-            "expedition": {"mode": expedition.mode(), "activity": expedition.activity(),
-                "goal": None if expedition.goal is None else {
-                    "x": expedition.goal["x"], "y": expedition.goal["y"], "kind": expedition.goal["kind"]},
-                "attributes": attribute_report(expedition.regular, expedition.dimensional),
-                "log": [dict(e) for e in expedition.log[-LOG_ENTRIES:]],
-                "vitals": expedition.vitals(), "inventory": expedition.inventory_rows(),
-                "equipped": dict(expedition.equipped),
-                "inventory_slots": INVENTORY_SLOTS, "life": expedition.life, "total_ms": expedition.total_ms,
-                "depth": expedition.depth, "best_depth": expedition.best_depth,
-                "dust": expedition.dust,
-                "anchor_space": None if not in_anchor else {"remaining_ms": expedition.anchor_ms,
-                    "waiting": expedition.anchor_wait,
-                    "offer": {i: economy.offer_value(i, n) for i, n in expedition.inventory.items()},
-                    "ash_if_burned": economy.rebirth_ash(expedition.inventory, expedition.depth)},
-                "punch_damage": expedition.punch_damage(), "report": expedition.report,
-                "anchor": {"x": expedition.anchor[0], "y": expedition.anchor[1]},
-                "skills": sorted(expedition.skills), "control": control,
-                "attack_radius": UNARMED_REACH,
-                "auto_target": unarmed_target[1] if unarmed_target else None,
-                "skill_slots": [{"name": "Empty", "state": "locked"} for _ in range(3)],
-                "prologue": expedition.prologue(),
-                "region": _region_view(expedition),
-                "meta": {"dust": expedition.dust, "ash": expedition.ash, "blessing": expedition.blessing,
-                         "unlocked": [{"id": u, "name": UNLOCKS[u].name} for u in sorted(expedition.unlocked)],
-                         "mastery": dict(expedition.mastery),
-                         "knowledge": sorted(expedition.knowledge), "recipes": sorted(expedition.recipes),
-                         "journal": [{"id": ident, "name": BY_ID[ident].name, "mastery": level,
-                                      "enabled": ident not in expedition.journal_disabled,
-                                      "mode": expedition.journal_favor.get(ident, "normal")}
-                                     for ident, level in sorted(expedition.mastery.items()) if level >= 2],
-                         "boon": None if expedition.boon is None else BOONS[expedition.boon].name,
-                         "boon_next": None if expedition.boon_next is None else BOONS[expedition.boon_next].name},
-                "shop": expedition.anchor_offers() if in_anchor else None,
-                "stats": dict(expedition.stats),
-                "debug": expedition.debug_info() if debug else None,
-                "detail": details.detail(expedition) if detail else None,
-                "bounty": [{"id": i, "name": BY_ID[i].name, "spawned": n, "limit": limit}
-                           for i, n, limit in expedition.bounty()]}}
+        frame_extra = {"spots": [] if in_anchor else expedition.visible_spots(),
+                       "target_kinds": {t["id"]: kinds.get(t["id"], "bramble_boar") for t in targets},
+                       "expedition": _expedition_view(expedition, control, debug=debug, detail=detail)}
     return {**frame_extra, "world_seed": str(game.world.world_seed), "clock_ms": game.elapsed_ms,
         "movement_interval_ms": game.movement_interval_ms,
         "player": {"x": px, "y": py, "facing": p.facing, "animation": p.animation,
@@ -117,6 +82,69 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual",
         "effects": effects, "chunks": chunks, "resident": resident,
         "minimap": game.world.minimap(center, 2), "chunk_width": w, "chunk_height": h,
         "paused": paused}
+
+
+def _chunk_view(world, chunk, expedition):
+    """One resident chunk the client does not have yet: tiles, collision, region tint."""
+    key, a = chunk.key, chunk.asset
+    region = expedition.region(key) if expedition is not None else None
+    tint_rows, tint_legend = _tile_tints(world, key, a) if region is not None else (None, None)
+    return {"id": chunk_ident(key), "x": key.x, "y": key.y,
+            "region": region.id if region else None, "tint": region.tint if region else None,
+            "tint_rows": tint_rows, "tint_legend": tint_legend,
+            "width": a.width, "height": a.height, "biome": a.biome,
+            "seed": derive_seed(chunk.seed, "browser-art-v1") % 2**32,
+            "tiles": ["".join((obj or env).glyph for obj, env in zip(orow, erow))
+                      for orow, erow in zip(a.objects, a.environment)],
+            "collision": ["".join("1" if c else "0" for c in row) for row in a.collision]}
+
+
+def _expedition_view(e, control, *, debug, detail):
+    """HUD state of the auto-pilot: vitals, activity, log, anchor shop, meta progress."""
+    in_anchor = e.anchor_ms is not None
+    unarmed_target = e.unarmed_target() if control == "manual" and not in_anchor else None
+    return {"mode": e.mode(), "activity": e.activity(),
+            "goal": None if e.goal is None else {"x": e.goal["x"], "y": e.goal["y"], "kind": e.goal["kind"]},
+            "attributes": attribute_report(e.regular, e.dimensional),
+            "log": [dict(entry) for entry in e.log[-LOG_ENTRIES:]],
+            "vitals": e.vitals(), "inventory": e.inventory_rows(),
+            "equipped": dict(e.equipped),
+            "inventory_slots": INVENTORY_SLOTS, "life": e.life, "total_ms": e.total_ms,
+            "depth": e.depth, "best_depth": e.best_depth,
+            "dust": e.dust,
+            "anchor_space": None if not in_anchor else {
+                "remaining_ms": e.anchor_ms, "waiting": e.anchor_wait,
+                "offer": {i: economy.offer_value(i, n) for i, n in e.inventory.items()},
+                "ash_if_burned": economy.rebirth_ash(e.inventory, e.depth)},
+            "punch_damage": e.punch_damage(), "report": e.report,
+            "anchor": {"x": e.anchor[0], "y": e.anchor[1]},
+            "skills": sorted(e.skills), "control": control,
+            "attack_radius": UNARMED_REACH,
+            "auto_target": unarmed_target[1] if unarmed_target else None,
+            "skill_slots": [{"name": "Empty", "state": "locked"} for _ in range(3)],
+            "prologue": e.prologue(),
+            "region": _region_view(e),
+            "meta": _meta_view(e),
+            "shop": e.anchor_offers() if in_anchor else None,
+            "stats": dict(e.stats),
+            "debug": e.debug_info() if debug else None,
+            "detail": details.detail(e) if detail else None,
+            "bounty": [{"id": i, "name": BY_ID[i].name, "spawned": n, "limit": limit}
+                       for i, n, limit in e.bounty()]}
+
+
+def _meta_view(e):
+    """Progress that survives death: currencies, unlocks, mastery, Journal controls, boons."""
+    return {"dust": e.dust, "ash": e.ash, "blessing": e.blessing,
+            "unlocked": [{"id": u, "name": UNLOCKS[u].name} for u in sorted(e.unlocked)],
+            "mastery": dict(e.mastery),
+            "knowledge": sorted(e.knowledge), "recipes": sorted(e.recipes),
+            "journal": [{"id": ident, "name": BY_ID[ident].name, "mastery": level,
+                         "enabled": ident not in e.journal_disabled,
+                         "mode": e.journal_favor.get(ident, "normal")}
+                        for ident, level in sorted(e.mastery.items()) if level >= 2],
+            "boon": None if e.boon is None else BOONS[e.boon].name,
+            "boon_next": None if e.boon_next is None else BOONS[e.boon_next].name}
 
 
 def _region_view(expedition):
@@ -254,41 +282,33 @@ class BrowserSession:
             return frame
 
     def step(self, now):
+        """One fixed TICK_MS tick (local server)."""
         with self.lock:
-            if self.paused:
-                return
-            if self.expedition is not None and (not self.active and now >= self.manual_until or self.expedition.anchor_ms is not None):
-                self.expedition.advance(TICK_MS)
-                if self.expedition.anchor_ms is not None:
-                    self.active = False
-                return
-            command = self.command if now - self.input_time <= INPUT_LEASE else InputCommand()
-            if self.expedition is not None:
-                self.expedition.advance_manual(TICK_MS, command, auto_attack=self.active)
-                if self.expedition.anchor_ms is not None:
-                    self.active = False
-            else:
-                self.game.advance(TICK_MS, command)
+            if not self.paused:
+                self._drive(TICK_MS, now, allow_prayer=True)
 
     def advance_ms(self, ms, now, *, allow_prayer=True):
         """Advance by real elapsed milliseconds (hosted mode; timers may be throttled).
         The auto-pilot is partition-independent, so one bulk call equals many ticks."""
         integer(ms, "elapsed milliseconds", 0)
         with self.lock:
-            if self.paused or ms == 0:
-                return
-            if self.expedition is not None and (not self.active and now >= self.manual_until or self.expedition.anchor_ms is not None):
-                self.expedition.advance(ms, allow_prayer=allow_prayer)
-                if self.expedition.anchor_ms is not None:
-                    self.active = False
-                return
+            if not self.paused and ms:
+                self._drive(ms, now, allow_prayer=allow_prayer)
+
+    def _drive(self, ms, now, *, allow_prayer):
+        """Auto-pilot unless the player holds control; held input expires after INPUT_LEASE."""
+        expedition = self.expedition
+        if expedition is not None and (not self.active and now >= self.manual_until
+                                       or expedition.anchor_ms is not None):
+            expedition.advance(ms, allow_prayer=allow_prayer)
+        else:
             command = self.command if now - self.input_time <= INPUT_LEASE else InputCommand()
-            if self.expedition is not None:
-                self.expedition.advance_manual(ms, command, auto_attack=self.active)
-                if self.expedition.anchor_ms is not None:
-                    self.active = False
-            else:
+            if expedition is None:
                 self.game.advance(ms, command)
+                return
+            expedition.advance_manual(ms, command, auto_attack=self.active)
+        if expedition.anchor_ms is not None:
+            self.active = False   # control returns to the auto-pilot at the anchor
 
     def state(self, now=None):
         with self.lock:

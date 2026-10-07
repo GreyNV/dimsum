@@ -16,14 +16,12 @@ from collections import deque
 from dataclasses import dataclass, replace
 
 from .actions import Context, bucket
-from .catalog import ACTIONS, ATTRIBUTES, BY_ID, ITEMS, ITEM_KINDS, ActionDef, ItemDef, Loot  # noqa: F401 (re-exports)
+from .catalog import ACTIONS, BY_ID, ActionDef
 from .models import DELTAS, ChunkKey, integer
 from .seeds import derive_seed
 from .tuning import SPOTS_PER_CHUNK
 
 ENCOUNTER_VERSION = "encounters-v8"  # v8: roll when a chunk is entered, persist the resulting opportunities
-EncounterDef = ActionDef            # compatibility name
-KINDS = tuple(sorted({a.category for a in ACTIONS}))
 NEAR = (None, "T", "^")
 SPOT_ACTIONS = tuple(a for a in ACTIONS if a.placement == "spot")
 POOLS = {"dark_forest": tuple(a for a in SPOT_ACTIONS if "dark_forest" in a.biomes)}

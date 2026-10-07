@@ -6,8 +6,8 @@ Self recipes use the same eligibility rules but need no terrain roll.
 """
 from dataclasses import dataclass, field
 
-from .catalog import ACTIONS, BY_ID, ITEMS, REGIONS, UNLOCKS
-from . import catalog
+from .catalog import (ACTIONS, BY_ID, ITEMS, JOURNAL_FAVOR_MASTERY, JOURNAL_FAVOR_PERCENT,
+                      JOURNAL_SUPPRESS_PERCENT, JOURNAL_TOGGLE_MASTERY, REGIONS, UNLOCKS)
 
 
 @dataclass(frozen=True)
@@ -49,8 +49,8 @@ def known(action, unlocked):
     """Whether permanent permission/knowledge permits this action to occur."""
     ctx = _ctx(unlocked)
     return (action.unlock is None or action.unlock in ctx.unlocked) and \
-        (getattr(action, "knowledge", None) is None or action.knowledge in ctx.knowledge) and \
-        (getattr(action, "recipe", None) is None or action.recipe in ctx.recipes)
+        (action.knowledge is None or action.knowledge in ctx.knowledge) and \
+        (action.recipe is None or action.recipe in ctx.recipes)
 
 
 def known_actions(unlocked):
@@ -59,7 +59,7 @@ def known_actions(unlocked):
 
 def _requirement_reasons(action, ctx):
     result = []
-    for req in getattr(action, "requirements", ()):
+    for req in action.requirements:
         if req.kind == "action_count":
             have = ctx.action_counts.get(req.id, 0)
             if have < req.count:
@@ -88,9 +88,9 @@ def bucket_reasons(action, ctx):
         unlock = UNLOCKS.get(action.unlock)
         reasons.append(f"locked: needs unlock '{unlock.name}' ({unlock.cost} {unlock.currency})"
                        if unlock else f"locked: needs unlock '{action.unlock}'")
-    if getattr(action, "knowledge", None) is not None and action.knowledge not in ctx.knowledge:
+    if action.knowledge is not None and action.knowledge not in ctx.knowledge:
         reasons.append(f"unknown: needs knowledge '{action.knowledge}'")
-    if getattr(action, "recipe", None) is not None and action.recipe not in ctx.recipes:
+    if action.recipe is not None and action.recipe not in ctx.recipes:
         reasons.append(f"unknown: needs recipe '{action.recipe}'")
     reasons.extend(_requirement_reasons(action, ctx))
     if action.placement != ctx.placement:
@@ -106,9 +106,8 @@ def bucket_reasons(action, ctx):
             reasons.append(f"region {region_id} weight is 0")
     if action.placement == "lead" and action.id not in ctx.active_leads:
         reasons.append("no active temporary lead")
-    toggle_level = getattr(catalog, "JOURNAL_TOGGLE_MASTERY", 2)
     if (action.placement == "spot" and action.id in ctx.journal_disabled
-            and ctx.mastery.get(action.id, 0) >= toggle_level):
+            and ctx.mastery.get(action.id, 0) >= JOURNAL_TOGGLE_MASTERY):
         reasons.append("journal disabled")
     return reasons
 
@@ -152,14 +151,18 @@ def weight(action, ctx):
         region = ctx.region_def or REGIONS.get(ctx.region)
         if region is not None:
             weight_value = weight_value * region.multiplier(action.id) // 100
-    favor_level = getattr(catalog, "JOURNAL_FAVOR_MASTERY", 3)
-    if action.placement == "spot" and ctx.mastery.get(action.id, 0) >= favor_level:
-        choice = ctx.journal_favor.get(action.id)
-        if choice in ("favor", "favour"):
-            weight_value = max(1, weight_value * getattr(catalog, "JOURNAL_FAVOR_PERCENT", 150) // 100)
-        elif choice == "suppress":
-            weight_value = max(1, weight_value * getattr(catalog, "JOURNAL_SUPPRESS_PERCENT", 50) // 100)
+    percent = _journal_percent(action, ctx)
+    if percent is not None:
+        weight_value = max(1, weight_value * percent // 100)
     return weight_value
+
+
+def _journal_percent(action, ctx):
+    """Earned Journal odds for a spot action (favor/suppress at mastery 3), or None."""
+    if action.placement != "spot" or ctx.mastery.get(action.id, 0) < JOURNAL_FAVOR_MASTERY:
+        return None
+    choice = ctx.journal_favor.get(action.id)
+    return {"favor": JOURNAL_FAVOR_PERCENT, "suppress": JOURNAL_SUPPRESS_PERCENT}.get(choice)
 
 
 def bucket(ctx):
@@ -237,12 +240,9 @@ def _weight_modifiers(action, ctx):
     region = ctx.region_def or REGIONS.get(ctx.region)
     if action.placement == "spot" and region is not None:
         modifiers.append({"source": "region", "percent": region.multiplier(action.id)})
-    if action.placement == "spot" and ctx.mastery.get(action.id, 0) >= getattr(catalog, "JOURNAL_FAVOR_MASTERY", 3):
-        choice = ctx.journal_favor.get(action.id)
-        if choice in ("favor", "favour"):
-            modifiers.append({"source": "journal", "percent": getattr(catalog, "JOURNAL_FAVOR_PERCENT", 150)})
-        elif choice == "suppress":
-            modifiers.append({"source": "journal", "percent": getattr(catalog, "JOURNAL_SUPPRESS_PERCENT", 50)})
+    percent = _journal_percent(action, ctx)
+    if percent is not None:
+        modifiers.append({"source": "journal", "percent": percent})
     return modifiers
 
 

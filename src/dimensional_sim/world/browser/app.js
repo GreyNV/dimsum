@@ -1,12 +1,17 @@
 /** Browser adapter: snapshots in, character art out. Python owns all game rules. */
 import {TILE_W, TILE_H, ZOOM, clamp, residentBounds, cameraView, follow, retainResident, tileAt, visualHash, stickDirection, Controls} from './view.js';
-import {PALETTE, OBJECT_PAD, paintChunk, drawTree, terrainColor} from './art.js';
+import {PALETTE, OBJECT_PAD, paintChunk, drawTree} from './art.js';
 import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawUnarmedReach, drawDamage, drawFloat, drawSpot, drawSpotCompletion, drawCamp, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
 import {PAGES, needsDetail, pageModel, PANELS, COLLAPSE_KEY, loadCollapsed, toggleCollapsed, defaultCollapsed} from './pages.js';
-import {debugText, shopSections, ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
+import {debugText, ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
 import {regionCue, skillSlots, worldMode} from './world_ui.js';
+import {$, el, readUi, writeUi} from './dom.js';
+import {hosted, request, releaseInput} from './transport.js';
+import {drawMinimap} from './minimap.js';
+import {anchorAction, renderAnchor} from './anchor_ui.js';
+import {buildTabs, renderSection} from './page_ui.js';
+import {drawEyelids, drawVignette, tintPicture} from './scene_fx.js';
 
-const $ = id => document.getElementById(id);
 const canvas = $('scene'), ctx = canvas.getContext('2d'), mini = $('minimap'), map = mini.getContext('2d');
 const chunks = new Map(), pictures = new Map(), controls = new Controls();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -31,15 +36,13 @@ let lastRewardSeq = null, spotsSeen = new Map(), reportSeen = null, reportTimer 
 let elder = null, elderLeaving = null;
 const ELDER_LEAVE_MS = 2200;
 const SEEN_REPORT_KEY = 'dimsum.report.seen';
-const seenReport = () => { try { return localStorage.getItem(SEEN_REPORT_KEY); } catch { return null; } };
-const markReport = (worldSeed, report) => { try { localStorage.setItem(SEEN_REPORT_KEY, reportStorageKey(worldSeed, report)); } catch { /* optional */ } };
+const seenReport = () => readUi(SEEN_REPORT_KEY);
+const markReport = (worldSeed, report) => writeUi(SEEN_REPORT_KEY, reportStorageKey(worldSeed, report));
 /* Pages (tabs) and collapsible HUD panels. The detail block is requested at most twice a
  * second while a page that needs it is open, so ordinary polling stays small. */
 let page = 'world', lastDetail = null, lastDetailAt = 0, pageSignature = '', armed = null, armTimer = 0;
 const closedSections = new Set();
 const isMobile = () => matchMedia('(max-width: 720px)').matches;
-const readUi = key => { try { return localStorage.getItem(key); } catch { return null; } };
-const writeUi = (key, value) => { try { localStorage.setItem(key, value); } catch { /* optional */ } };
 let collapsed = loadCollapsed(readUi(COLLAPSE_KEY), isMobile());
 let controlMode = 'auto', bagOpen = false, pendingInteract = false;
 /* A mode the player just chose; polls already in flight still carry the old mode, so the
@@ -84,7 +87,7 @@ function updateActivity() {
   if (!state) return;
   const tile = tileAt([...chunks.values()], state.player.x, state.player.y);
   const near = state.targets.find(t => t.hp > 0 && Math.abs(t.x - state.player.x) + Math.abs(t.y - state.player.y) <= 2);
-  const surface = near ? `Bramble boar nearby - ${near.hp} HP` : tile?.blocked ? 'Obstructed ground' : tile?.glyph === '=' ? 'On the old forest trail' : 'Among the trees';
+  const surface = near ? `Bramble boar nearby - ${near.hp} HP` : tile?.glyph === '%' ? 'Fording the river' : tile?.glyph === 'H' ? 'On an old bridge' : tile?.blocked ? 'Obstructed ground' : tile?.glyph === '=' ? 'On the old forest trail' : 'Among the trees';
   const auto = activityText(state, paused);
   const text = auto ?? (paused ? 'Paused - the forest can wait' : state.player.animation === 'attack' ? 'Fists up' : surface);
   if ($('activity').textContent !== text) $('activity').textContent = text;
@@ -132,7 +135,7 @@ function adopt(next, sentControl = null) {
   }
   if (firstSnapshot && $('report').hidden) setPause(false);
   hud.update(next);
-  updateAnchor(next.expedition);
+  renderAnchor(next.expedition);
   if (next.expedition?.detail) lastDetail = next.expedition.detail;
   if (page !== 'world') renderPage();
   const position = {x:(next.player.x + .5) * TILE_W, y:(next.player.y + .5) * TILE_H};
@@ -149,63 +152,6 @@ function adopt(next, sentControl = null) {
   debugPanel.hidden = !debugOn;
   if (debugOn) debugPanel.textContent = debugText(next.expedition?.debug);
   updateActivity();
-}
-function updateAnchor(ex) {
-  const anchor = ex?.anchor_space, panel = $('anchor-space');
-  panel.hidden = !anchor;
-  document.body.classList.toggle('anchor-active', !!anchor);
-  if (!anchor) return;
-  $('anchor-countdown').textContent = anchor.waiting ? 'The next life waits for your choice.'
-    : `Next life in ${Math.ceil(anchor.remaining_ms / 1000)}s unless you offer a resource.`;
-  $('anchor-dust').textContent = String(ex.meta?.dust ?? ex.dust);
-  $('anchor-ash').textContent = String(ex.meta?.ash ?? 0);
-  $('anchor-blessing').textContent = String(ex.meta?.blessing ?? 0);
-  const signature = JSON.stringify([ex.inventory, ex.shop, ex.meta, anchor.ash_if_burned]);
-  if (panel.dataset.inventory === signature) return;
-  panel.dataset.inventory = signature;
-  $('anchor-hint').textContent = ex.inventory.length
-    ? `Offer items for dust (new actions). Keep them and they burn to ${anchor.ash_if_burned} ash (mastery) at rebirth.`
-    : `Nothing carried. Rebirth still leaves ${anchor.ash_if_burned} ash from the road you walked.`;
-  const offers = $('anchor-offers');
-  offers.replaceChildren(...ex.inventory.map(row => {
-    const button = document.createElement('button');
-    button.type = 'button'; button.dataset.trade = row.id;
-    button.textContent = `Offer ${row.count} ${row.name.toLowerCase()} (+${anchor.offer?.[row.id] ?? '?'} dust)`;
-    return button;
-  }));
-  if (!ex.inventory.length) offers.textContent = 'Nothing left to offer.';
-  const shop = $('anchor-shop');
-  shop.replaceChildren(...shopSections(ex.shop).flatMap(section => {
-    const heading = document.createElement('h3'); heading.textContent = section.title;
-    return [heading, ...section.rows.map(row => {
-      const button = document.createElement('button');
-      button.type = 'button'; button.dataset.buy = `${row.kind}:${row.id}`; button.disabled = !row.available;
-      button.title = row.available ? row.description : row.reasons.join('; ');
-      const cost = document.createElement('span'); cost.className = 'cost'; cost.textContent = `${row.cost} ${row.currency}`;
-      const name = document.createElement('b'); name.textContent = row.name;
-      const text = document.createElement('small');
-      text.textContent = row.available ? row.description : `${row.description} (${row.reasons.join('; ')})`;
-      button.append(cost, name, text);
-      return button;
-    })];
-  }));
-  const journal = ex.meta?.journal || [];
-  if (journal.length) {
-    const heading = document.createElement('h3'); heading.textContent = 'Journal · shape future encounters';
-    shop.append(heading);
-    for (const row of journal) {
-      const toggle = document.createElement('button'); toggle.type = 'button';
-      toggle.dataset.journalToggle = row.id;
-      toggle.textContent = `${row.name}: ${row.enabled ? 'enabled' : 'disabled'} (mastery ${row.mastery})`;
-      shop.append(toggle);
-      if (row.mastery >= 3) {
-        const odds = document.createElement('button'); odds.type = 'button';
-        odds.dataset.journalFavor = row.id;
-        odds.textContent = `Appearance odds: ${row.mode} · select to cycle`;
-        shop.append(odds);
-      }
-    }
-  }
 }
 function observeCombat(next) {
   const now = performance.now();
@@ -281,22 +227,6 @@ function repaintCanopies(tx, ty, resident) {
     if (chunk.tiles[ly][lx] === 'T') drawTree(ctx, tile.x * TILE_W, tile.y * TILE_H, visualHash(tile.x, tile.y, chunk.seed));
   }
 }
-/* Hosted build (web/): the simulation runs in a worker and host.js installs this
- * transport. Locally, the Python server answers the same requests over HTTP. */
-const transport = window.DIMSUM_TRANSPORT || null;
-const hosted = !!transport?.hosted;
-async function request(path, body) {
-  if (transport) return transport.request(path, body);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2500);
-  try {
-    const response = await fetch(path, {method:body ? 'POST' : 'GET', cache:'no-store',
-      headers:body ? {'Content-Type':'application/json'} : {}, body:body ? JSON.stringify(body) : undefined,
-      signal:controller.signal});
-    if (!response.ok) throw new Error('HTTP ' + response.status);
-    return await response.json();
-  } finally { clearTimeout(timeout); }
-}
 /** Exactly one request in flight. Server fixed ticks and input lease own timing. */
 async function poll() {
   if (polling || stopped) return;
@@ -311,7 +241,11 @@ async function poll() {
     if (needsDetail(page) && (!lastDetail || started - lastDetailAt > 500)) { body.detail = true; lastDetailAt = started; }
     const attackRevision = controls.attackRevision;
     const next = await request('/api/input', body);
-    controls.acknowledge(body, attackRevision); pendingAction = null; pendingInteract = false; adopt(next, body.control);
+    controls.acknowledge(body, attackRevision);
+    // Clear only what this request carried: a click made while it was in flight is sent next.
+    if (pendingAction === body.action) pendingAction = null;
+    if (body.interact) pendingInteract = false;
+    adopt(next, body.control);
     if (connection !== 'connected') { connection = 'connected'; status(''); }
   } catch {
     connection = 'disconnected';
@@ -321,48 +255,6 @@ async function poll() {
     polling = false;
     if (!stopped) setTimeout(poll, Math.max(0, 50 - (performance.now() - started)));
   }
-}
-function drawMap() {
-  if (!state) return;
-  map.setTransform(dpr,0,0,dpr,0,0);
-  map.fillStyle = '#0b110b'; map.fillRect(0,0,180,130);
-  const entries = state.minimap;
-  if (!entries.length) return;
-  const minX = Math.min(...entries.map(p=>p.x)), maxX = Math.max(...entries.map(p=>p.x));
-  const minY = Math.min(...entries.map(p=>p.y)), maxY = Math.max(...entries.map(p=>p.y));
-  const spanX = (maxX-minX+1) * state.chunk_width, spanY = (maxY-minY+1) * state.chunk_height;
-  const scale = Math.min(174/spanX,124/spanY), left=(180-spanX*scale)/2, top=(130-spanY*scale)/2;
-  const coords = new Map([...chunks.values()].map(c=>[c.x+':'+c.y,c]));
-  for (const entry of entries) {
-    const x=left+(entry.x-minX)*state.chunk_width*scale, y=top+(entry.y-minY)*state.chunk_height*scale;
-    const w=state.chunk_width*scale, h=state.chunk_height*scale;
-    map.fillStyle = entry.status === 'unknown' ? '#10180f' : entry.status === 'visited' ? '#405031' : '#26331e';
-    map.fillRect(x,y,w,h);
-    const chunk=coords.get(entry.x+':'+entry.y);
-    if (chunk && entry.status !== 'unknown') {
-      map.globalAlpha = entry.status === 'visited' ? .95 : .42;
-      for (let ry=0;ry<chunk.height;ry++) for(let rx=0;rx<chunk.width;rx++) {
-        map.fillStyle=terrainColor(chunk.tiles[ry][rx]);
-        map.fillRect(x+rx*scale,y+ry*scale,Math.max(.7,scale),Math.max(.7,scale));
-      }
-      map.globalAlpha=1;
-    } else if (entry.status === 'unknown') {
-      map.fillStyle='#26301f';
-      for(let py=y+3;py<y+h;py+=5) for(let px=x+3;px<x+w;px+=5) map.fillRect(px,py,.7,.7);
-    }
-  }
-  const px=left+(state.player.x-minX*state.chunk_width+.5)*scale;
-  const py=top+(state.player.y-minY*state.chunk_height+.5)*scale;
-  const mark=(gx,gy,color,r)=>{
-    const mx=left+(gx-minX*state.chunk_width+.5)*scale, my=top+(gy-minY*state.chunk_height+.5)*scale;
-    map.fillStyle='#070a06'; map.fillRect(mx-r-.6,my-r-.6,r*2+1.2,r*2+1.2);
-    map.fillStyle=color; map.fillRect(mx-r,my-r,r*2,r*2);
-  };
-  for(const spot of state.spots||[]) mark(spot.x,spot.y,'#e2c066',1.1);
-  for(const t of state.targets) if(t.hp>0) mark(t.x,t.y,'#e0604f',1.1);
-  map.fillStyle='#fff1bc'; map.fillRect(px-1.8,py-1.8,3.6,3.6);
-  map.strokeStyle='#ffe6a0'; map.lineWidth=.7; map.strokeRect(px-3.5,py-3.5,7,7);
-  mapDirty=false;
 }
 /** Where to draw a target now: glides toward its cell, plus a short lunge at the avatar. */
 function enemyXY(t, now, dt = 0) {
@@ -419,9 +311,15 @@ function render(now) {
     if(pending) pictures.set(pending.id, paintChunk(pending));
     for(const chunk of visible) ctx.drawImage(pictures.get(chunk.id).ground,chunk.x*chunk.width*TILE_W,chunk.y*chunk.height*TILE_H);
     // Region tint: a flat, low-alpha wash per chunk so regions read at a glance (VISUAL_STYLE.md effects pass).
+    // Organic regions (generator v3) send one tint code per tile; the wash is cached per chunk.
     for(const chunk of visible) if(chunk.tint) {
-      ctx.globalAlpha=.28; ctx.fillStyle=chunk.tint;
-      ctx.fillRect(chunk.x*chunk.width*TILE_W,chunk.y*chunk.height*TILE_H,chunk.width*TILE_W,chunk.height*TILE_H);
+      ctx.globalAlpha=.28;
+      const tint = chunk.tint_rows ? tintPicture(chunk, pictures.get(chunk.id)) : null;
+      if (tint) ctx.drawImage(tint, chunk.x*chunk.width*TILE_W, chunk.y*chunk.height*TILE_H);
+      else {
+        ctx.fillStyle=chunk.tint;
+        ctx.fillRect(chunk.x*chunk.width*TILE_W,chunk.y*chunk.height*TILE_H,chunk.width*TILE_W,chunk.height*TILE_H);
+      }
       ctx.globalAlpha=1;
     }
     for(const chunk of visible) ctx.drawImage(pictures.get(chunk.id).objects,chunk.x*chunk.width*TILE_W-OBJECT_PAD,chunk.y*chunk.height*TILE_H-OBJECT_PAD);
@@ -498,27 +396,11 @@ function render(now) {
         {color: rewards[i].color, duration: 1600, size: 9});
     }
     ctx.setTransform(dpr,0,0,dpr,0,0);
-    const opening = prologueView(prologue);
-    if (opening.dark) {
-      // Eyes closed: black. Opening: two lids part from the middle of the screen.
-      const lid = (1 - (reducedMotion ? opening.eyes : 1 - (1 - opening.eyes) ** 2)) * height / 2;
-      ctx.fillStyle = '#000';
-      if (opening.eyes <= 0) ctx.fillRect(0, 0, width, height);
-      else {
-        ctx.fillRect(0, 0, width, lid); ctx.fillRect(0, height - lid, width, lid);
-        for (const [y0, y1] of [[lid, lid + 40], [height - lid, height - lid - 40]]) {
-          const edge = ctx.createLinearGradient(0, y0, 0, y1);
-          edge.addColorStop(0, '#000'); edge.addColorStop(1, '#0000');
-          ctx.fillStyle = edge; ctx.fillRect(0, Math.min(y0, y1), width, 40);
-        }
-      }
-    }
-    const shade=ctx.createRadialGradient(width/2,height/2,Math.min(width,height)*.27,width/2,height/2,Math.max(width,height)*.7);
-    shade.addColorStop(0,'#00000000'); shade.addColorStop(1,'#070c0755');
-    ctx.fillStyle=shade; ctx.fillRect(0,0,width,height);
+    drawEyelids(ctx, prologueView(prologue), width, height, reducedMotion);
+    drawVignette(ctx, width, height);
     $('zoom').textContent=Math.round(view.scale*100)+'%';
     $('zoom-out').disabled=zoom<=ZOOM.min; $('zoom-in').disabled=zoom>=ZOOM.max;
-    if(mapDirty) drawMap();
+    if(mapDirty && state) { drawMinimap(map, state, chunks, dpr); mapDirty = false; }
   }
   if(!stopped) requestAnimationFrame(render);
 }
@@ -546,10 +428,7 @@ addEventListener('blur',()=>{ if(hosted) controls.reset(); else setPause(true); 
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){ if(hosted) controls.reset(); else setPause(true); } });
 addEventListener('pagehide',()=>{
   stopped=true; controls.reset();
-  if (hosted) return;  // host.js saves; there is no server lease to release
-  // Best-effort release; server input lease still protects abrupt tab closure.
-  fetch('/api/input',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(controls.payload(true,[])),keepalive:true}).catch(()=>{});
+  releaseInput(controls.payload(true,[]));   // the server's input lease still covers abrupt closes
 });
 canvas.addEventListener('pointerdown',()=>canvas.focus());
 $('pause').addEventListener('click',()=>setPause(!paused));
@@ -574,29 +453,10 @@ $('touch-interact').addEventListener('click',()=>{ if (!paused && manualAllowed(
 // Some mobile browsers still zoom on a double tap over HUD text; touch-action covers the rest.
 document.addEventListener('dblclick',event=>event.preventDefault());
 $('report-close').addEventListener('click',()=>{hud.hideReport();setPause(false);canvas.focus();});
-$('anchor-offers').addEventListener('click',event=>{
-  const item=event.target.closest('button[data-trade]')?.dataset.trade;
-  if(item && !pendingAction) pendingAction={type:'trade',item};
-});
-$('anchor-begin').addEventListener('click',()=>{ if(!pendingAction) pendingAction={type:'begin_life'}; });
-$('anchor-shop').addEventListener('click',event=>{
-  const toggle=event.target.closest('button[data-journal-toggle]')?.dataset.journalToggle;
-  if (toggle && !pendingAction) {
-    const row=state?.expedition?.meta?.journal?.find(entry=>entry.id===toggle);
-    if (row) pendingAction={type:'journal_toggle',id:toggle,enabled:!row.enabled};
-    return;
-  }
-  const favor=event.target.closest('button[data-journal-favor]')?.dataset.journalFavor;
-  if (favor && !pendingAction) {
-    const row=state?.expedition?.meta?.journal?.find(entry=>entry.id===favor);
-    const modes=['normal','favor','suppress'];
-    if (row) pendingAction={type:'journal_favor',id:favor,mode:modes[(modes.indexOf(row.mode)+1)%modes.length]};
-    return;
-  }
-  const value=event.target.closest('button[data-buy]')?.dataset.buy;
-  if(!value || pendingAction) return;
-  const [type,id]=value.split(':');
-  pendingAction={type,id};
+// One anchor action per request: later clicks wait until the server has answered.
+for (const id of ['anchor-offers', 'anchor-begin', 'anchor-shop']) $(id).addEventListener('click', event => {
+  const action = anchorAction(event.target, state?.expedition);
+  if (action && !pendingAction) pendingAction = action;
 });
 $('resume').addEventListener('click',()=>{setPause(false);canvas.focus();});
 $('zoom-in').addEventListener('click',()=>changeZoom(.1));
@@ -636,16 +496,6 @@ document.addEventListener('click', event => {
   writeUi(COLLAPSE_KEY, JSON.stringify(collapsed));
   applyCollapsed();
 });
-function buildTabs() {
-  $('tabs').replaceChildren(...PAGES.map((p, i) => {
-    const button = document.createElement('button');
-    button.type = 'button'; button.dataset.page = p.id; button.title = `${p.label} (${i + 1})`;
-    const icon = document.createElement('span'); icon.className = 'tab-icon'; icon.setAttribute('aria-hidden', 'true'); icon.textContent = p.icon;
-    const text = document.createElement('span'); text.className = 'tab-label'; text.textContent = p.label;
-    button.append(icon, text);
-    return button;
-  }));
-}
 function openPage(id) {
   page = id; pageSignature = ''; armed = null; lastDetailAt = 0;
   for (const button of $('tabs').querySelectorAll('button')) button.setAttribute('aria-pressed', String(button.dataset.page === page));
@@ -653,65 +503,6 @@ function openPage(id) {
   $('page').hidden = page === 'world';
   if (page !== 'world') { $('page-body').scrollTop = 0; renderPage(); }
   else canvas.focus();
-}
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = String(text);
-  return node;
-}
-function renderSection(section) {
-  const key = `${page}:${section.title.replace(/ ·.*$/, '')}`;
-  const box = el('details', 'page-section'); box.open = !closedSections.has(key);
-  box.addEventListener('toggle', () => { box.open ? closedSections.delete(key) : closedSections.add(key); });
-  box.append(el('summary', '', section.title));
-  if (section.kind === 'rows') {
-    const list = el('dl', 'rows');
-    for (const [name, value, note] of section.rows) {
-      const dd = el('dd', '', value);
-      if (note) dd.append(el('small', '', note));
-      list.append(el('dt', '', name), dd);
-    }
-    box.append(list);
-  } else if (section.kind === 'table') {
-    if (!section.rows.length) box.append(el('p', 'note', section.empty || 'Nothing yet.'));
-    else {
-      const table = el('table'), head = el('tr'), body = el('tbody');
-      for (const name of section.head) head.append(el('th', '', name));
-      for (const row of section.rows) { const tr = el('tr'); for (const cell of row) tr.append(el('td', '', cell)); body.append(tr); }
-      const thead = el('thead'); thead.append(head); table.append(thead, body); box.append(table);
-    }
-  } else if (section.kind === 'progress') {
-    const list = el('ul', 'progress');
-    const bar = (target, item) => {
-      const top = el('div', 'p-head'); top.append(el('span', '', item.label), el('b', '', item.text));
-      const track = el('i'), fill = el('s'); fill.style.width = `${Math.round(100 * Math.min(1, item.value / Math.max(1, item.max)))}%`; track.append(fill);
-      target.append(top, track);
-    };
-    for (const item of section.items) {
-      const li = el('li', [item.done ? 'done' : '', item.dim ? 'dim' : '', item.bars ? 'group' : ''].join(' ').trim());
-      if (item.bars) {   // one attribute: regular bar with its dimensional bar right below
-        li.append(el('div', 'p-group', item.label));
-        for (const sub of item.bars) { const row = el('div', sub.dim ? 'p-bar dim' : 'p-bar'); bar(row, sub); li.append(row); }
-      } else bar(li, item);
-      if (item.note) li.append(el('small', '', item.note));
-      list.append(li);
-    }
-    box.append(list);
-  } else if (section.kind === 'actions') {
-    const list = el('div', 'page-actions');
-    for (const b of section.buttons) {
-      const row = el('div');
-      const button = el('button', [b.danger ? 'danger' : '', armed === b.id ? 'armed' : ''].join(' ').trim(),
-        armed === b.id ? 'Select again to confirm' : b.label);
-      button.type = 'button'; button.dataset.act = b.id;
-      row.append(button, el('small', '', b.note));
-      list.append(row);
-    }
-    box.append(list);
-  }
-  if (section.note) box.append(el('p', 'note', section.note));
-  return box;
 }
 function renderPage(force = false) {
   if (page === 'world') return;
@@ -721,7 +512,8 @@ function renderPage(force = false) {
   pageSignature = signature;
   $('page-title').textContent = model.title;
   const body = $('page-body'), scroll = body.scrollTop;
-  body.replaceChildren(...(model.loading ? [el('p', 'page-loading', 'Reading the expedition...')] : model.sections.map(renderSection)));
+  body.replaceChildren(...(model.loading ? [el('p', 'page-loading', 'Reading the expedition...')]
+    : model.sections.map(section => renderSection(section, {page, closed: closedSections, armed}))));
   body.scrollTop = scroll;
 }
 $('tabs').addEventListener('click', event => {
@@ -746,6 +538,6 @@ $('page-body').addEventListener('click', event => {
   status(act === 'rebuild' ? 'Building a new world...' : 'Starting over...');
   Promise.resolve(act === 'rebuild' ? host.rebuildWorld() : host.wipe()).catch(error => status(`Could not reset: ${error.message}`));
 });
-buildTabs(); openPage('world'); applyCollapsed();
+buildTabs(PAGES); openPage('world'); applyCollapsed();
 addEventListener('resize',resize);
 resize(); requestAnimationFrame(render); poll();

@@ -14,6 +14,8 @@ P0 food/enemy fix could be expressed without hard-coded conditions, so the fix s
 | B6 (P4) | Visual: walk artifacts, crouch frame, wagons as cell sprites, style spec | pixel-player tests, contact sheets | done (parallel agent, merged) |
 | B7 | Balancing runs and documentation | BALANCING.md tables | done |
 | B8 (2026-10-06) | Region-shaped terrain (generator v2), knowledge/recipe/lead outcomes, deer chain, gated staff, equipment slots, Journal roll controls, lifecycle states, schema 8 | DEFINITION_OF_DONE.md (2026-10-06) | done |
+| B9 (2026-10-06) | Organic per-tile regions + meandering trails (generator v3, world schema 4), 8-way movement (stick sectors, combined keys, 141% diagonal time, no corner cutting) | test_world_generation OrganicRegionTests, test_world_runtime DiagonalMovementTests | done |
+| B10 (2026-10-06) | Rivers as an overlay, not a region (generator v4, world schema 5): continuous across chunks, impassable, fords/bridges on trails | test_world_generation RiverTests | done |
 | Next | ash_plain biome via RegionDefs + pool; pixel-tier equipment overlays; region adjacency rules; more chains | - | not started |
 
 ## Architectural decisions

@@ -9,13 +9,14 @@ from collections import deque
 from dataclasses import asdict, replace
 
 from .models import (
-    Cell, Chunk, ChunkAsset, ChunkKey, DELTAS, DimensionSpec, Spawn,
+    Cell, Chunk, ChunkKey, DELTAS, DimensionSpec, Spawn,
     asset_to_dict, integer, validate_asset,
 )
 from .seeds import canonical_json, content_digest, derive_seed
 
-GENERATOR_VERSION = 2
-SUPPORTED_GENERATOR_VERSIONS = (1, 2)
+GENERATOR_VERSION = 4   # v3: tile-level organic region borders (regions.RegionField), game trails
+                        # v4: + continuous rivers (water.WaterField), fords and bridges
+SUPPORTED_GENERATOR_VERSIONS = (1, 2, 3, 4)
 
 
 def validated_dimensions(dimensions):
@@ -84,13 +85,16 @@ class ChunkGenerator:
 
     def __init__(self, world_seed: int, dimensions: tuple, assets: tuple,
                  generator_version: int = GENERATOR_VERSION, region_catalog=None,
-                 region_version=2):
+                 region_version=None):
         integer(world_seed, "world seed", 0, 2**64 - 1)
         if type(generator_version) is not int or generator_version not in SUPPORTED_GENERATOR_VERSIONS:
             raise ValueError("unsupported generator version")
         self.world_seed = world_seed
         self.generator_version = generator_version
-        if type(region_version) is not int or region_version not in (1, 2):
+        if region_version is None:
+            region_version = 3 if generator_version >= 3 else 2
+        if type(region_version) is not int or region_version not in (1, 2, 3) \
+                or (region_version == 3) != (generator_version >= 3):
             raise ValueError("unsupported region version")
         self.region_version = region_version
         self.dimensions = validated_dimensions(dimensions)
@@ -133,7 +137,7 @@ class ChunkGenerator:
                 self.world_seed, "generator", 1, "catalog",
                 self.catalog_digest, "dimension", canonical_json(asdict(spec)))
         else:
-            parts = (self.world_seed, "generator", 2, "catalog", self.catalog_digest,
+            parts = (self.world_seed, "generator", min(self.generator_version, 2), "catalog", self.catalog_digest,
                      "regions", self.region_catalog_digest)
             if self.region_version >= 2:
                 parts += ("region-version", self.region_version)
@@ -150,6 +154,33 @@ class ChunkGenerator:
         pool = self._pools[(spec.id, biome)]
         return pool[derive_seed(terrain_seed, "template") % len(pool)]
 
+    def region_field(self, biome, spec):
+        """Generator v3: the cached tile-level region field of one biome."""
+        fields_ = self.__dict__.setdefault("_region_fields", {})
+        field_ = fields_.get((biome, spec.id))
+        if field_ is None:
+            from .regions import RegionField
+            field_ = RegionField(self.world_seed, biome, self.region_catalog, spec.width, spec.height)
+            fields_[(biome, spec.id)] = field_
+        return field_
+
+    def water_field(self, spec):
+        """Generator v4: the cached river layer (independent of regions and biomes)."""
+        fields_ = self.__dict__.setdefault("_water_fields", {})
+        field_ = fields_.get(spec.id)
+        if field_ is None:
+            from .water import WaterField
+            field_ = fields_[spec.id] = WaterField(self.world_seed, spec.width, spec.height)
+        return field_
+
+    def chunk_region(self, key):
+        """Region used for this chunk's action bucket (None for biomes without regions)."""
+        biome = self.biome_for(key)
+        if self.generator_version >= 3:
+            return self.region_field(biome, self._spec(key)).chunk(key)
+        from .regions import region_for
+        return region_for(self.world_seed, biome, key, self.region_catalog, version=self.region_version)
+
     def biome_for(self, key):
         """Read deterministic biome metadata without composing/residing a grid."""
         return self._source(key).biome
@@ -160,13 +191,19 @@ class ChunkGenerator:
             from .open_terrain import compose_open
             landscape_seed = derive_seed(self.world_seed, "open-terrain-v1", self.catalog_digest,
                                          canonical_json(asdict(spec)))
-            region = None
-            if self.generator_version >= 2:
+            region = region_grid = water = None
+            if self.generator_version >= 4:
+                water = self.water_field(spec).grid(key)
+            if self.generator_version >= 3:
+                region_grid = self.region_field(source.biome, spec).grid(key)
+                region = self.region_field(source.biome, spec).chunk(key)
+            elif self.generator_version >= 2:
                 from .regions import region_for
                 region = region_for(self.world_seed, source.biome, key, self.region_catalog,
                                     version=self.region_version)
             return Chunk(key, seed, source.id, compose_open(source, spec, key, landscape_seed,
-                                                             region=region))
+                                                             region=region, region_grid=region_grid,
+                                                             water=water))
         terrain = derive_seed(seed, "terrain")
         decoration = derive_seed(seed, "decoration")
         encounter = derive_seed(seed, "encounter")

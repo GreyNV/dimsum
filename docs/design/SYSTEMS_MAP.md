@@ -4,12 +4,13 @@
 |---|---|---|---|
 | `world/catalog.py` | Items, actions, unlocks, boons, regions, mastery cost (validated data) | - | - |
 | `world/tuning.py` | Balance numbers for spots, pity, offering, ash, gear, frontier | - | - |
-| `world/regions.py` / `world/repository.py` | Adjacency-weighted region selection and pinned region catalog per world | catalog.REGIONS, seeds | world save schema 3 |
+| `world/regions.py` / `world/repository.py` | Adjacency-weighted region selection, organic per-tile region field (v3), pinned region catalog per world | catalog.REGIONS, seeds | world save schema 5 |
+| `world/water.py` | River overlay (generator v4): one global contour field, fords/bridges where trails cross | seeds | nothing (pure function of world seed) |
 | `world/actions.py` | Known/eligible/bucket/explain (pure) | catalog | - |
 | `world/encounters.py` | Rolled spot, pity spot and temporary lead placement (pure) | actions, tuning | - |
 | `world/equipment.py` | Validated current-life weapon/body slots | catalog.ITEMS | - |
 | `world/economy.py` | Offer value, rebirth ash, anchor shop rows, purchase | catalog, tuning | meta fields |
-| `world/autopilot.py` | Expedition: lives, vitals, screening (windows, pity), goals, crafting policy, anchor, saves | all above | expedition state |
+| `world/autopilot/` | Expedition (one mixin per concern): life loop, goals, navigation, screening (windows, pity), combat, outcomes/crafting policy, vitals, anchor, saves | all above | expedition state (schema 9) |
 | `world/session.py` | Snapshot projection (+ region, meta, shop, debug), input validation | expedition | - |
 | `world/journal.py` | Lifetime journal (actions, items, deaths, longest life) and achievements derived from it | catalog.ACHIEVEMENTS | expedition.journal |
 | `world/details.py` | Read-only page projections: character, stats, multipliers, rolls, journal | expedition | - |

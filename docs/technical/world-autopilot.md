@@ -18,8 +18,9 @@ bare-handed, and the attack is a punch. Manual WASD control is the locked skill
 ## Modules
 - world/encounters.py: EncounterDef catalog (validated), POOLS by biome,
   chunk_spots(chunk). Version tag ENCOUNTER_VERSION = encounters-v1.
-- world/autopilot.py: Expedition(game). Drives Exploration with ordinary
+- world/autopilot/: Expedition(game). Drives Exploration with ordinary
   InputCommands; owns completed spots, attribute XP, log, skills, task and goal.
+  Since 2026-10-07 a package; see "Code layout" at the end of this file.
 - browser_server.py: BrowserSession(game, expedition). Without an expedition the
   session is the original manual adapter (kept for tests and terminal parity).
 
@@ -80,8 +81,8 @@ a plain exploration save (which starts a fresh expedition). Exploration schema 1
 is unchanged; auto-pilot targets use enc: IDs that it already accepts.
 
 ## Lives, survival and items (encounters-v2, 2026-10-04)
-Plan and decisions: world-lives-plan.md. Code: progression.py, autopilot.py.
-- Two tracks per attribute, reusing core.GameConfig: regular XP (100 x 1.15^n,
+Plan and decisions: world-lives-plan.md. Code: progression.py, autopilot/.
+- Two tracks per attribute (curve numbers match the idle sim's GameConfig; progression.py owns them): regular XP (100 x 1.15^n,
   resets each life) and dimensional XP (100 x 1.35^n, persists, 20% of gains).
   speed = 1 + 0.10*soft(regular) + 0.01*soft(dimensional), softcap 10/0.08,
   rounded once to per-mille. Activity time = base / speed(attribute); punch
@@ -241,3 +242,25 @@ targets are `enc:` actors, so moved positions save and reload under Exploration'
 custom-target rules. Encounter version v5 and expedition schema 5 migrate v4
 saves by retaining progression/inventory and rerolling current-life spots; the
 old shrine log keeps its earned blessing with no new map shrine.
+
+## Code layout (refactor, 2026-10-07)
+Behavior-preserving split of the former 2,100-line autopilot.py: same seeds, same saves,
+byte-identical frames (checked by a golden capture of seeded runs, reloads and web frames).
+`Expedition` is assembled from one mixin per concern in `world/autopilot/`:
+
+| module | owns |
+|---|---|
+| expedition.py | life state, `_settle`, `advance()` (anchor step, punch, task, travel steps) and `advance_manual()` |
+| planning.py | goal choice: nearest spot (food first when hungry), home, wander |
+| navigation.py | global cells, resident grid, reverse-move graph, memoized distance fields, `_clear_caches()` |
+| spawning.py | spot plans, spawn windows, pity, action contexts (`spot_context`, `lead_context`, `self_context`) |
+| combat.py | punch damage, boar hit by ring, frontier, boar pursuit |
+| outcomes.py | rewards, XP (`_gain_xp`), loot, leads, eating, self actions |
+| vitals.py | hunger/health integer rates |
+| lives.py | death report, anchor interlude, anchor actions (`ANCHOR_FIELDS`), rebirth |
+| saves.py | `to_dict`/`from_dict`, field loaders, `MIGRATIONS` (schemas 6, 7, 8 -> 9) |
+| presentation.py | read-only HUD/page/debug views |
+| constants.py | vitals and combat numbers, prologue text, `SCHEMA_VERSION` |
+
+Saves older than schema 6 (before the hosted build) are rejected with a clear error.
+`models.chunk_ident(key)` is the one chunk-id formatter (saves, frames, logs).

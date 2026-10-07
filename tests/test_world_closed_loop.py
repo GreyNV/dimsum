@@ -11,11 +11,13 @@ from dimensional_sim.world.autopilot import Expedition
 from dimensional_sim.world.catalog import (ACTIONS, BOONS, BY_ID, ITEMS, REGIONS, UNLOCKS, ActionDef,
                                            validate_catalog)
 from dimensional_sim.world.encounters import chunk_spots, forced_spot
+from dimensional_sim.world.equipment import equip_item
 from dimensional_sim.world.models import ChunkKey
 from dimensional_sim.world.regions import region_for
 from dimensional_sim.world.runtime import Exploration
 from dimensional_sim.world.seeds import canonical_json
 from dimensional_sim.world.session import BrowserSession, validate_input
+from dimensional_sim.world.tuning import PITY_CHUNKS
 from dimensional_sim.world.web import new_world
 
 P = ap.POINT
@@ -139,7 +141,7 @@ class PlayableWorldTests(unittest.TestCase):
 
     def test_pity_forces_a_starved_category_and_says_so(self):
         e = past_prologue(fresh(3))
-        e.drought["enemy"] = ap.PITY_CHUNKS["enemy"] - 1
+        e.drought["enemy"] = PITY_CHUNKS["enemy"] - 1
         e.screened_chunks = {c for c in e.screened_chunks if c != "forest:1:1"}
         chunk = e.game.world.get(ChunkKey("forest", 1, 1))
         before = e.stats["pity"]
@@ -181,7 +183,7 @@ class CraftingTests(unittest.TestCase):
         self.assertGreaterEqual(e.frontier(), frontier)
         hit = e.boar_hit(ChunkKey("forest", 2, 0))
         e.inventory["hide_wrap"] = 1
-        e.equipped = ap.equip_item(e.equipped, e.inventory, "hide_wrap")
+        e.equipped = equip_item(e.equipped, e.inventory, "hide_wrap")
         self.assertEqual(e.boar_hit(ChunkKey("forest", 2, 0)), hit * 70 // 100)
 
     def test_snare_turns_materials_into_food_only_when_needed(self):

@@ -2,22 +2,22 @@
 
 The browser worker (web/src/worker.js) imports this module and exchanges JSON text,
 so no Python objects cross into JavaScript. Every player gets their own world. Time
-comes from the caller (performance.now seconds); offline progress follows the idle
-simulator's offline efficiency and is capped so a returning tab catches up quickly.
+comes from the caller (performance.now seconds); offline progress follows
+progression.CONFIG.offline_efficiency and is capped so a returning tab catches up quickly.
 """
 import json
 
-from ..core import GameConfig
 from .autopilot import Expedition
 from .models import DimensionSpec
 from .open_terrain import open_assets
+from .progression import CONFIG
 from .repository import WorldRepository
 from .runtime import Exploration
 from .seeds import canonical_json
 from .session import BrowserSession
 
 CHUNK_SIZE = (32, 16)
-OFFLINE_EFFICIENCY_PERMILLE = int(round(GameConfig().offline_efficiency * 1000))
+OFFLINE_EFFICIENCY_PERMILLE = int(round(CONFIG.offline_efficiency * 1000))
 OFFLINE_CAP_MS = 30 * 60 * 1000          # at most 30 simulated minutes per return
 CATCH_UP_SLICE_MS = 5_000
 

@@ -6,27 +6,26 @@ WHY: players and designers need to see, at a glance, what drives the numbers.
 NEVER: change state or roll anything here.
 TESTS: tests/test_world_pages.py.
 """
-from . import autopilot as ap
 from .actions import Context, known
+from .autopilot import INVENTORY_SLOTS, POINT, REGEN, REST_REGEN
 from .catalog import ACTIONS, BOONS, BY_ID, ITEMS, UNLOCKS
-from .equipment import is_equipped
 from .encounters import spawn_window
+from .equipment import is_equipped
 from .journal import achievements
+from .models import ChunkKey
 from .progression import attribute_report, scaled_ms, speed_permille
-from .tuning import BOUNTY_WINDOW_BONUS, PITY_CHUNKS, SPOTS_PER_CHUNK
-
-POINTS = ap.POINT
+from .tuning import (BOUNTY_WINDOW_BONUS, IRON_SKIN_HIT_PERCENT, PITY_CHUNKS, SPOTS_PER_CHUNK, STAFF_PUNCH_BONUS,
+                     WRAP_HIT_PERCENT)
 
 
 def _pts(micro):
-    return round(micro / POINTS, 1)
+    return round(micro / POINT, 1)
 
 
 def _known_context(e):
     """Use the same permanent permission state as action generation."""
-    return Context(unlocked=frozenset(e.unlocked),
-                   knowledge=frozenset(getattr(e, "knowledge", ())),
-                   recipes=frozenset(getattr(e, "recipes", ())))
+    return Context(unlocked=frozenset(e.unlocked), knowledge=frozenset(e.knowledge),
+                   recipes=frozenset(e.recipes))
 
 
 def character(e):
@@ -38,11 +37,11 @@ def character(e):
         "punch_damage": e.punch_damage(), "gear": gear,
         "boon": BOONS[e.boon].name if e.boon else None,
         "boon_next": BOONS[e.boon_next].name if e.boon_next else None,
-        "boar_hit_at_frontier": _pts(e.boar_hit(ap.ChunkKey(e.dimension, frontier, 0))),
+        "boar_hit_at_frontier": _pts(e.boar_hit(ChunkKey(e.dimension, frontier, 0))),
         "fight_cost_at_frontier": _pts(e.fight_damage(frontier)),
         "hunger_per_minute": _pts(e._drain() * 60_000),
-        "regen_per_minute": _pts(ap.REGEN * 60_000), "rest_regen_per_minute": _pts(ap.REST_REGEN * 60_000),
-        "inventory_slots": [len(e.inventory), ap.INVENTORY_SLOTS],
+        "regen_per_minute": _pts(REGEN * 60_000), "rest_regen_per_minute": _pts(REST_REGEN * 60_000),
+        "inventory_slots": [len(e.inventory), INVENTORY_SLOTS],
         "currencies": {"dust": e.dust, "ash": e.ash, "blessing": e.blessing},
         "unlocked": [UNLOCKS[u].name for u in sorted(e.unlocked)],
     }
@@ -64,7 +63,7 @@ def multipliers(e):
     known_ctx = _known_context(e)
     actions = []
     for a in ACTIONS:
-        if a.category in ("fight",) or not known(a, known_ctx):
+        if a.category == "fight" or not known(a, known_ctx):
             continue
         speed = e.speed(a.attribute)
         base = a.duration_ms
@@ -74,15 +73,17 @@ def multipliers(e):
     endurance = e.speed("endurance")
     hit_parts = [["Endurance", round(1000 / endurance, 3)]]
     if is_equipped(e.equipped, "hide_wrap"):
-        hit_parts.append(["Hide wrap", 0.7])
+        hit_parts.append(["Hide wrap", WRAP_HIT_PERCENT / 100])
     if e.boon == "iron_skin":
-        hit_parts.append(["Iron skin boon", 0.75])
+        hit_parts.append(["Iron skin boon", IRON_SKIN_HIT_PERCENT / 100])
+    punch = e.punch_damage()
+    staff = STAFF_PUNCH_BONUS if is_equipped(e.equipped, "walking_staff") else 0
     return {"actions": actions,
             "hunger_drain": round(1000 / endurance, 3),
             "boar_hit": hit_parts,
-            "punch_damage": e.punch_damage(),
-            "punch_parts": [["Base", 1], ["Strength levels", e.punch_damage() - 1 - (1 if is_equipped(e.equipped, "walking_staff") else 0)],
-                            *([["Walking staff", 1]] if is_equipped(e.equipped, "walking_staff") else [])]}
+            "punch_damage": punch,
+            "punch_parts": [["Base", 1], ["Strength levels", punch - 1 - staff],
+                            *([["Walking staff", staff]] if staff else [])]}
 
 
 def rolls(e):

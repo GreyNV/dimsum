@@ -301,3 +301,61 @@ class RateConfigurationRegressionTests(unittest.TestCase):
                 setattr(game, name, 200)
         game.advance(1, InputCommand(attack=True))
         self.assertEqual(game.targets["near"].hp, 2)
+
+
+class DiagonalMovementTests(unittest.TestCase):
+    """Manual diagonals: two cardinal half-steps at ~sqrt(2) interval, no corner cutting."""
+
+    def open_game(self):
+        from dimensional_sim.world.web import new_world
+        from dimensional_sim.world.runtime import Exploration
+        game = Exploration(new_world(4), "forest")
+        a = game.current_chunk().asset
+        # find a cell whose diagonal neighbour and both half-steps are open
+        for y in range(1, a.height - 1):
+            for x in range(1, a.width - 1):
+                if not any(a.collision[y + dy][x + dx] for dx, dy in ((0, 0), (1, 0), (0, -1), (1, -1))):
+                    game.player.x, game.player.y = x, y
+                    return game
+        self.skipTest("no open 2x2 patch")
+
+    def test_diagonal_moves_both_axes_at_diagonal_interval(self):
+        from dimensional_sim.world.runtime import DIAGONAL_PERCENT, InputCommand
+        game = self.open_game()
+        x, y = game.player.x, game.player.y
+        interval = game.movement_interval_ms * DIAGONAL_PERCENT // 100
+        game.advance(interval - 1, InputCommand("northeast"))
+        self.assertEqual((game.player.x, game.player.y), (x, y))
+        game.advance(1, InputCommand("northeast"))
+        self.assertEqual((game.player.x, game.player.y), (x + 1, y - 1))
+        self.assertIn(game.player.facing, ("north", "east"), "the sprite keeps a cardinal facing")
+
+    def test_diagonal_never_cuts_a_blocked_corner_and_slides_along_walls(self):
+        from dimensional_sim.world.runtime import InputCommand
+        game = self.open_game()
+        x, y = game.player.x, game.player.y
+        a = game.current_chunk().asset
+        rows = [list(r) for r in a.collision]
+        rows[y - 1][x] = True          # the north half-step is a tree
+        game.world.peek(game.player.chunk).asset.__dict__  # asset is frozen; patch via a copy
+        from dataclasses import replace
+        patched = replace(a, collision=tuple(tuple(r) for r in rows))
+        chunk = game.world.peek(game.player.chunk)
+        object.__setattr__(chunk, "asset", patched)
+        game._move("northeast")
+        self.assertEqual((game.player.x, game.player.y), (x + 1, y), "slides east instead of squeezing past")
+        rows[y][x + 2] = True
+        rows[y - 1][x + 1] = True
+        object.__setattr__(chunk, "asset", replace(a, collision=tuple(tuple(r) for r in rows)))
+        game._move("northeast")
+        self.assertEqual((game.player.x, game.player.y), (x + 1, y), "fully blocked: stays")
+
+    def test_input_accepts_diagonals_and_saves_them(self):
+        import json
+        from dimensional_sim.world.runtime import Exploration, InputCommand
+        game = self.open_game()
+        game.advance(50, InputCommand("southwest"))
+        again = Exploration.from_dict(json.loads(json.dumps(game.to_dict())))
+        self.assertEqual(again.last_move, "southwest")
+        with self.assertRaises(ValueError):
+            InputCommand(face="northeast")

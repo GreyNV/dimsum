@@ -1,19 +1,30 @@
 # Procedural generation
 
 ```
-WORLD (seed) -> DIMENSION forest -> BIOME (generation.biome_for) -> REGION (repository.region_for, 3x3 chunks)
-  -> CHUNK (v2 region-shaped open terrain, 32x16)
+WORLD (seed) -> DIMENSION forest -> BIOME (generation.biome_for) -> REGION (regions.RegionField, per tile)
+  -> WATER (water.WaterField, per tile, independent of regions)
+  -> CHUNK (v4 region-shaped open terrain + rivers, 32x16)
 PLAYER ENTERS CHUNK -> CURRENT BUCKET -> RUNTIME SPOT ROLL -> SCREENING -> AVAILABLE INTERACTIONS
 ```
 
 ## Order and seeds
-1. Terrain: generator v2 uses a pinned `RegionDef` to shape canopy, brush and floor landmarks (measured in
-   BALANCING.md: blocked cells range 0% in Still Glade to 62% in Deep Woods). Generator v1 worlds keep their
-   byte-identical terrain mid-life and are regenerated from the same seed with v2 at the next rebirth. Origin (0,0) in v2 has a safe caravan ambush clearing,
-   debris and scorch marks beneath the browser's wagon wrecks.
-2. Region: world schema 3 uses `regions-v2`: deterministic cell proposals combined with data-driven
-   compatibility weights for shared edges. The anchor cell is Old Road. The save pins region version and
-   definitions. Schema 2 worlds retain their `regions-v1` geography.
+1. Terrain: generator v3 (world schema 4) reads a per-tile region field (`regions.RegionField`): one jittered
+   site per 3x3-chunk cell, region chosen by `regions-v2` adjacency weights, each tile assigned to the nearest
+   of the 9 surrounding sites after a two-octave domain warp. Borders therefore wander through chunks instead
+   of following chunk edges. Canopy, brush and landmarks are read per tile, trails meander (no fixed crossing
+   grid; only every third chunk row/column carries one) and are drawn as roads only inside Old Road tiles.
+   A chunk's region (spots, buckets, `region_for`) is the region under its centre tile; (0,0) is Old Road
+   with the caravan ambush clearing. Generator v2 (rectangular cells, schema 2/3) and v1 worlds keep their
+   terrain mid-life and are regrown with v3 at the next rebirth. Blocked-cell share by region is in BALANCING.md.
+   Generator v4 (world schema 5) overlays water. Water is not a location: a river is the 50% contour of a
+   low-frequency, domain-warped field over global tiles, so it crosses regions and always continues into
+   the next chunk. River tiles ('w') block like trees; a trail over water is a ford ('%'), a road a bridge
+   ('H'), so trails and exits stay connected. Bank tiles grow no trees. The field is shifted by a
+   seed-chosen offset that keeps the anchor chunk dry. Still Glade marks are wildflowers ('*'), no longer
+   '~', which read as water. v3 worlds keep their terrain mid-life and gain rivers at the next rebirth.
+2. Region: `regions-v2` deterministic cell proposals combined with data-driven compatibility weights for
+   shared edges. The anchor cell is Old Road. The save pins region version and definitions (region version 3
+   = v2 choices + organic field). Schema 2 worlds retain their `regions-v1` geography.
 3. Spots: no encounter is stored in generated geography. On first entry to a chunk during a life, the
    current action bucket rolls opportunities using a seed derived from world seed, life, entry order and
    chunk ID. The resulting plans are saved in expedition schema 9 for replay. Future entries see current

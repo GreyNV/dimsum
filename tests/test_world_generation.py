@@ -156,10 +156,11 @@ class RegionTerrainTests(unittest.TestCase):
         self.assertEqual(restored.generator_version, 1)
         self.assertEqual(canonical(restored.get(key)), before)
         self.assertEqual(json.loads(canonical_json(restored.to_dict())), payload)
-        self.assertEqual(WorldRepository(482910, dimensions, assets).generator_version, 2)
+        self.assertEqual(WorldRepository(482910, dimensions, assets).generator_version, 4)
+        self.assertEqual(WorldRepository(482910, dimensions, assets, generator_version=2).region_version, 2)
 
     def test_v2_region_catalog_is_pinned_and_tampering_is_rejected(self):
-        world = WorldRepository(91, (DimensionSpec("forest"),), open_assets())
+        world = WorldRepository(91, (DimensionSpec("forest"),), open_assets(), generator_version=2)
         key = ChunkKey("forest", 0, 0)
         before = canonical(world.get(key))
         payload = json.loads(canonical_json(world.to_dict()))
@@ -192,8 +193,8 @@ class RegionTerrainTests(unittest.TestCase):
             glyphs[region_id] = "".join(cell.glyph for row in chunk.asset.environment for cell in row)
         self.assertIn("o", glyphs["deep_woods"])
         self.assertIn(";", glyphs["bramble_thicket"])
-        self.assertIn("~", glyphs["still_glade"])
-        self.assertNotIn("~", glyphs["old_road"])
+        self.assertIn("*", glyphs["still_glade"])  # wildflowers; '~' read as water
+        self.assertNotIn("*", glyphs["old_road"])
 
     def test_origin_ambush_marks_are_unique_safe_and_deterministic(self):
         dimensions = (DimensionSpec("forest"),)
@@ -339,9 +340,9 @@ class RepositoryTests(unittest.TestCase):
         world.visit(ChunkKey("forest", 0, 0))
         snapshot = json.loads(canonical_json(world.to_dict()))
         changes = (
-            lambda p: p.update(schema_version=4),
+            lambda p: p.update(schema_version=6),
             lambda p: p.update(schema_version=True),
-            lambda p: p.update(generator_version=3),
+            lambda p: p.update(generator_version=5),
             lambda p: p.update(generator_version=True),
             lambda p: p.update(world_seed=True),
             lambda p: p.update(cache_limit=0),
@@ -381,6 +382,68 @@ class RepositoryTests(unittest.TestCase):
             with self.assertRaises(ValueError): operation(ChunkKey("missing", 0, 0))
             with self.assertRaises(ValueError): operation("not a key")
         self.assertEqual(before, world.to_dict())
+
+
+class RiverTests(unittest.TestCase):
+    """Generator v4: water is an overlay that crosses regions and chunks, not a region."""
+    R = 4
+
+    def area(self, seed):
+        from dimensional_sim.world.web import new_world
+        world, tiles = new_world(seed), {}
+        for cy in range(-self.R, self.R + 1):
+            for cx in range(-self.R, self.R + 1):
+                a = world.get(ChunkKey("forest", cx, cy)).asset
+                for y in range(16):
+                    for x in range(32):
+                        tiles[(cx * 32 + x, cy * 16 + y)] = (a.environment[y][x].glyph, a.collision[y][x],
+                                                             a.objects[y][x])
+        return world, tiles
+
+    def test_rivers_block_like_trees_and_trails_ford_them(self):
+        fords = 0
+        for seed in (1, 2, 3):
+            world, tiles = self.area(seed)
+            water = [p for p, t in tiles.items() if t[0] in "w%H"]
+            self.assertGreater(len(water), 150, f"seed {seed} should have a river nearby")
+            for p in water:
+                glyph, blocked, obj = tiles[p]
+                self.assertIsNone(obj)
+                self.assertEqual(blocked, glyph == "w", (seed, p, glyph))
+            fords += sum(tiles[p][0] in "%H" for p in water)
+            regions = {world.region_at(x, y, "forest").id for x, y in water}
+            self.assertGreater(len(regions), 1, "a river runs through several locations")
+        self.assertGreater(fords, 0)
+
+    def test_a_river_leaving_a_chunk_continues_in_the_next(self):
+        """Water is one global field: every chunk's water equals the field at those
+        global tiles, so a river at a chunk edge continues in the neighbour."""
+        from dimensional_sim.world.water import WaterField
+        for seed in (1, 2, 3):
+            world, tiles = self.area(seed)
+            field = WaterField(world.world_seed, 32, 16)
+            wet = {p for p, t in tiles.items() if t[0] in "w%H"}
+            self.assertEqual(wet, {p for p in tiles if field.at(*p)})
+            crossings = sum(1 for x, y in wet if (x + 1) % 32 == 0 and (x + 1, y) in wet)
+            self.assertGreater(crossings, 0, "some river crosses a chunk edge")
+
+    def test_anchor_chunk_is_dry_and_glade_has_no_water_marks(self):
+        from dimensional_sim.world.web import new_world
+        for seed in range(1, 9):
+            a = new_world(seed).get(ChunkKey("forest", 0, 0)).asset
+            self.assertFalse(any(c.glyph in "w%H" for row in a.environment for c in row), seed)
+        _, tiles = self.area(1)
+        self.assertFalse(any(t[0] == "~" for t in tiles.values()))
+
+    def test_v3_worlds_still_load_without_rivers(self):
+        old = WorldRepository(5, generator_version=3)
+        data = old.to_dict()
+        self.assertEqual(data["schema_version"], 4)
+        restored = WorldRepository.from_dict(data)
+        self.assertEqual(restored.generator_version, 3)
+        key = ChunkKey("forest", 2, 1)
+        self.assertEqual(restored.get(key), old.get(key))
+        self.assertFalse(any(c.glyph in "w%H" for row in restored.get(key).asset.environment for c in row))
 
 
 if __name__ == "__main__":

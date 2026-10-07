@@ -1,5 +1,4 @@
 """Open topology and local adapter regressions; no browser/AI required."""
-import copy
 from dataclasses import replace
 from http.client import HTTPConnection
 import json

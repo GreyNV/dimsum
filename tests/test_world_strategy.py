@@ -106,13 +106,16 @@ class GeographyStrategyTests(unittest.TestCase):
         self.assertEqual((expedition.game.player.chunk, expedition.game.player.x,
                           expedition.game.player.y), old_position)
         self.assertEqual(expedition.spot_plans, first_spots)
-        exit_west = next(x for x in expedition.game.current_chunk().asset.exits if x.direction == "west")
+        west = expedition.game.world.get(ChunkKey("forest", -1, 0)).asset
+        exit_west = next(x for x in expedition.game.current_chunk().asset.exits if x.direction == "west"
+                         and not west.collision[x.y][west.width - 1])
         expedition.game.player.x, expedition.game.player.y = exit_west.x, exit_west.y
         session.input({**body, "control": "active", "move": "west"}, .02)
         session.step(.04)
         self.assertEqual(expedition.game.player.chunk.x, -1)
-        self.assertEqual(expedition.region(expedition.game.player.chunk).id, "still_glade")
-        self.assertEqual(expedition.debug_info()["region"], "still_glade")
+        west_region = expedition.game.world.region_for(ChunkKey("forest", -1, 0)).id
+        self.assertEqual(expedition.region(expedition.game.player.chunk).id, west_region)
+        self.assertEqual(expedition.debug_info()["region"], west_region)
         self.assertIn("forest:-1:0", expedition.spot_plans)
         clock = expedition.total_ms
         back = session.input({**body, "control": "auto"}, .05)
@@ -195,8 +198,27 @@ class GeographyStrategyTests(unittest.TestCase):
             session.step(tick * .02)
         self.assertEqual(target.hp, 4)
 
+    def test_active_walk_abandons_task_at_movement_speed(self):
+        expedition = Expedition(Exploration(new_world(1), "forest"))
+        expedition.advance(40_000)
+        session = BrowserSession(expedition.game, expedition)
+        body = {"move": None, "attack": False, "paused": False, "known": [], "control": "active"}
+        session.input(body, 0)
+        self.assertIsNotNone(expedition.task)
+        player, now, cells = expedition.game.player, 0.0, set()
+        for tick in range(50):  # one second: 20 ms ticks, input polls every 50 ms
+            now += .02
+            if tick % 5 in (0, 2):
+                session.input({**body, "move": "east"}, now)
+            session.step(now)
+            cells.add((player.chunk.x, player.x))
+        self.assertIsNone(expedition.task)
+        # One press step plus one per 120 ms interval; polls never add free steps.
+        self.assertLessEqual(len(cells) - 1, 1 + 1000 // expedition.game.movement_interval_ms)
+        self.assertGreaterEqual(len(cells) - 1, 6)
+
     def test_legacy_region_save_retains_v1_geography(self):
-        old = WorldRepository(19, region_version=1)
+        old = WorldRepository(19, generator_version=2, region_version=1)
         key = ChunkKey("forest", -3, 0)
         before = old.get(key)
         data = old.to_dict()

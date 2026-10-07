@@ -92,6 +92,11 @@ class ChunkKey:
         integer(self.y, "chunk y")
 
 
+def chunk_ident(key):
+    """Canonical text id of a chunk key, e.g. "forest:-1:2" (saves, frames, logs)."""
+    return f"{key.dimension}:{key.x}:{key.y}"
+
+
 @dataclass(frozen=True)
 class DimensionSpec:
     id: str

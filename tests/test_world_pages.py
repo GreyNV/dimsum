@@ -4,7 +4,7 @@ import json
 import unittest
 
 from dimensional_sim.world import autopilot as ap
-from dimensional_sim.world.autopilot import Expedition
+from dimensional_sim.world.autopilot import Expedition, saves
 from dimensional_sim.world.catalog import ACHIEVEMENTS, BY_ID
 from dimensional_sim.world.details import detail
 from dimensional_sim.world.journal import achievements, metric, new_journal, validate_journal
@@ -109,16 +109,34 @@ class UpgradeAndRebuildTests(unittest.TestCase):
     def test_v6_save_upgrades_with_empty_journal(self):
         e = played(30_000)
         old = e.to_dict()
-        old.pop("journal")
-        for key in Expedition.V8_FIELDS:
-            old.pop(key)
-        for key in Expedition.V9_FIELDS:
+        for key in (*saves.V7_FIELDS, *saves.V8_FIELDS, *saves.V9_FIELDS):
             old.pop(key)
         old["schema_version"] = 6
         old["encounters"] = "encounters-v6"
         migrated = Expedition.from_dict(old)
         self.assertEqual(migrated.journal, new_journal())
         self.assertEqual(migrated.dimensional, e.dimensional)
+
+    def test_v7_and_v8_saves_upgrade_keeping_progress_and_rerolling_spots(self):
+        e = played(90_000)
+        e.unlocked.add("climbing")
+        current = json.loads(canonical_json(e.to_dict()))
+        v8 = {k: v for k, v in current.items() if k != "spot_plans"}
+        v8.update(schema_version=8, encounters="encounters-v7")
+        v7 = {k: v for k, v in v8.items() if k not in ("equipped", "knowledge", "recipes", "journal_disabled",
+                                                       "journal_favor", "leads", "lead_history")}
+        v7.update(schema_version=7, encounters="encounters-v6")
+        for old in (v8, v7):
+            migrated = Expedition.from_dict(json.loads(json.dumps(old)))
+            self.assertEqual((migrated.life, migrated.dimensional, migrated.regular, migrated.inventory),
+                             (e.life, e.dimensional, e.regular, e.inventory))
+            self.assertIn("climbing", migrated.unlocked)
+            self.assertFalse(any(c.startswith("enc:") for c in migrated.completed))
+            migrated.advance(30_000)
+            again = Expedition.from_dict(json.loads(canonical_json(migrated.to_dict())))
+            self.assertEqual(canonical_json(again.to_dict()), canonical_json(migrated.to_dict()))
+        with self.assertRaises(ValueError):
+            Expedition.from_dict({**v8, "encounters": "encounters-v6"})
 
     def test_rebuilt_world_keeps_meta_and_changes_seed(self):
         e = played(60_000)

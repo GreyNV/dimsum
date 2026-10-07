@@ -1,6 +1,5 @@
 """Cross-boundary acceptance tests; use real world/runtime/renderer, no external API."""
 from contextlib import contextmanager, redirect_stdout
-from copy import deepcopy
 import io
 import json
 import os

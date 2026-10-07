@@ -1,7 +1,7 @@
 # Balancing
 
 All numbers live in `world/tuning.py` (systems), `world/catalog.py` (content values) and the vitals block at
-the top of `world/autopilot.py`. Measure with:
+`world/autopilot/constants.py`. Measure with:
 
 ```
 PYTHONPATH=src python -m dimensional_sim.world.cli simulate --seeds 1-8 --minutes 45 --policy spend --lives

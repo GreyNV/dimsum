@@ -12,6 +12,15 @@ from dataclasses import asdict, dataclass
 from .animation import (animations_from_dict, animations_to_dict, default_animations,
                         rotate, validate_animations)
 from .models import Cell, ChunkKey, DELTAS, DIRECTIONS, fields, identifier, integer
+
+# Manual movement also accepts the four diagonals. A diagonal is two cardinal half-steps taken
+# together; it never cuts a corner between two blocked cells and slides along a wall when only
+# one half-step is open. It takes DIAGONAL_PERCENT of the cardinal interval (about sqrt 2), so
+# speed over ground stays even. Facing stays cardinal (the sprite has four facings).
+DIAGONALS = {"northeast": ("north", "east"), "southeast": ("south", "east"),
+             "southwest": ("south", "west"), "northwest": ("north", "west")}
+MOVE_DIRECTIONS = DIRECTIONS + tuple(DIAGONALS)
+DIAGONAL_PERCENT = 141
 from .seeds import derive_seed
 
 
@@ -22,8 +31,8 @@ class InputCommand:
     face: str | None = None
 
     def __post_init__(self):
-        if self.move is not None and self.move not in DIRECTIONS:
-            raise ValueError("move must be a cardinal direction")
+        if self.move is not None and self.move not in MOVE_DIRECTIONS:
+            raise ValueError("move must be a cardinal or diagonal direction")
         if type(self.attack) is not bool:
             raise ValueError("attack input must be boolean")
         if self.face is not None and self.face not in DIRECTIONS:
@@ -166,25 +175,62 @@ class Exploration:
                         target.hp = max(0, target.hp - self.attack_damage)
                         self.hit_targets.add(target.id)
 
-    def _move(self, direction):
-        self.player.facing = direction
+    def _step_target(self, key, x, y, direction):
+        """Where one cardinal step from (key, x, y) lands, or None if blocked (pure)."""
         dx, dy = DELTAS[direction]
-        asset = self.current_chunk().asset
-        x, y = self.player.x + dx, self.player.y + dy
-        key = self.player.chunk
-        if not (0 <= x < asset.width and 0 <= y < asset.height):
-            if not any(e.direction == direction and (self.player.x, self.player.y) == (e.x, e.y)
-                       for e in asset.exits):
-                return
-            key = ChunkKey(key.dimension, key.x + dx, key.y + dy)
-            destination = self.world.get(key).asset
-            x, y = x % destination.width, y % destination.height
-            if destination.collision[y][x]:
-                return
-            self.player.chunk, self.player.x, self.player.y = key, x, y
+        # peek first: reading the source chunk must not reorder the world's LRU cache.
+        asset = (self.world.peek(key) or self.world.get(key)).asset
+        nx, ny = x + dx, y + dy
+        if 0 <= nx < asset.width and 0 <= ny < asset.height:
+            return None if asset.collision[ny][nx] else (key, nx, ny)
+        if not any(e.direction == direction and (x, y) == (e.x, e.y) for e in asset.exits):
+            return None
+        nkey = ChunkKey(key.dimension, key.x + dx, key.y + dy)
+        destination = self.world.get(nkey).asset
+        nx, ny = nx % destination.width, ny % destination.height
+        return None if destination.collision[ny][nx] else (nkey, nx, ny)
+
+    def _place(self, key, x, y):
+        entered = key != self.player.chunk
+        self.player.chunk, self.player.x, self.player.y = key, x, y
+        if entered:
             self._enter(key)
-        elif not asset.collision[y][x]:
-            self.player.x, self.player.y = x, y
+
+    @staticmethod
+    def facing_for(direction, current):
+        """Cardinal sprite facing for a move: a diagonal keeps a matching current facing,
+        otherwise shows its east/west side."""
+        if direction in DIAGONALS:
+            vertical, horizontal = DIAGONALS[direction]
+            return current if current in (vertical, horizontal) else horizontal
+        return direction
+
+    def interval_for(self, direction):
+        if direction in DIAGONALS:
+            return self.movement_interval_ms * DIAGONAL_PERCENT // 100
+        return self.movement_interval_ms
+
+    def _move(self, direction):
+        self.player.facing = self.facing_for(direction, self.player.facing)
+        start = (self.player.chunk, self.player.x, self.player.y)
+        if direction not in DIAGONALS:
+            landing = self._step_target(*start, direction)
+            if landing is not None:
+                self._place(*landing)
+            return
+        vertical, horizontal = DIAGONALS[direction]
+        via_h = self._step_target(*start, horizontal)
+        via_v = self._step_target(*start, vertical)
+        if via_h is not None and via_v is not None:
+            landing = self._step_target(*via_h, vertical)
+            if landing is not None and landing == self._step_target(*via_v, horizontal):
+                self._place(*landing)
+                return
+        # Corner blocked: slide along whichever half-step is open (horizontal first).
+        for landing in (via_h, via_v):
+            if landing is not None:
+                self._place(*landing)
+                return
 
     def advance(self, milliseconds, command=InputCommand()):
         integer(milliseconds, "elapsed milliseconds", 0)
@@ -204,7 +250,7 @@ class Exploration:
             self.move_elapsed_ms = 0
         self.last_move = command.move
         if command.move and self.player.animation != "attack":
-            self.player.facing = command.move
+            self.player.facing = self.facing_for(command.move, self.player.facing)
         if command.face and self.player.animation != "attack":
             self.player.facing = command.face
         if command.attack and not self.attack_held and self.player.animation != "attack":
@@ -230,11 +276,12 @@ class Exploration:
                     self.hit_targets.clear()
             else:
                 self._set_animation("walk" if command.move else "idle")
-                step = min(remaining, self.movement_interval_ms - self.move_elapsed_ms) if command.move else remaining
+                interval = self.interval_for(command.move) if command.move else 0
+                step = min(remaining, interval - self.move_elapsed_ms) if command.move else remaining
                 self.player.animation_elapsed_ms += step
                 if command.move:
                     self.move_elapsed_ms += step
-                    if self.move_elapsed_ms == self.movement_interval_ms:
+                    if self.move_elapsed_ms >= interval:
                         self.move_elapsed_ms = 0
                         self._move(command.move)
             remaining -= step
@@ -279,7 +326,8 @@ class Exploration:
                 raise ValueError("invalid player facing/animation")
             integer(p["animation_elapsed_ms"], "animation elapsed", 0)
             integer(data["elapsed_ms"], "simulation elapsed", 0)
-            integer(data["move_elapsed_ms"], "movement elapsed", 0, result.movement_interval_ms - 1)
+            integer(data["move_elapsed_ms"], "movement elapsed", 0,
+                    result.movement_interval_ms * DIAGONAL_PERCENT // 100 - 1)
             if p["animation_elapsed_ms"] > data["elapsed_ms"]:
                 raise ValueError("animation clock exceeds simulation")
             if p["animation"] == "attack" and p["animation_elapsed_ms"] * result.attack_rate_percent >= result.animations["attack"].duration_ms * 100:

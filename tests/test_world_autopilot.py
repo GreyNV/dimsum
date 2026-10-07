@@ -8,9 +8,10 @@ from dimensional_sim.core import new_demo_game
 from dimensional_sim.world import autopilot as ap
 from dimensional_sim.world.autopilot import Expedition
 from dimensional_sim.world.browser_server import MANUAL_HOLD, BrowserSession
-from dimensional_sim.world.encounters import (
-    BY_ID, DARK_FOREST, ITEMS, ItemDef, Loot, chunk_spots, roll_loot, validate_pools)
-from dimensional_sim.world.models import DELTAS, ChunkKey, DimensionSpec
+from dimensional_sim.world.catalog import BY_ID, ITEMS, ItemDef, Loot
+from dimensional_sim.world.encounters import DARK_FOREST, chunk_spots, roll_loot, validate_pools
+from dimensional_sim.world.catalog import REGIONS, UNLOCKS
+from dimensional_sim.world.models import DELTAS, DIRECTIONS, ChunkKey, DimensionSpec
 from dimensional_sim.world.open_terrain import open_assets
 from dimensional_sim.world.progression import attribute_report, scaled_ms, speed_permille
 from dimensional_sim.world.repository import WorldRepository
@@ -46,8 +47,8 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(locations <= set(BY_ID))
         self.assertEqual(len({BY_ID[i].name for i in locations}), len(locations))
         w = world()
-        everything = frozenset(ap.UNLOCKS)
-        rolled = {spot.encounter for y in range(-5, 6) for x in range(-5, 6) for region in ap.REGION_IDS
+        everything = frozenset(UNLOCKS)
+        rolled = {spot.encounter for y in range(-5, 6) for x in range(-5, 6) for region in tuple(REGIONS)
                   for spot in chunk_spots(w.get(ChunkKey("forest", x, y)), unlocked=everything, region=region)}
         self.assertTrue(locations <= rolled, "every location appears once its unlock is owned")
         locked = {spot.encounter for y in range(-5, 6) for x in range(-5, 6)
@@ -234,53 +235,6 @@ class LifeTests(unittest.TestCase):
         session.input(body, now=2)  # a retried whole-stack offer cannot duplicate dust
         self.assertEqual(e.dust, 2)
 
-    def test_v3_save_migrates_to_new_location_pool(self):
-        e = expedition()
-        e.advance(40_000)
-        old = json.loads(dump(e))
-        for key in (*ap.Expedition.V8_FIELDS, *ap.Expedition.V9_FIELDS):
-            old.pop(key)
-        for key in ("dust", "anchor_ms", "anchor_wait", "monster_ms", "prayers_this_life", "ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal"):
-            del old[key]
-        for entry in old["log"]:
-            entry["type"] = "encounter" if entry["type"] not in ap.LOG_TYPES[:8] else entry["type"]
-        old.update(schema_version=3, encounters="encounters-v3")
-        migrated = Expedition.from_dict(old)
-        self.assertEqual((migrated.regular, migrated.dimensional), (e.regular, e.dimensional))
-        self.assertEqual((migrated.life, migrated.dust), (e.life, 0))
-        self.assertEqual(migrated.to_dict()["encounters"], ap.ENCOUNTER_VERSION)
-
-    def test_v4_save_keeps_progress_when_shrines_become_active_prayer(self):
-        e = expedition()
-        e.advance(40_000)
-        old = json.loads(dump(e))
-        for key in (*ap.Expedition.V8_FIELDS, *ap.Expedition.V9_FIELDS):
-            old.pop(key)
-        for key in ("monster_ms", "prayers_this_life", "ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal"):
-            old.pop(key)
-        old.update(schema_version=4, encounters="encounters-v4", task=None, goal=None, blessing=23)
-        migrated = Expedition.from_dict(old)
-        self.assertEqual((migrated.regular, migrated.dimensional, migrated.blessing),
-                         (e.regular, e.dimensional, 23))
-        self.assertEqual(migrated.to_dict()["encounters"], ap.ENCOUNTER_VERSION)
-
-    def test_v5_save_upgrades_keeping_meta_and_vitals(self):
-        e = skip_prologue(expedition())
-        e.advance(40_000)
-        e.dust, e.blessing = 9, 4
-        old = json.loads(dump(e))
-        for key in (*ap.Expedition.V8_FIELDS, *ap.Expedition.V9_FIELDS):
-            old.pop(key)
-        for key in ("ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal"):
-            old.pop(key)
-        old.update(schema_version=5, encounters="encounters-v5")
-        migrated = Expedition.from_dict(old)
-        self.assertEqual((migrated.dust, migrated.blessing, migrated.hunger, migrated.inventory),
-                         (9, 4, e.hunger, e.inventory))
-        self.assertEqual((migrated.ash, migrated.unlocked), (0, set()))
-        migrated.advance(20_000)
-        self.assertEqual(dump(Expedition.from_dict(json.loads(dump(migrated)))), dump(migrated))
-
     def test_bulk_ticks_slices_and_reload_identical_across_a_death(self):
         T = 360000
         bulk, ticks, odd = expedition(), expedition(), expedition()
@@ -324,15 +278,14 @@ class LifeTests(unittest.TestCase):
         self.assertEqual(e._player(), e.anchor)
         self.assertEqual([entry["type"] for entry in e.log[-2:]], ["life", "rebirth"])
 
-    def test_saves_migrate_v1_and_reject_malformed(self):
+    def test_saves_before_schema_6_are_rejected_and_malformed_saves_too(self):
         e = expedition()
         e.advance(5000)
-        v1 = {"schema_version": 1, "encounters": "encounters-v1", "exploration": e.game.to_dict(),
-              "completed": [], "xp": {a: 7 for a in e.regular}, "log": [], "sequence": 0,
-              "decisions": 3, "skills": [], "task": None, "goal": None}
-        migrated = Expedition.from_dict(json.loads(canonical_json(v1)))
-        self.assertEqual(set(migrated.regular.values()), {70})
-        self.assertEqual(migrated.life, 1)
+        for schema in range(1, ap.OLDEST_SUPPORTED_SCHEMA):
+            old = json.loads(dump(e))
+            old.update(schema_version=schema, encounters=f"encounters-v{schema}")
+            with self.assertRaisesRegex(ValueError, "too old"):
+                Expedition.from_dict(old)
         for mutate in (lambda d: d.update(schema_version=99), lambda d: d.update(encounters="v0"),
                        lambda d: d.update(ash=-1), lambda d: d.update(unlocked=["flying"]),
                        lambda d: d.update(mastery={"think": 1}), lambda d: d.update(boon="wealth"),
@@ -495,7 +448,7 @@ class PrayerTests(unittest.TestCase):
         e._after_location(prayed, True)
         self.assertEqual(e.task["type"], "pray")
         self.assertEqual(e.blessing, 0, "prayer pays only after its full duration")
-        e.advance(ap.PRAYER_MS - 1)
+        e.advance(BY_ID["pray"].duration_ms - 1)
         self.assertEqual(e.blessing, 0)
         e.advance(1)
         self.assertEqual(e.blessing, 1)
@@ -524,33 +477,12 @@ class PrayerTests(unittest.TestCase):
         self.assertTrue(any(line.startswith("Forest bounty") for line in e.report["lines"]))
         self.assertEqual(Expedition.from_dict(json.loads(dump(e))).blessing, e.blessing)
 
-    def test_v2_saves_upgrade_without_the_prologue(self):
-        e = skip_prologue(expedition())
-        e.advance(60000)
-        data = json.loads(dump(e))
-        for key in (*ap.Expedition.V8_FIELDS, *ap.Expedition.V9_FIELDS):
-            data.pop(key)
-        for key in ("blessing", "budget", "spawned", "admitted", "screened_chunks", "screened_targets",
-                    "dust", "anchor_ms", "anchor_wait", "monster_ms", "prayers_this_life", "ash", "unlocked", "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal"):
-            del data[key]
-        for entry in data["log"]:
-            del entry["blessing"]
-        data["log"] = [entry for entry in data["log"] if entry["type"] in ("encounter", "eat", "rest", "life")]
-        data.update(schema_version=2, encounters="encounters-v2", task=None)
-        upgraded = Expedition.from_dict(data)
-        self.assertFalse(upgraded.in_prologue)
-        self.assertEqual((upgraded.regular, upgraded.inventory), (e.regular, e.inventory))
-        self.assertFalse(any(i.startswith("enc:") for i in upgraded.completed))
-        upgraded.advance(30000)
-        self.assertEqual(Expedition.from_dict(json.loads(dump(upgraded))).to_dict(), upgraded.to_dict())
-
 
 class PursuitTests(unittest.TestCase):
     def _boar_at(self, e, offset, ident="enc:forest:0:0:99"):
         """Place a live, admitted boar `offset` walkable steps from the avatar (far from camp)."""
         px, py = e._player()
         e.anchor = (px + 40, py)   # the camp is elsewhere: boars may chase here
-        grid = e._grid()
         field = e._field({(px, py)})
         cell = min((c for c, d in field.items() if d == offset), key=lambda c: (c[1], c[0]))
         w, h = e._dims()
@@ -681,7 +613,7 @@ class PathfindingSpeedTests(unittest.TestCase):
                 queue.append(g)
         while queue:
             x, y = queue.popleft()
-            for direction in ap.DIRECTIONS:
+            for direction in DIRECTIONS:
                 dx, dy = DELTAS[direction]
                 px, py = x - dx, y - dy
                 if (px, py) in dist or (px, py) in blocked:

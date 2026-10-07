@@ -35,7 +35,7 @@ than movement cells. Cached text terrain redraws independently of actor animatio
 
 ## Frozen browser transport
 GET /api/state returns the same frame as POST /api/input. POST JSON:
-{move:null|north|east|south|west, attack:boolean, paused:boolean, known:string[]}.
+{move:null|north|east|south|west|northeast|southeast|southwest|northwest, attack:boolean, paused:boolean, known:string[]}.
 known contains chunk IDs already cached by client (max25). Unknown fields rejected.
 Frame: {world_seed:string, clock_ms:int, movement_interval_ms:int,
 player:{x:int,y:int,facing:string,animation:string,animation_ms:int,active:boolean},
@@ -46,12 +46,26 @@ minimap:[{x:int,y:int,status:unknown|generated|visited,biome:string|null}],
 chunk_width:int,chunk_height:int,paused:boolean}.
 Player/target/effect x,y are GLOBAL movement-cell coordinates. Chunk x,y are chunk
 coordinates; IDs dimension:x:y. Chunk seed is a deterministic uint32 VISUAL seed;
-world seed stays a string to avoid JS precision loss. tiles use '=' path, '.' floor,
+world seed stays a string to avoid JS precision loss. tiles use '=' path, '.' floor, 'w' river (blocked), '%' ford, 'H' bridge, '*' flowers,
 'T' tree, '^' rock, ';' grass. collision uses '1'/'0'. Frontend MUST use collision
 for readout/tests and never compute gameplay from glyphs. Missing chunks returned
 only; GET state returns all resident chunks. Input is held, attack rising-edge.
 Sprites and colors live in browser/art.js; view math in browser/view.js; app.js
-owns transport/input/camera/rendering; no generation inside animation/minimap.
+owns state, polling, input wiring and the render loop; no generation inside animation/minimap.
+
+Module map (2026-10-07):
+- app.js: snapshot adoption, poll loop, camera/render loop, input and page wiring.
+- transport.js: local HTTP or the hosted worker transport (window.DIMSUM_TRANSPORT).
+- dom.js: $, el(), crash-proof localStorage helpers.
+- view.js: camera, tiles, input Controls. art.js: terrain stamps and chunk painting.
+- actors.js: re-exports sprites.js (roles, cell sprites, shadows, depth helpers),
+  player_art.js (pixel avatar, poses, fists), combat_art.js (boars, hits, punch marks),
+  place_art.js (spots, camp, ambush site, the old man).
+- hud.js: side panels and reports. pages.js: page models; page_ui.js renders them.
+- anchor_ui.js: the anchor panel and its actions. minimap.js. scene_fx.js: region tint,
+  prologue eyelids, vignette. world_ui.js: region cues, skill slots, control mode.
+The legacy ASCII-cell player sprite and its layered equipment overlay were removed; the
+pixel player is the only avatar art (pixel-tier equipment overlays are still to come).
 
 ## Definition of Done
 B-D1: Existing 143 tests pass and old room asset canonical data stays unchanged.
@@ -109,3 +123,11 @@ world-autopilot.md for the additive transport contract.
 continuous hold, and sub-poll taps never reached the server). Browser sessions
 now step on press (Exploration.step_on_press) and the client queues taps. 154
 unittest + 14 node tests; 6 headless taps of 30/80ms = 6 steps; holds unchanged.
+2026-10-06 diagonal movement + organic regions: the stick maps to 8 sectors and
+held keys combine (newest + older perpendicular, e.g. W+D = northeast). A diagonal
+step takes 141% of the movement interval, needs both half-steps open (no corner
+cutting) and otherwise slides along the open axis; facing stays cardinal. Chunk
+frames carry `tint_rows` (one letter per tile) + `tint_legend` so the region wash
+follows the per-tile region field (generator v3) instead of whole chunks. Moving in
+Active control abandons a running task; before this, every 50ms input poll during
+a task was a fresh press edge and stepped for free (~2x walking speed).

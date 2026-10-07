@@ -14,7 +14,7 @@ from .models import (
     ChunkKey, DimensionSpec, asset_from_dict, asset_to_dict, fields, integer,
 )
 
-WORLD_SCHEMA_VERSION = 3
+WORLD_SCHEMA_VERSION = 5   # 5: generator v4 (rivers); 4: generator v3 (organic region borders); 1-4 still load
 MAX_MAP_RADIUS = 32
 
 
@@ -41,7 +41,7 @@ class WorldRepository:
     """
 
     def __init__(self, world_seed=1, dimensions=None, assets=None, cache_limit=9,
-                 generator_version=GENERATOR_VERSION, region_catalog=None, region_version=2):
+                 generator_version=GENERATOR_VERSION, region_catalog=None, region_version=None):
         integer(cache_limit, "cache limit", 1, 4096)
         self._world_seed = integer(world_seed, "world seed", 0, 2**64 - 1)
         self._dimensions = validated_dimensions(
@@ -101,10 +101,22 @@ class WorldRepository:
 
     def region_for(self, key):
         """Read this world's pinned region without generating or residing a chunk."""
-        from .regions import region_for
-        biome = self.biome_for(key)
-        return region_for(self.world_seed, biome, key, self._generator.region_catalog,
-                          version=self.region_version)
+        return self._generator.chunk_region(key)
+
+    def region_grid(self, key):
+        """Generator v3: per-tile regions of one chunk (None for older generators)."""
+        if self.generator_version < 3:
+            return None
+        spec = next(s for s in self.dimensions if s.id == key.dimension)
+        return self._generator.region_field(self.biome_for(key), spec).grid(key)
+
+    def region_at(self, gx, gy, dimension):
+        """Region of one global tile (generator v3: organic borders; older: its chunk's)."""
+        spec = next(s for s in self.dimensions if s.id == dimension)
+        key = ChunkKey(dimension, gx // spec.width, gy // spec.height)
+        if self.generator_version >= 3:
+            return self._generator.region_field(self.biome_for(key), spec).at(gx, gy)
+        return self.region_for(key)
 
     def _key(self, key):
         self._generator._spec(key)
@@ -178,7 +190,7 @@ class WorldRepository:
 
     def to_dict(self):
         data = {
-            "schema_version": 1 if self.generator_version == 1 else WORLD_SCHEMA_VERSION,
+            "schema_version": {1: 1, 2: 3, 3: 4}.get(self.generator_version, WORLD_SCHEMA_VERSION),
             "generator_version": self.generator_version,
             "world_seed": self.world_seed,
             "cache_limit": self.cache_limit,
@@ -205,7 +217,7 @@ class WorldRepository:
         if type(data) is not dict or type(data.get("schema_version")) is not int:
             raise ValueError("unsupported world schema")
         schema = data["schema_version"]
-        if schema not in (1, 2, WORLD_SCHEMA_VERSION):
+        if schema not in (1, 2, 3, 4, WORLD_SCHEMA_VERSION):
             raise ValueError("unsupported world schema")
         required = ("schema_version", "generator_version", "world_seed", "cache_limit",
                     "dimensions", "catalog", "catalog_digest", "discovery")
@@ -216,7 +228,7 @@ class WorldRepository:
         fields(data, required)
         if (type(data["generator_version"]) is not int or
                 data["generator_version"] not in SUPPORTED_GENERATOR_VERSIONS or
-                data["generator_version"] != (1 if schema == 1 else 2)):
+                data["generator_version"] != {1: 1, 2: 2, 3: 2, 4: 3, 5: 4}[schema]):
             raise ValueError("unsupported generator version")
         if any(type(data[name]) is not list for name in ("dimensions", "catalog", "discovery")):
             raise ValueError("world collections must be arrays")
@@ -243,7 +255,7 @@ class WorldRepository:
                 raise ValueError("duplicate pinned region")
         result = cls(data["world_seed"], tuple(dimensions), catalog, data["cache_limit"],
                      generator_version=data["generator_version"], region_catalog=region_catalog,
-                     region_version=integer(data["region_version"], "region version", 2, 2)
+                     region_version=integer(data["region_version"], "region version", 2, 3)
                      if schema >= 3 else 1)
         if data["catalog_digest"] != result.catalog_digest:
             raise ValueError("world catalog digest mismatch")

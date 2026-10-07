@@ -15,17 +15,12 @@ from .assets import parse_json
 from .models import integer
 # Re-exported: the session logic lives in session.py so the hosted build can reuse it.
 from .session import (INPUT_LEASE, LOG_ENTRIES, MANUAL_HOLD, TICK_MS,  # noqa: F401
-                      BrowserSession as _BaseSession, chunk_id, snapshot, validate_input)
-STATIC = {"/": ("index.html", "text/html"),
-          "/style.css": ("style.css", "text/css"),
-          "/app.js": ("app.js", "text/javascript"),
-          "/art.js": ("art.js", "text/javascript"),
-          "/actors.js": ("actors.js", "text/javascript"),
-          "/hud.js": ("hud.js", "text/javascript"),
-          "/world_ui.js": ("world_ui.js", "text/javascript"),
-          "/pages.js": ("pages.js", "text/javascript"),
-          "/view.js": ("view.js", "text/javascript")}
-
+                      BrowserSession as _BaseSession, snapshot, validate_input)
+CLIENT_MODULES = ("app.js", "art.js", "actors.js", "sprites.js", "player_art.js", "combat_art.js", "place_art.js",
+                  "hud.js", "world_ui.js", "pages.js", "page_ui.js", "anchor_ui.js", "minimap.js", "scene_fx.js",
+                  "dom.js", "transport.js", "view.js")
+STATIC = {"/": ("index.html", "text/html"), "/style.css": ("style.css", "text/css"),
+          **{f"/{name}": (name, "text/javascript") for name in CLIENT_MODULES}}
 
 
 class BrowserSession(_BaseSession):

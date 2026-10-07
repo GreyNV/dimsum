@@ -4,7 +4,7 @@ Current as of the 2026-10-06 region/discovery iteration. The per-action inventor
 led here are in [ACTION_ARCHITECTURE_AUDIT.md](ACTION_ARCHITECTURE_AUDIT.md).
 
 **Owner:** `world/catalog.py` (data), `world/actions.py` (pure rules), `world/encounters.py` (placement),
-`world/autopilot.py` (execution, persistence). Generators and the auto-pilot never test action ids; every
+`world/autopilot/` (execution in `expedition.py`/`spawning.py`/`outcomes.py`, persistence in `saves.py`). Generators and the auto-pilot never test action ids; every
 content rule is a field on an `ActionDef`, `RegionDef`, `OutcomeDef` or `Requirement`.
 
 ## The rule
@@ -25,7 +25,7 @@ BIOME (dark_forest)
   -> JOURNAL / MASTERY    disabled (mastery 2+) removes it; favor/suppress (3+) x1.5 / x0.5
   -> BUCKET               positive effective weight                               actions.bucket()
   -> ROLL / SPAWN         first entry: 0-3 spots from current bucket, seeded by life + entry order + chunk
-  -> SCREENING            spawn windows (at-once caps) and pity                    autopilot._screen
+  -> SCREENING            spawn windows (at-once caps) and pity        autopilot/spawning.py _screen
   -> CONTEXT              ingredients, hunger, carried food, live play, once per life, live lead token
   -> AVAILABLE ACTION     the auto-pilot walks there / starts it
   -> OUTCOME              loot, XP, heal, blessing, gear (equipped), knowledge, recipe, temporary lead

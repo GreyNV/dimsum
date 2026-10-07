@@ -183,7 +183,8 @@ class LifecycleStateTests(unittest.TestCase):
     def test_inspect_explains_region_generation_and_every_spot_state(self):
         from dimensional_sim.world.simulate import inspect_chunk, region_map
         report = inspect_chunk(1, 3, 0)
-        self.assertEqual(report["generator_version"], 2)
+        from dimensional_sim.world.generation import GENERATOR_VERSION
+        self.assertEqual(report["generator_version"], GENERATOR_VERSION)
         self.assertIn(report["region"], REGIONS)
         self.assertEqual(set(report["region_parameters"]) >= {"canopy", "brush", "landmark"}, True)
         self.assertIn("blocked_percent", report["terrain"])
