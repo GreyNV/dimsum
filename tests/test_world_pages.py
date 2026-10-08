@@ -138,6 +138,14 @@ class UpgradeAndRebuildTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Expedition.from_dict({**v8, "encounters": "encounters-v6"})
 
+    def test_web_rebuild_accepts_any_uint32_and_negative_seeds(self):
+        for seed in (0, 2**31, 2**32 - 1, -1594716262):   # the last one is what `x | 0` sent
+            game = WebGame(seed=5)
+            game.advance(10_000, 1.0)
+            summary = json.loads(game.rebuild(seed))
+            self.assertEqual(summary["life"], 2)
+            self.assertEqual(int(game.world_seed()), seed % 2**32 if seed < 0 else seed)
+
     def test_rebuilt_world_keeps_meta_and_changes_seed(self):
         e = played(60_000)
         e.dust, e.ash, e.blessing = 7, 3, 2

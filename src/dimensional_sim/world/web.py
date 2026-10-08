@@ -61,7 +61,13 @@ class WebGame:
 
     def rebuild(self, seed):
         """New world from `seed`, keeping everything that persists across lives."""
-        expedition = Expedition.rebuilt(self.expedition, Exploration(new_world(int(seed)), "forest"))
+        # Older workers signed the random uint32 with `| 0`; recover its original value.
+        seed = int(seed)
+        if -(2**31) <= seed < 0:
+            seed %= 2**32
+        else:
+            seed %= 2**64
+        expedition = Expedition.rebuilt(self.expedition, Exploration(new_world(seed), "forest"))
         paused = self.session.paused
         self.expedition = expedition
         self.session = BrowserSession(expedition.game, expedition, start_paused=paused)

@@ -102,7 +102,7 @@ const handlers = {
   input: ({body}) => game.input(JSON.stringify(body), now()),
   save: () => game.save(),
   // New world, same soul: keeps dimensional XP, currencies, unlocks, mastery and journal.
-  rebuild: ({seed}) => { owed = 0; return game.rebuild(seed | 0); },
+  rebuild: ({seed}) => { owed = 0; return game.rebuild(seed >>> 0); },   // unsigned: `| 0` made half of all seeds negative
 };
 
 onmessage = async ({data}) => {
