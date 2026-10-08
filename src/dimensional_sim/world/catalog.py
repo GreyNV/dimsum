@@ -23,13 +23,13 @@ EQUIPMENT_SLOTS = ("weapon", "body")
 
 @dataclass(frozen=True)
 class ItemDef:
-    """Current-life inventory item. `dust` is its anchor offering value per unit."""
+    """Current-life inventory item. `ash_value` is its prestige value per unit."""
     id: str
     name: str
     kind: str
     food: int = 0       # hunger points restored when eaten
     glyph: str = "*"
-    dust: int = 1       # dimensional dust per unit when offered at the anchor
+    ash_value: int = 1  # dimensional ash before duplicate-resource diminishing returns
     slot: str | None = None   # gear occupies an explicit equipment slot
 
     def __post_init__(self):
@@ -37,7 +37,7 @@ class ItemDef:
         if self.kind not in ITEM_KINDS or not isinstance(self.name, str) or not 1 <= len(self.name) <= 40:
             raise ValueError("invalid item kind/name")
         integer(self.food, "food value", 0, 100)
-        integer(self.dust, "dust value", 0, 100)
+        integer(self.ash_value, "ash value", 0, 100)
         if (self.kind == "food") != (self.food > 0):
             raise ValueError("food, and only food, restores hunger")
         if (self.kind == "gear") != (self.slot in EQUIPMENT_SLOTS):
@@ -47,18 +47,18 @@ class ItemDef:
 
 
 ITEMS = {item.id: item for item in (
-    ItemDef("wild_berries", "Wild berries", "food", 12, "o", dust=1),
-    ItemDef("bird_egg", "Bird egg", "food", 20, "0", dust=2),
-    ItemDef("boar_meat", "Boar meat", "food", 35, "%", dust=3),
-    ItemDef("venison", "Venison", "food", 28, "v", dust=3),
-    ItemDef("pale_mushroom", "Pale mushroom", "food", 15, "n", dust=2),
-    ItemDef("snared_hare", "Snared hare", "food", 30, "&", dust=3),
-    ItemDef("stick", "Stick", "material", glyph="/", dust=1),
-    ItemDef("bramble_thorn", "Bramble thorn", "material", glyph="^", dust=2),
-    ItemDef("boar_hide", "Boar hide", "material", glyph="#", dust=4),
-    # Gear is worth less than its inputs: crafting spends dust you could have offered.
-    ItemDef("walking_staff", "Walking staff", "gear", glyph="|", dust=2, slot="weapon"),
-    ItemDef("hide_wrap", "Hide wrap", "gear", glyph="]", dust=6, slot="body"),
+    ItemDef("wild_berries", "Wild berries", "food", 12, "o", ash_value=1),
+    ItemDef("bird_egg", "Bird egg", "food", 20, "0", ash_value=2),
+    ItemDef("boar_meat", "Boar meat", "food", 35, "%", ash_value=3),
+    ItemDef("venison", "Venison", "food", 28, "v", ash_value=3),
+    ItemDef("pale_mushroom", "Pale mushroom", "food", 15, "n", ash_value=2),
+    ItemDef("snared_hare", "Snared hare", "food", 30, "&", ash_value=3),
+    ItemDef("stick", "Stick", "material", glyph="/", ash_value=1),
+    ItemDef("bramble_thorn", "Bramble thorn", "material", glyph="^", ash_value=2),
+    ItemDef("boar_hide", "Boar hide", "material", glyph="#", ash_value=4),
+    # Gear is worth less than its inputs: crafting spends resources you could carry home.
+    ItemDef("walking_staff", "Walking staff", "gear", glyph="|", ash_value=2, slot="weapon"),
+    ItemDef("hide_wrap", "Hide wrap", "gear", glyph="]", ash_value=6, slot="body"),
 )}
 
 
@@ -278,7 +278,7 @@ ACTIONS = (
               "A territorial boar that charges anything nearby. Meat and hide.",
               "Drove off a bramble boar with your bare fists.", window=(1, 2), hp=3,
               loot=(L("boar_meat", 1, 1), L("boar_hide", 1, 1, 60)), roles=("base", "combat")),
-    # --- unlocked with dimensional dust ---------------------------------------
+    # --- unlocked with dimensional ash ----------------------------------------
     ActionDef("gnarled_tree", "Gnarled tree", "climb", "spot", "agility", 60, 3200, 10,
               "Climb for bird eggs and a look over the canopy.", "Climbed a gnarled tree and scouted the canopy.",
               unlock="climbing", near="T", window=(1, 1),
@@ -348,7 +348,7 @@ BY_ID = {action.id: action for action in ACTIONS}
 
 
 # ----- unlocks, boons, mastery ---------------------------------------------------
-CURRENCIES = ("dust", "ash", "blessing")
+CURRENCIES = ("ash", "blessing")
 
 
 @dataclass(frozen=True)
@@ -369,13 +369,14 @@ class UnlockDef:
 
 
 UNLOCKS = {u.id: u for u in (
-    UnlockDef("climbing", "Climbing", "Gnarled trees appear: bird eggs and sticks.", "dust", 15),
-    UnlockDef("scavenging", "Scavenging", "Abandoned camps appear: thorns, sticks and old hide.", "dust", 20),
-    UnlockDef("snares", "Snares", "Craft a bramble snare (2 sticks, 1 thorn) when hungry: usually a hare.", "dust", 25),
-    UnlockDef("meditation", "Meditation", "Mossy stones and moonlit pools appear.", "dust", 30),
-    UnlockDef("mushroom_lore", "Mushroom lore", "Mushroom rings become food.", "dust", 45, ("climbing",)),
-    UnlockDef("hide_working", "Hide working", "Craft a hide wrap (2 hides): boar hits hurt 30% less.", "dust", 50),
-    UnlockDef("road_lore", "Road lore", "Old carvings and watchtowers appear: Intelligence XP.", "dust", 70,
+    UnlockDef("return_anchor", "Return to anchor", "End this life by choice; available every 5 minutes.", "ash", 10),
+    UnlockDef("climbing", "Climbing", "Gnarled trees appear: bird eggs and sticks.", "ash", 15),
+    UnlockDef("scavenging", "Scavenging", "Abandoned camps appear: thorns, sticks and old hide.", "ash", 20),
+    UnlockDef("snares", "Snares", "Craft a bramble snare (2 sticks, 1 thorn) when hungry: usually a hare.", "ash", 25),
+    UnlockDef("meditation", "Meditation", "Mossy stones and moonlit pools appear.", "ash", 30),
+    UnlockDef("mushroom_lore", "Mushroom lore", "Mushroom rings become food.", "ash", 45, ("climbing",)),
+    UnlockDef("hide_working", "Hide working", "Craft a hide wrap (2 hides): boar hits hurt 30% less.", "ash", 50),
+    UnlockDef("road_lore", "Road lore", "Old carvings and watchtowers appear: Intelligence XP.", "ash", 70,
               ("meditation",)),
     UnlockDef("shrine_path", "Shrine path", "Wayside shrines appear on the old road: one prayer per shrine.",
               "blessing", 3),
@@ -400,17 +401,17 @@ BOONS = {b.id: b for b in (
     BoonDef("iron_skin", "Iron skin", "Next life: boar hits hurt 25% less.", 2),
 )}
 
-# Ash buys mastery: each level widens one action's spawn window (encounters.spawn_window).
+# Completing the same encounter earns mastery at tenfold lifetime milestones.
 MASTERY_MAX = 3
-JOURNAL_TOGGLE_MASTERY = 2
-JOURNAL_FAVOR_MASTERY = 3
+MASTERY_THRESHOLDS = (10, 100, 1000)
+JOURNAL_FAVOR_MASTERY = 2
+JOURNAL_GUARANTEE_MASTERY = 3
 JOURNAL_FAVOR_PERCENT = 150
 JOURNAL_SUPPRESS_PERCENT = 50
 
 
-def mastery_cost(level):
-    """Ash to raise mastery from `level` to `level + 1`."""
-    return 3 * (level + 1)
+def mastery_level(completions):
+    return sum(completions >= threshold for threshold in MASTERY_THRESHOLDS)
 
 
 # ----- regions ---------------------------------------------------------------------
@@ -507,7 +508,7 @@ def validate_catalog():
         for required in unlock.requires:
             if required not in UNLOCKS or required == unlock.id:
                 raise ValueError(f"unlock {unlock.id} requires unknown {required}")
-        if not any(a.unlock == unlock.id for a in ACTIONS):
+        if unlock.id != "return_anchor" and not any(a.unlock == unlock.id for a in ACTIONS):
             raise ValueError(f"unlock {unlock.id} opens no action")
     if ORIGIN_REGION not in REGIONS:
         raise ValueError("origin region missing")

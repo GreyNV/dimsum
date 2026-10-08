@@ -1,3 +1,12 @@
+> Current rules (schema 10): all carried resources convert to dimensional ash at return.
+> The first five lifetime copies of each item yield full value, later copies half value;
+> converted counts persist across lives. First death pauses for anchor dialogue.
+> The first shop skill, manual return, costs 10 ash and has a five-minute cooldown.
+> Spot mastery is earned at 10/100/1000 completions: grade 1 reveals the Journal
+> location and current-run chance, grade 2 changes odds, grade 3 places one extra
+> guaranteed encounter in the chosen eligible region each life.
+> Encounter rolls use `encounters-v9`; schema-9 saves reroll this life's spots when upgraded.
+>
 > Historical implementation notes below. As of 2026-10-06, Auto and Active both run through
 > `Expedition`; Active is available directly from the World screen and remains active until the
 > player selects Auto. On first chunk entry, the current bucket rolls and saves spot plans

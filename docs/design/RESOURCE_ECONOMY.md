@@ -1,10 +1,10 @@
 # Resource economy
 
 Every resource has a source, at least one in-run use and a death-time conversion. Values: `catalog.ITEMS`
-(`dust`), rules: `world/economy.py`, numbers: `world/tuning.py`.
+(`ash_value`), rules: `world/economy.py`, numbers: `world/tuning.py`.
 
 ## Items
-| Item | Source | In-run sink | Dust each | Notes |
+| Item | Source | In-run sink | Ash each before diminishing | Notes |
 |---|---|---|---|---|
 | Wild berries | bramble berries | eat (+12) | 1 | |
 | Bird egg | gnarled tree (unlock) | eat (+20) | 2 | |
@@ -21,18 +21,17 @@ Every resource has a source, at least one in-run use and a death-time conversion
 ## Currencies
 | Currency | Source | Sink | Timing | Purpose |
 |---|---|---|---|---|
-| Dimensional dust | offering stacks at the anchor; first 5 units full value, rest half | unlocks (new actions) | between lives | widen possibility space |
-| Ash | rebirth burns every item still carried at 1/2 dust value + 1 per ring reached | spot mastery (wider windows where present; Journal toggle at level 2 and odds influence at level 3; 3/6/9 ash) | automatic at rebirth (works offline) | tune future rolls |
+| Dimensional ash | all carried items convert at return; first 5 lifetime copies of each item full value, later copies half value; +1 per ring reached | unlocks, starting with manual return (10) | automatic at return (works offline) | widen possibility space |
 | Blessing | prayer (rare random, or wayside shrines once unlocked) | shrine_path unlock (3) or a next-life boon (2) | between lives | favour from the gods |
 
 ## Decisions this creates
 - **Use or keep?** Eating and crafting keep the life going (more XP, depth, items); keeping maximises
-  dust/ash at death. Gear converts at a loss, so crafting is a real cost.
-- **Offer or burn?** Offering gives dust (unlocks, larger); burning gives ash (mastery, half value but
-  automatic and boosted by depth). An absent player still progresses through ash.
-- **Hoarding is not dominant:** diminishing offering past 5 units and the measured survival advantage of
+  ash at death. Gear converts at a loss, so crafting is a real cost.
+- **Convert or use?** All remaining inventory converts automatically at return; spending it during life can
+  extend survival and increase depth and XP.
+- **Hoarding is not dominant:** diminishing conversion past 5 lifetime copies and the measured survival advantage of
   crafting (BALANCING.md).
 
 ## Failure modes guarded by tests
-Refused purchases change nothing; duplicate offers cannot duplicate dust (stack is popped); a boon is one per
-life; mastery needs the action unlocked; currencies and unlocks survive saves.
+Refused purchases change nothing; a stack converts once at return; a boon is one per life; lifetime converted
+counts, currencies, unlocks and earned mastery survive saves.

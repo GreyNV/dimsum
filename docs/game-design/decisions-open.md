@@ -15,6 +15,5 @@ These are intentionally unresolved until the first prototype produces useful evi
 - What crafting and binding at the anchor camp consume and produce.
 - How world lives relate to idle lives (shared XP, vitality, shards, journal).
 - Blessing power (from prayer): what it buys, and whether gods differ.
-- Action mastery: how it is earned; it widens spawn windows (encounters.spawn_window).
 - Spawn window tuning: food is capped, but boars still cause every death in samples.
 - Bandit ambush: replace the placeholder memory lines with the original text from the earlier game.

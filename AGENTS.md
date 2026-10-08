@@ -32,7 +32,7 @@ core.py/content.py/balance.py: the Phase One idle sim, standalone; the world doe
 world/catalog.py: ALL forest content as validated data (items, actions, recipes/knowledge/lead outcomes, unlocks, boons, regions).
 world/equipment.py: current-life weapon/body slots. Leads, knowledge and Journal roll controls live in autopilot state.
 world/actions.py: action bucket (known -> eligible -> weighted) and explain(); regions.py: chunk regions.
-world/economy.py: dust/ash/blessing rules and anchor purchases; tuning.py: balance numbers.
+world/economy.py: dimensional ash/blessing rules and anchor purchases; tuning.py: balance numbers.
 world/simulate.py: `cli simulate` (seeded metrics), `cli inspect` (why a spot did/didn't appear, region provenance), `cli regions` (layout).
 Action pipeline + lifecycle states: docs/design/ACTION_SYSTEM.md; per-action audit: ACTION_ARCHITECTURE_AUDIT.md.
 Unlock/knowledge != always available: never add a permanent action button; extend buckets, outcomes or leads.

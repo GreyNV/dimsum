@@ -51,7 +51,7 @@ class DiscoveryTests(unittest.TestCase):
         self.assertFalse(bulk.leads)
         self.assertEqual(bulk.lead_history[-1]["status"], "expired")
 
-    def test_first_death_anchor_auto_rebirth_and_trade_pause(self):
+    def test_first_death_anchor_dialogue_and_automatic_ash(self):
         e = expedition()
         e.inventory = {"stick": 4}
         e.health, e.cause = 0, "starvation"
@@ -61,10 +61,9 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(e.anchor_ms, ANCHOR_COUNTDOWN_MS)
         saved = Expedition.from_dict(e.to_dict())
         saved.advance(ANCHOR_COUNTDOWN_MS)
-        self.assertEqual(saved.life, 2)
+        self.assertEqual(saved.life, 1)
+        self.assertEqual(saved.ash, 4)
         e.advance(5000)
-        e.anchor_action({"type": "trade", "item": "stick"})
-        self.assertEqual(e.dust, 4)
         self.assertTrue(e.anchor_wait)
         e.advance(ANCHOR_COUNTDOWN_MS)
         self.assertEqual(e.life, 1)
@@ -97,6 +96,7 @@ class WorldGeneratorUpgradeTests(unittest.TestCase):
         self.assertEqual(e.game.world.world_seed, 5)
         self.assertEqual(e._player(), e.anchor)
         self.assertIn("new shape", e.log[-1]["text"])
+        e.anchor_action({"type": "begin_life"})
         e.advance(ANCHOR_COUNTDOWN_MS + 30_000)
         self.assertEqual(e.life, 2)
         again = Expedition.from_dict(json.loads(canonical_json(e.to_dict())))
@@ -136,7 +136,7 @@ class CraftingProgressionTests(unittest.TestCase):
         e.health, e.cause = 0, "starvation"
         e.advance(0)
         self.assertEqual(e.leads, [], "a lead belongs to the life that found it")
-        e.advance(ANCHOR_COUNTDOWN_MS)   # carried items wait at the anchor, then the next life starts empty
+        e.anchor_action({"type": "begin_life"})
         self.assertEqual(e.life, 2)
         self.assertEqual((e.inventory, e.equipped, e.leads), ({}, {}, []))
         self.assertIn("deer_sign", e.knowledge)

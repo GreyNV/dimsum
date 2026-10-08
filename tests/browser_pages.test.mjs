@@ -8,7 +8,7 @@ const stat = name => ({name, level: 2, xp: 250, into: 40, next: 130, dim_level: 
 const detail = {
   character: {life: 3, depth: 2, best_depth: 5, frontier: 3, health: 80.5, hunger: 41, punch_damage: 2, gear: ['Walking staff'],
     boon: null, boon_next: 'Iron skin', boar_hit_at_frontier: 20.1, fight_cost_at_frontier: 40.2, hunger_per_minute: 30,
-    regen_per_minute: 12, rest_regen_per_minute: 60, inventory_slots: [3, 12], currencies: {dust: 4, ash: 2, blessing: 1}, unlocked: ['Climbing']},
+    regen_per_minute: 12, rest_regen_per_minute: 60, inventory_slots: [3, 12], currencies: {ash: 2, blessing: 1}, unlocked: ['Climbing']},
   stats: ['strength', 'endurance', 'agility', 'intelligence', 'perception', 'willpower'].map(stat),
   multipliers: {actions: [{id: 'bramble_berries', name: 'Bramble berries', attribute: 'perception', speed: 1410, base_ms: 2400, effective_ms: 1703}],
     hunger_drain: 0.909, boar_hit: [['Endurance', 0.909], ['Hide wrap', 0.7]], punch_damage: 2, punch_parts: [['Base', 1], ['Strength levels', 1]]},

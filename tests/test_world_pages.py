@@ -84,7 +84,7 @@ class DetailTests(unittest.TestCase):
         self.assertEqual(set(d["rolls"]), {"life", "windows", "spots_per_chunk", "pity", "stats", "loot"})
         self.assertEqual(set(d["journal"]), {"actions", "items", "deaths", "best_life_min", "lives", "best_depth",
                                              "achievements", "knowledge", "recipes", "disabled", "favor",
-                                             "leads", "lead_history"})
+                                             "mastery", "leads", "lead_history"})
         self.assertTrue({"name", "level", "into", "next", "dim_level", "dim_into", "dim_next", "speed",
                          "speed_regular_only", "speed_dimensional_only", "life_gain", "xp"} <= set(d["stats"][0]))
 
@@ -109,8 +109,9 @@ class UpgradeAndRebuildTests(unittest.TestCase):
     def test_v6_save_upgrades_with_empty_journal(self):
         e = played(30_000)
         old = e.to_dict()
-        for key in (*saves.V7_FIELDS, *saves.V8_FIELDS, *saves.V9_FIELDS):
+        for key in (*saves.V7_FIELDS, *saves.V8_FIELDS, *saves.V9_FIELDS, *saves.V10_FIELDS):
             old.pop(key)
+        old["dust"] = 0
         old["schema_version"] = 6
         old["encounters"] = "encounters-v6"
         migrated = Expedition.from_dict(old)
@@ -121,7 +122,8 @@ class UpgradeAndRebuildTests(unittest.TestCase):
         e = played(90_000)
         e.unlocked.add("climbing")
         current = json.loads(canonical_json(e.to_dict()))
-        v8 = {k: v for k, v in current.items() if k != "spot_plans"}
+        v8 = {k: v for k, v in current.items() if k not in ("spot_plans", *saves.V10_FIELDS)}
+        v8["dust"] = 0
         v8.update(schema_version=8, encounters="encounters-v7")
         v7 = {k: v for k, v in v8.items() if k not in ("equipped", "knowledge", "recipes", "journal_disabled",
                                                        "journal_favor", "leads", "lead_history")}
@@ -148,11 +150,12 @@ class UpgradeAndRebuildTests(unittest.TestCase):
 
     def test_rebuilt_world_keeps_meta_and_changes_seed(self):
         e = played(60_000)
-        e.dust, e.ash, e.blessing = 7, 3, 2
+        e.ash, e.blessing = 10, 2
         e.unlocked.add("climbing")
         new = Expedition.rebuilt(e, Exploration(new_world(1234), "forest"))
         self.assertEqual(new.game.world.world_seed, 1234)
-        self.assertEqual((new.dust, new.ash, new.blessing), (7, 3, 2))
+        self.assertGreaterEqual(new.ash, 10)
+        self.assertEqual(new.blessing, 2)
         self.assertEqual(new.dimensional, e.dimensional)
         self.assertEqual(new.journal, e.journal)
         self.assertIn("climbing", new.unlocked)

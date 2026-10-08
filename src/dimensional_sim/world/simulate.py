@@ -9,16 +9,16 @@ USE:
   python -m dimensional_sim.world.cli inspect --seed 482910 --x 1 --y 0 --unlock climbing
   python -m dimensional_sim.world.cli regions --seed 482910 --radius 2
 Policies (anchor behaviour; the auto-pilot plays the lives):
-  spend - offer every stack, buy the cheapest available unlock, then a boon, then
-          mastery of the first food action with ash; crafting on.
-  hoard - same anchor buying, but never crafts (keeps materials for offering).
-  idle  - never acts at the anchor (an absent player): everything burns to ash.
+  spend - buy the cheapest available unlock, then a boon; crafting on.
+  hoard - same anchor buying, but never crafts (keeps materials for conversion).
+  idle  - never acts at the anchor (an absent player); resources still become ash.
 """
 from statistics import mean
 
 from .actions import Context, describe_bucket, explain
 from .autopilot import Expedition
-from .catalog import BY_ID, ITEMS, REGION_CELL, REGIONS
+from .catalog import BY_ID, REGION_CELL, REGIONS
+from . import economy
 from .encounters import chunk_spots
 from .models import ChunkKey
 from .regions import region_cell
@@ -27,22 +27,17 @@ from .seeds import derive_seed
 from .web import new_world
 
 POLICIES = ("spend", "hoard", "idle")
-FOOD_FIRST = ("bramble_berries", "bramble_boar", "mushroom_ring", "gnarled_tree")
 
 
 def anchor_policy(e, policy):
     """Spend at the anchor according to `policy`, then begin the next life."""
     if policy == "idle":
         return
-    for item in sorted(e.inventory):
-        e.anchor_action({"type": "trade", "item": item})
     while True:
         rows = [r for r in e.anchor_offers() if r["available"]]
         unlocks = sorted((r for r in rows if r["kind"] == "unlock"), key=lambda r: (r["cost"], r["id"]))
         boons = [r for r in rows if r["kind"] == "boon"]
-        mastery = sorted((r for r in rows if r["kind"] == "mastery"),
-                         key=lambda r: (FOOD_FIRST.index(r["id"]) if r["id"] in FOOD_FIRST else 9, r["id"]))
-        choice = (unlocks or boons or mastery or [None])[0]
+        choice = (unlocks or boons or [None])[0]
         if choice is None:
             break
         e.anchor_action({"type": choice["kind"], "id": choice["id"]})
@@ -73,13 +68,15 @@ def run(seed, minutes=30, policy="spend", step_ms=1000):
                           "cause": e.cause or "exhaustion", "depth": e.depth, **e.stats,
                           "regions_visited": len(visited), "leads": leads,
                           "staff": e.journal["actions"].get("craft_staff", 0) > staff_before,
-                          "carried_dust": sum(ITEMS[i].dust * n for i, n in e.inventory.items()),
+                          "converted_ash": economy.rebirth_ash(e.inventory, e.depth, e.converted),
                           "title": report["title"]})
             lead_log, staff_before = set(), e.journal["actions"].get("craft_staff", 0)
             anchor_policy(e, policy)
+            if policy == "idle" and e.anchor_wait:
+                break  # first return requires the anchor dialogue interaction
             start = e.total_ms if policy != "idle" else e.total_ms + e.anchor_ms
     return {"seed": seed, "policy": policy, "lives": lives,
-            "final": {"life": e.life, "dust": e.dust, "ash": e.ash, "blessing": e.blessing,
+            "final": {"life": e.life, "ash": e.ash, "blessing": e.blessing,
                       "unlocked": sorted(e.unlocked), "mastery": dict(e.mastery),
                       "dimensional_xp": sum(e.dimensional.values())}}
 
@@ -98,7 +95,7 @@ def summarize(results):
             "causes": causes,
             "per_life_mean": {k: round(mean(l[k] for l in lives), 2) for k in (
                 "depth", "chunks", "food_spots", "enemy_spots", "pity", "rejected", "completed",
-                "eaten", "crafted", "fights", "prayers", "carried_dust", "regions_visited")},
+                "eaten", "crafted", "fights", "prayers", "converted_ash", "regions_visited")},
             "lives_with_staff": sum(1 for l in lives if l["staff"]),
             "leads": {k: sum(l["leads"].get(k, 0) for l in lives) for k in sorted(
                 {k for l in lives for k in l["leads"]})},
@@ -107,8 +104,8 @@ def summarize(results):
             "lives_without_food_spot": sum(1 for l in lives if l["food_spots"] == 0),
             "lives_without_enemy": sum(1 for l in lives if l["enemy_spots"] == 0),
             "unlocks_mean": round(mean(len(r["final"]["unlocked"]) for r in results), 2),
-            "dust_ash_blessing_mean": [round(mean(r["final"][k] for r in results), 1)
-                                       for k in ("dust", "ash", "blessing")]}
+            "ash_blessing_mean": [round(mean(r["final"][k] for r in results), 1)
+                                  for k in ("ash", "blessing")]}
 
 
 def _terrain_profile(chunk):

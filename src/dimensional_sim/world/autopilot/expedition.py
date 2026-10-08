@@ -43,10 +43,13 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.decisions = 0
         self.best_depth = 0
         self.blessing = 0
-        self.dust = 0
         self.ash = 0
-        self.unlocked = set()      # UnlockDef ids bought with dust/blessing
-        self.mastery = {}          # action id -> mastery level bought with ash
+        self.converted = {}       # item id -> lifetime count converted into ash
+        self.unlocked = set()      # UnlockDef ids bought with ash/blessing
+        self.mastery = {}          # action id -> level earned from lifetime completions
+        self.journal_guarantee = None  # one selected mastered encounter, placed once per life
+        self.journal_guarantee_region = None
+        self.return_ready_ms = 0  # persistent cooldown deadline in simulation time
         self.knowledge = set()     # discoveries persist across lives
         self.recipes = set()       # learned recipes persist across lives
         self.journal_disabled = set()
@@ -90,6 +93,7 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.stats = {key: 0 for key in STAT_KEYS}
         self.drought = {category: 0 for category in PITY_CHUNKS}
         self.forced = {}   # chunk id -> [encounter id, ...] pity spots, in order
+        self.guarantee_used = False
         self._reset_spawns()
 
     # ----- public state -------------------------------------------------

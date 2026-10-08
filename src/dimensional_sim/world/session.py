@@ -8,8 +8,8 @@ import time
 
 from .animation import rotate
 from .autopilot import INVENTORY_SLOTS, Expedition
-from . import details, economy
-from .catalog import BOONS, UNLOCKS
+from . import details
+from .catalog import BOONS, UNLOCKS, REGIONS
 from .catalog import BY_ID
 from .models import ChunkKey, chunk_ident, integer
 from .progression import attribute_report
@@ -111,17 +111,20 @@ def _expedition_view(e, control, *, debug, detail):
             "equipped": dict(e.equipped),
             "inventory_slots": INVENTORY_SLOTS, "life": e.life, "total_ms": e.total_ms,
             "depth": e.depth, "best_depth": e.best_depth,
-            "dust": e.dust,
             "anchor_space": None if not in_anchor else {
                 "remaining_ms": e.anchor_ms, "waiting": e.anchor_wait,
-                "offer": {i: economy.offer_value(i, n) for i, n in e.inventory.items()},
-                "ash_if_burned": economy.rebirth_ash(e.inventory, e.depth)},
+                "first_return": e.life == 1},
             "punch_damage": e.punch_damage(), "report": e.report,
             "anchor": {"x": e.anchor[0], "y": e.anchor[1]},
             "skills": sorted(e.skills), "control": control,
             "attack_radius": UNARMED_REACH,
             "auto_target": unarmed_target[1] if unarmed_target else None,
-            "skill_slots": [{"name": "Empty", "state": "locked"} for _ in range(3)],
+            "skill_slots": [{"name": "Return to anchor", "state":
+                             "locked" if "return_anchor" not in e.unlocked else
+                             "disabled" if in_anchor or e.in_prologue else
+                             "cooldown" if e.total_ms < e.return_ready_ms else "ready",
+                             "remaining_ms": max(0, e.return_ready_ms - e.total_ms)},
+                            {"name": "Empty", "state": "locked"}, {"name": "Empty", "state": "locked"}],
             "prologue": e.prologue(),
             "region": _region_view(e),
             "meta": _meta_view(e),
@@ -135,14 +138,19 @@ def _expedition_view(e, control, *, debug, detail):
 
 def _meta_view(e):
     """Progress that survives death: currencies, unlocks, mastery, Journal controls, boons."""
-    return {"dust": e.dust, "ash": e.ash, "blessing": e.blessing,
+    return {"ash": e.ash, "blessing": e.blessing,
             "unlocked": [{"id": u, "name": UNLOCKS[u].name} for u in sorted(e.unlocked)],
             "mastery": dict(e.mastery),
             "knowledge": sorted(e.knowledge), "recipes": sorted(e.recipes),
             "journal": [{"id": ident, "name": BY_ID[ident].name, "mastery": level,
-                         "enabled": ident not in e.journal_disabled,
-                         "mode": e.journal_favor.get(ident, "normal")}
-                        for ident, level in sorted(e.mastery.items()) if level >= 2],
+                         "mode": e.journal_favor.get(ident, "normal"),
+                         "regions": [{"id": region.id, "name": region.name}
+                                     for region in REGIONS.values() if region.biome in BY_ID[ident].biomes
+                                     and (BY_ID[ident].regions is None or region.id in BY_ID[ident].regions)
+                                     and region.multiplier(ident) > 0]}
+                        for ident, level in sorted(e.mastery.items()) if level >= 1],
+            "journal_guarantee": e.journal_guarantee,
+            "journal_guarantee_region": e.journal_guarantee_region,
             "boon": None if e.boon is None else BOONS[e.boon].name,
             "boon_next": None if e.boon_next is None else BOONS[e.boon_next].name}
 

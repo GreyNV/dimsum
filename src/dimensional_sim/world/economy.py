@@ -1,32 +1,31 @@
-"""Currency rules: anchor offering, rebirth ash, and anchor purchases.
+"""Currency rules: automatic dimensional ash conversion and anchor purchases.
 
-    items --(offer at the anchor)--> dimensional dust --(unlock)--> new actions
-    items --(left unoffered, burned at rebirth)--> ash --(mastery)--> wider spawn windows
+    all carried items --(return to anchor)--> dimensional ash --(unlock)--> new actions
     prayer --> blessing --(shrine unlock | next-life boon)--> new spot / one-life favour
 
 WHAT: pure value rules and purchase validation over an object with the meta fields
-(dust, ash, blessing, unlocked, mastery, boon_next). WHY: one place answers "what
+(ash, blessing, unlocked, boon_next). WHY: one place answers "what
 is this worth" and "why can't I buy this". The auto-pilot applies the results.
-TESTS: tests/test_world_economy.py.
+TESTS: tests/test_world_closed_loop.py.
 """
-from .catalog import BOONS, BY_ID, ITEMS, MASTERY_MAX, UNLOCKS, mastery_cost
-from .tuning import ASH_DIVISOR, ASH_PER_RING, OFFER_FULL
+from .catalog import BOONS, ITEMS, UNLOCKS
+from .tuning import ASH_PER_RING, OFFER_FULL
 
 
-def offer_value(item, count):
-    """Dust for offering a whole stack: full value for OFFER_FULL units, half after."""
-    value = ITEMS[item].dust
-    full = min(count, OFFER_FULL)
-    return value * full + value * (count - full) // 2
+def offer_value(item, count, previous=0):
+    """Ash gained from this stack, accounting for all earlier lives' conversions."""
+    value = ITEMS[item].ash_value
+    def cumulative(n):
+        full = min(n, OFFER_FULL)
+        return value * full + value * (n - full) // 2
+    return cumulative(previous + count) - cumulative(previous)
 
 
-def rebirth_ash(inventory, depth):
-    """Ash from everything still carried when the next life begins, plus depth."""
-    burned = sum(ITEMS[item].dust * count for item, count in inventory.items())
-    return burned // ASH_DIVISOR + depth * ASH_PER_RING
-
-
-MASTERABLE = tuple(a.id for a in BY_ID.values() if a.placement == "spot")
+def rebirth_ash(inventory, depth, converted=None):
+    """All carried resources convert automatically when a life ends."""
+    converted = converted or {}
+    return sum(offer_value(item, count, converted.get(item, 0))
+               for item, count in inventory.items()) + depth * ASH_PER_RING
 
 
 def offers(meta):
@@ -53,22 +52,6 @@ def offers(meta):
         rows.append({"kind": "boon", "id": boon.id, "name": boon.name, "description": boon.description,
                      "currency": "blessing", "cost": boon.cost, "owned": meta.boon_next == boon.id,
                      "available": not reasons, "reasons": reasons})
-    for action_id in MASTERABLE:
-        action, level = BY_ID[action_id], meta.mastery.get(action_id, 0)
-        reasons = []
-        if action.unlock is not None and action.unlock not in meta.unlocked:
-            reasons.append(f"unlock {UNLOCKS[action.unlock].name} first")
-        if level >= MASTERY_MAX:
-            reasons.append("mastered")
-        cost = mastery_cost(level)
-        if level < MASTERY_MAX and meta.ash < cost:
-            reasons.append(f"needs {cost} ash")
-        benefits = (["Wider spawn window"] if action.window is not None else []) + [
-            "Journal on/off at level 2", "Favor or suppress odds at level 3"]
-        rows.append({"kind": "mastery", "id": action_id, "name": f"{action.name} mastery {level + 1}",
-                     "description": f"{'; '.join(benefits)}. Level {level}/{MASTERY_MAX}.",
-                     "currency": "ash", "cost": cost, "owned": level >= MASTERY_MAX,
-                     "available": not reasons, "reasons": reasons})
     return rows
 
 
@@ -84,6 +67,4 @@ def purchase(meta, kind, ident):
         meta.unlocked.add(ident)
     elif kind == "boon":
         meta.boon_next = ident
-    else:
-        meta.mastery[ident] = meta.mastery.get(ident, 0) + 1
     return row

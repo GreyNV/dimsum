@@ -65,7 +65,7 @@ class PresentationMixin:
                 "drought": dict(self.drought), "pity_after": dict(PITY_CHUNKS),
                 "screening": list(self.screen_log[-12:]), "stats": dict(self.stats),
                 "recent_rolls": list(self.roll_log[-8:]),
-                "currencies": {"dust": self.dust, "ash": self.ash, "blessing": self.blessing}}
+                "currencies": {"ash": self.ash, "blessing": self.blessing}}
 
     def activity(self):
         """Current activity for presentation: name/kind/progress 0..1000."""
@@ -113,7 +113,7 @@ class PresentationMixin:
     def vitals(self):
         return {"hunger": self.hunger // 10_000, "health": self.health // 10_000, "max": 10_000,
                 "food_cooldown_ms": self.food_cooldown_ms, "food_cooldown_total_ms": FOOD_COOLDOWN_MS,
-                "blessing": self.blessing, "dust": self.dust, "ash": self.ash}
+                "blessing": self.blessing, "ash": self.ash}
 
     def inventory_rows(self):
         return [{"id": item, "name": ITEMS[item].name, "kind": ITEMS[item].kind,

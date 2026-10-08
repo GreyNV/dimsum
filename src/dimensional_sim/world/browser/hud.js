@@ -106,7 +106,7 @@ export class ExpeditionHud {
   }
   updateVitals(ex) {
     const v = ex.vitals, cd = v.food_cooldown_ms;
-    const signature = [v.health, v.hunger, Math.ceil(cd / 250), ex.life, ex.depth, ex.best_depth, v.blessing, v.dust, v.ash].join();
+    const signature = [v.health, v.hunger, Math.ceil(cd / 250), ex.life, ex.depth, ex.best_depth, v.blessing, v.ash].join();
     if (signature === this.vitalsSignature) return;
     this.vitalsSignature = signature;
     for (const [name, value] of [['health', v.health], ['hunger', v.hunger]]) {
@@ -124,7 +124,7 @@ export class ExpeditionHud {
     const blessing = this.$('blessing');
     if (blessing) blessing.textContent = `✦ ${v.blessing ?? 0} blessing`;
     const wealth = this.$('wealth');
-    if (wealth) wealth.textContent = `◇ ${v.dust ?? 0} dust · ${v.ash ?? 0} ash`;
+    if (wealth) wealth.textContent = `◇ ${v.ash ?? 0} dimensional ash`;
   }
   /** Opening scene: dark screen with memories, then the old man's words. The rest
    * of the HUD stays hidden until the prologue ends, then fades in. */
@@ -235,8 +235,7 @@ export class ExpeditionHud {
 
 /** Anchor shop rows grouped for display: [{title, rows}] (rows come from the server). */
 export function shopSections(shop) {
-  const groups = [['unlock', 'New possibilities (dust / blessing)'], ['boon', 'Next-life boon (blessing)'],
-    ['mastery', 'Mastery (ash)']];
+  const groups = [['unlock', 'New possibilities (ash / blessing)'], ['boon', 'Next-life boon (blessing)']];
   return groups.map(([kind, title]) => ({kind, title, rows: (shop || []).filter(r => r.kind === kind && !r.owned)}))
     .filter(section => section.rows.length);
 }
@@ -248,7 +247,7 @@ export function debugText(info) {
     ? `${r.base_weight} ${(r.modifiers || []).map(m => `x${m.percent / 100} ${m.source}`).join(' ')} = ` : ''}${r.weight} (${(r.share_permille / 10).toFixed(1)}%)`;
   return [
     `seed ${info.world_seed}  life ${info.life}  chunk ${info.chunk}  region ${info.region}`,
-    `currencies dust ${info.currencies.dust} ash ${info.currencies.ash} blessing ${info.currencies.blessing}  boon ${info.boon || '-'}`,
+    `currencies ash ${info.currencies.ash} blessing ${info.currencies.blessing}  boon ${info.boon || '-'}`,
     `unlocked: ${info.unlocked.join(', ') || 'none'}  knowledge: ${(info.knowledge || []).join(', ') || 'none'}  recipes: ${(info.recipes || []).join(', ') || 'none'}`,
     `region params: ${info.region_parameters ? `canopy ${info.region_parameters.canopy} brush ${info.region_parameters.brush} ${info.region_parameters.landmark}` : '-'}  generator v${info.generator_version ?? '?'}`,
     `states: ${(info.states || []).map(r => `${r.id}=${r.state}${r.admitted ? '*' : ''}`).join(' ')}`,

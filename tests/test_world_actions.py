@@ -35,9 +35,10 @@ class ActionAvailabilityTests(unittest.TestCase):
         ctx = Context(region="old_road", region_def=pinned)
         self.assertEqual(weight(BY_ID["fallen_branches"], ctx), 0)
         self.assertNotIn("fallen_branches", [spot.encounter for spot in chunk_spots(chunk, context=ctx)])
-        suppressed = replace(ctx, journal_disabled=frozenset({"bramble_berries"}),
+        suppressed = replace(ctx, journal_favor={"bramble_berries": "suppress"},
                              mastery={"bramble_berries": 2})
-        self.assertNotIn("bramble_berries", [spot.encounter for spot in chunk_spots(chunk, context=suppressed)])
+        self.assertLess(weight(BY_ID["bramble_berries"], suppressed),
+                        weight(BY_ID["bramble_berries"], ctx))
         self.assertEqual(chunk_spots(chunk, context=suppressed), chunk_spots(chunk, context=suppressed))
 
     def test_detail_known_state_uses_earned_knowledge_and_recipe(self):
@@ -117,22 +118,16 @@ class ActionAvailabilityTests(unittest.TestCase):
         action = BY_ID["bramble_berries"]
         base = Context(region="bramble_thicket")
         base_weight = weight(action, base)
-        disabled_early = replace(base, mastery={action.id: 1}, journal_disabled=frozenset({action.id}))
-        self.assertEqual(weight(action, disabled_early), base_weight)
-        disabled = replace(base, mastery={action.id: 2}, journal_disabled=frozenset({action.id}))
-        self.assertEqual(weight(action, disabled), 0)
-        self.assertIn("journal disabled", explain(action.id, disabled)["reasons"])
-        self.assertEqual(weight(action, replace(disabled, journal_disabled=frozenset())), base_weight)
-        premature_favor = replace(base, mastery={action.id: 2}, journal_favor={action.id: "favor"})
+        premature_favor = replace(base, mastery={action.id: 1}, journal_favor={action.id: "favor"})
         self.assertEqual(weight(action, premature_favor), base_weight)
-        favored = replace(base, mastery={action.id: 3}, journal_favor={action.id: "favor"})
-        suppressed = replace(base, mastery={action.id: 3}, journal_favor={action.id: "suppress"})
+        favored = replace(base, mastery={action.id: 2}, journal_favor={action.id: "favor"})
+        suppressed = replace(base, mastery={action.id: 2}, journal_favor={action.id: "suppress"})
         self.assertGreater(weight(action, favored), base_weight)
         self.assertLess(weight(action, suppressed), base_weight)
         self.assertIn(action.id, [entry.id for entry, _ in bucket(favored)])
-        # Suppression changes odds; only disabling removes a valid action.
+        # Suppression changes odds without removing a valid action.
         one_weight = replace(action, weight=1)
-        low_odds = Context(mastery={action.id: 3}, journal_favor={action.id: "suppress"})
+        low_odds = Context(mastery={action.id: 2}, journal_favor={action.id: "suppress"})
         self.assertEqual(weight(one_weight, low_odds), 1)
 
 
@@ -153,9 +148,9 @@ class LifecycleStateTests(unittest.TestCase):
         self.assertEqual(explain("gnarled_tree", Context(**climb, spawned=True, admitted=True))["state"],
                          "AVAILABLE")
         self.assertEqual(explain("fallen_branches", Context(region="still_glade"))["state"], "BUCKET_INELIGIBLE")
-        disabled = Context(region="old_road", mastery={"fallen_branches": 2},
-                           journal_disabled=frozenset({"fallen_branches"}))
-        self.assertEqual(explain("fallen_branches", disabled)["state"], "JOURNAL_DISABLED")
+        suppressed = Context(region="old_road", mastery={"fallen_branches": 2},
+                             journal_favor={"fallen_branches": "suppress"})
+        self.assertEqual(explain("fallen_branches", suppressed)["state"], "BUCKET_ELIGIBLE")
         lead = Context(placement="lead", knowledge=frozenset({"deer_sign"}))
         self.assertEqual(explain("hunt_deer", lead)["state"], "BUCKET_INELIGIBLE")
         live = Context(placement="lead", knowledge=frozenset({"deer_sign"}), active_leads=frozenset({"hunt_deer"}))

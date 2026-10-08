@@ -1,6 +1,6 @@
 """Rewards, loot, leads, eating and self actions (crafting, reflection, prayer)."""
 from ..actions import bucket, outcome_chance, reasons_against
-from ..catalog import BY_ID, ITEMS
+from ..catalog import BY_ID, ITEMS, mastery_level
 from ..encounters import lead_spot, roll_loot
 from ..equipment import equip_item
 from ..journal import record_action, record_items
@@ -118,6 +118,13 @@ class OutcomesMixin:
             self.health = min(VITAL_MAX, self.health + entry.heal * POINT)
         self.blessing += entry.blessing
         record_action(self.journal, entry.id)
+        if entry.placement == "spot":
+            count = self.journal["actions"][entry.id]
+            earned = mastery_level(count)
+            if earned > self.mastery.get(entry.id, 0):
+                self.mastery[entry.id] = earned
+                self._entry("lore", f"Mastery {earned} of {entry.name} earned at {count} completions.",
+                            encounter=entry.id)
         self._apply_outcomes(entry, ident)
         if ident.startswith("lead:"):
             self._record_leads([lead for lead in self.leads if lead["id"] == ident], "completed")

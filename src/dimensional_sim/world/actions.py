@@ -7,7 +7,7 @@ Self recipes use the same eligibility rules but need no terrain roll.
 from dataclasses import dataclass, field
 
 from .catalog import (ACTIONS, BY_ID, ITEMS, JOURNAL_FAVOR_MASTERY, JOURNAL_FAVOR_PERCENT,
-                      JOURNAL_SUPPRESS_PERCENT, JOURNAL_TOGGLE_MASTERY, REGIONS, UNLOCKS)
+                      JOURNAL_SUPPRESS_PERCENT, REGIONS, UNLOCKS)
 
 
 @dataclass(frozen=True)
@@ -106,9 +106,6 @@ def bucket_reasons(action, ctx):
             reasons.append(f"region {region_id} weight is 0")
     if action.placement == "lead" and action.id not in ctx.active_leads:
         reasons.append("no active temporary lead")
-    if (action.placement == "spot" and action.id in ctx.journal_disabled
-            and ctx.mastery.get(action.id, 0) >= JOURNAL_TOGGLE_MASTERY):
-        reasons.append("journal disabled")
     return reasons
 
 
@@ -158,7 +155,7 @@ def weight(action, ctx):
 
 
 def _journal_percent(action, ctx):
-    """Earned Journal odds for a spot action (favor/suppress at mastery 3), or None."""
+    """Earned Journal odds for a spot action (favor/suppress at mastery 2), or None."""
     if action.placement != "spot" or ctx.mastery.get(action.id, 0) < JOURNAL_FAVOR_MASTERY:
         return None
     choice = ctx.journal_favor.get(action.id)

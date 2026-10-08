@@ -4,6 +4,7 @@ import {visualHash, residentBounds, cameraView, follow, retainResident, tileAt, 
 import {groundMarks, paintChunk, TREE, terrainColor, OBJECT_PAD, clearStamps, stampCount, TILE_VARIANTS, TREE_VARIANTS, ROCK_VARIANTS} from '../src/dimensional_sim/world/browser/art.js';
 import {ENEMY, ROLE, spriteSize, paintSprite, punchReach, hiddenBehind, occludingTreeTiles, SPOTS, POSE, drawSpot, CAMP, ELDER} from '../src/dimensional_sim/world/browser/actors.js';
 import {activityText, newRewards, ATTRIBUTES, rewardTexts, reportIsFresh, reportStorageKey, ExpeditionHud, prologueView, shopSections, debugText} from '../src/dimensional_sim/world/browser/hud.js';
+import {anchorAction} from '../src/dimensional_sim/world/browser/anchor_ui.js';
 const pose = (facing, animation='idle', animation_ms=0) => ({facing, animation, animation_ms, active:false});
 const chunk = (x=0,y=0) => ({id:'forest:'+x+':'+y,x,y,width:32,height:16,seed:1234,
   tiles:Array(16).fill('.'.repeat(32)),collision:Array(16).fill('0'.repeat(32))});
@@ -378,19 +379,28 @@ test('ambush wagons are outlined cell sprites with no free-drawn geometry',()=>{
 
 test('anchor shop groups server rows and the debug overlay explains buckets',()=>{
   const shop=[{kind:'unlock',id:'climbing',owned:false,available:true},{kind:'unlock',id:'snares',owned:true,available:false},
-    {kind:'boon',id:'iron_skin',owned:false,available:false},{kind:'mastery',id:'bramble_berries',owned:false,available:false}];
+    {kind:'boon',id:'iron_skin',owned:false,available:false}];
   const sections=shopSections(shop);
-  assert.deepEqual(sections.map(s=>s.kind),['unlock','boon','mastery']);
+  assert.deepEqual(sections.map(s=>s.kind),['unlock','boon']);
   assert.deepEqual(sections[0].rows.map(r=>r.id),['climbing'],'owned unlocks are hidden');
   assert.deepEqual(shopSections(null),[]);
-  const text=debugText({world_seed:'7',life:2,chunk:'forest:0:0',region:'old_road',currencies:{dust:1,ash:2,blessing:3},
+  const text=debugText({world_seed:'7',life:2,chunk:'forest:0:0',region:'old_road',currencies:{ash:2,blessing:3},
     boon:null,unlocked:[],spot_bucket:[{id:'bramble_berries',weight:13,share_permille:224}],self_bucket:[],need:null,
     windows:[{id:'bramble_boar',active:1,limit:1,spawned:2}],drought:{food:1},pity_after:{food:5},stats:{chunks:9},
-    why_not:[{id:'gnarled_tree',reasons:["locked: needs unlock 'Climbing' (15 dust)"]}],
+    why_not:[{id:'gnarled_tree',reasons:["locked: needs unlock 'Climbing' (15 ash)"]}],
     screening:[{chunk:'forest:1:0',action:'bramble_boar',result:'rejected: window full (1/1 at once)'}]});
   for(const needle of ['seed 7','bramble_berries 13 (22.4%)','bramble_boar 1/1','food 1/5','gnarled_tree: locked','window full'])
     assert.ok(text.includes(needle),needle);
   assert.match(activityText({expedition:{control:'auto',activity:{kind:'craft',name:'Carve a walking staff',progress:500}}}),/^Carve a walking staff - 50%/);
+});
+
+test('mastery guarantee chooses and clears a named region',()=>{
+  const button={dataset:{journalGuarantee:'bramble_berries',region:'old_road'}};
+  const target={closest:selector=>selector==='button[data-journal-guarantee]' ? button : null};
+  assert.deepEqual(anchorAction(target,{meta:{journal_guarantee:null,journal_guarantee_region:null}}),
+    {type:'journal_guarantee',id:'bramble_berries',region:'old_road'});
+  assert.deepEqual(anchorAction(target,{meta:{journal_guarantee:'bramble_berries',journal_guarantee_region:'old_road'}}),
+    {type:'journal_guarantee',id:null,region:null});
 });
 
 test('stick and keys move in eight directions', async () => {

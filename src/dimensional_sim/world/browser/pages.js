@@ -63,8 +63,7 @@ function character(d) {
       ['Boon this life', c.boon || 'none'], ['Boon next life', c.boon_next || 'none'],
     ]},
     {title: 'Across lives', kind: 'rows', rows: [
-      ['Dust', String(c.currencies.dust), 'offer items at the anchor; buys actions'],
-      ['Ash', String(c.currencies.ash), 'unoffered items burn at rebirth; buys mastery'],
+      ['Dimensional ash', String(c.currencies.ash), 'carried resources convert on return; buys new possibilities'],
       ['Blessing', String(c.currencies.blessing), 'from prayer; buys boons and the shrine path'],
       ['Unlocked actions', c.unlocked.length ? c.unlocked.join(', ') : 'none yet'],
     ]},
@@ -121,6 +120,12 @@ function journal(d) {
       empty: 'Nothing completed yet.'},
     {title: 'Actions', kind: 'table', head: ['Action', 'Type', 'Done'],
       rows: j.actions.map(([name, category, n]) => [name, title(category), n]), empty: 'Nothing completed yet.'},
+    {title: 'Mastered encounters', kind: 'table',
+      head: ['Encounter', 'Grade', 'Completions', 'Possible regions', 'Current chance', 'Seen this life'],
+      rows: (j.mastery || []).map(m => [m.name, `${m.level} / 3`,
+        m.next ? `${m.done} / ${m.next}` : String(m.done), m.regions.join(', '),
+        `${(m.current_share_permille / 10).toFixed(1)}% per draw`, m.locations.join(', ') || 'none yet']),
+      note: 'Grade 1 reveals locations and current odds; grade 2 shapes future odds; grade 3 guarantees a chosen encounter.'},
     {title: 'Items gathered', kind: 'table', head: ['Item', 'Total'], rows: j.items, empty: 'Nothing gathered yet.'},
     {title: 'Discoveries', kind: 'rows', rows: [
       ['Knowledge', j.knowledge.map(title).join(', ') || 'none yet'],
@@ -142,9 +147,9 @@ function life(d) {
   return [
     {title: `Spawn windows · life ${r.life}`, kind: 'table', head: ['Action', 'Rolled', 'Possible', '', 'Now / spawned', 'Mastery'],
       rows: known.map(rollRow),
-      note: `${lucky} of ${known.length} rolled their maximum. Each life rolls how many of each can exist at once; mastery (ash) widens the range.`},
+      note: `${lucky} of ${known.length} rolled their maximum. Each life rolls how many of each can exist at once.`},
     ...(locked.length ? [{title: 'Rolled but not yet known', kind: 'table', head: ['Action', 'Rolled', 'Possible', '', 'Now / spawned', 'Mastery'],
-      rows: locked.map(rollRow), note: 'Unlock these with dust at the anchor.'}] : []),
+      rows: locked.map(rollRow), note: 'Unlock these with dimensional ash at the anchor.'}] : []),
     {title: 'Spots and pity', kind: 'rows', rows: [
       ['Spots per chunk', `${r.spots_per_chunk[0]}–${r.spots_per_chunk[1]}`],
       ...r.pity.map(p => [`${title(p.category)} drought`, `${p.drought} / ${p.after} chunks`, 'a spot is forced when it reaches the limit']),
@@ -163,7 +168,7 @@ function settings(state, host) {
   const sections = [{title: 'This world', kind: 'rows', rows}];
   if (host) sections.push({title: 'Reset', kind: 'actions', buttons: [
     {id: 'rebuild', label: 'New world, keep progress',
-      note: 'A fresh forest from a new seed. Keeps dimensional levels, dust, ash, blessing, unlocks, mastery and the journal; starts the next life.'},
+      note: 'A fresh forest from a new seed. Keeps dimensional levels, ash, blessing, unlocks, mastery and the journal; starts the next life.'},
     {id: 'wipe', label: 'Start over', danger: true,
       note: 'Deletes this browser\'s save and its cloud link, then starts a brand-new game. Copy your save code first if you may want it back.'},
   ]});

@@ -8,6 +8,7 @@ from ..models import DELTAS, DIRECTIONS
 
 DIRECTION_DELTAS = tuple(DELTAS[d] for d in DIRECTIONS)
 SKILLS = ("take_control",)
+RETURN_COOLDOWN_MS = 300_000
 LOG_LIMIT = 16
 ANCHOR_COUNTDOWN_MS = 30_000
 PAUSE_AFTER_ACTIVITY_MS = 450
@@ -69,7 +70,7 @@ ELDER_LINES = (
 LOG_TYPES = ("encounter", "eat", "rest", "life", "blessing", "lore", "trade", "ambush",
              "craft", "reflect", "purchase", "rebirth")
 TASK_TYPES = ("perform", "pause", "rest", *SELF_ACTIONS, *PROLOGUE_MS)
-SCHEMA_VERSION = 9                 # expedition saves; older schemas upgrade in saves.py
+SCHEMA_VERSION = 10                # unified ash, earned mastery and manual return
 
 
 def attribute_table():

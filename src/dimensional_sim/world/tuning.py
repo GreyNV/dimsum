@@ -12,11 +12,9 @@ SPOTS_PER_CHUNK = (0, 1, 1, 2, 2, 3)
 # category, the next chunk with room gets one forced spot of that category.
 PITY_CHUNKS = {"food": 5, "enemy": 4}
 
-# Anchor offering: per stack, the first OFFER_FULL units give full dust, the rest half.
+# Ash conversion: for each resource, the first OFFER_FULL units give full value, then half.
 OFFER_FULL = 5
-# Rebirth: unoffered items burn to ash at 1/ASH_DIVISOR of their dust value, plus
-# ASH_PER_RING per ring of depth reached this life.
-ASH_DIVISOR = 2
+# Each ring of depth also grants ASH_PER_RING at the end of a life.
 ASH_PER_RING = 1
 
 # Crafted gear effects.

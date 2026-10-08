@@ -50,12 +50,12 @@ class CatalogTests(unittest.TestCase):
         crafted_from = {item for a in ACTIONS for item, _ in a.cost}
         for item in ITEMS.values():
             with self.subTest(item=item.id):
-                self.assertGreater(item.dust, 0, "every item is worth something at the anchor")
+                self.assertGreater(item.ash_value, 0, "every item is worth something at the anchor")
                 in_run = {"food": item.food > 0, "material": item.id in crafted_from,
                           "gear": any(a.effect == item.id for a in ACTIONS)}[item.kind]
                 self.assertTrue(in_run, "every item has an in-run use: eat, craft or wear")
         self.assertEqual({u.currency for u in UNLOCKS.values()} | {"blessing", "ash"},
-                         {"dust", "ash", "blessing"}, "dust, ash and blessing all have sinks")
+                         {"ash", "blessing"}, "ash and blessing both have sinks")
 
     def test_invalid_definitions_are_rejected(self):
         good = BY_ID["bramble_berries"]
@@ -132,7 +132,7 @@ class PlayableWorldTests(unittest.TestCase):
         for seed in range(1, 13):
             with self.subTest(seed=seed):
                 e = past_prologue(fresh(seed))
-                while e.stats["chunks"] < 18 and e.life == 1:
+                while e.stats["chunks"] < 18 and e.anchor_ms is None:
                     e.advance(2000)
                 self.assertGreaterEqual(e.stats["food_spots"], 1)
                 self.assertGreaterEqual(e.stats["enemy_spots"], 1)
@@ -213,46 +213,105 @@ class EconomyTests(unittest.TestCase):
         self.assertEqual(economy.offer_value("stick", 5), 5)
         self.assertEqual(economy.offer_value("stick", 9), 5 + 2)
         self.assertEqual(economy.offer_value("boar_hide", 2), 8)
-        self.assertEqual(economy.rebirth_ash({"stick": 4, "boar_hide": 1}, 3), (4 + 4) // 2 + 3)
+        self.assertEqual(economy.rebirth_ash({"stick": 4, "boar_hide": 1}, 3), 4 + 4 + 3)
+        self.assertEqual(economy.offer_value("stick", 4, previous=4), 2)
+        self.assertEqual(economy.offer_value("stick", 1, previous=8), 1)
+        self.assertEqual(economy.rebirth_ash({"stick": 4}, 0, {"stick": 4}), 2)
 
-    def test_anchor_trade_unlock_mastery_boon_flow_changes_the_next_life(self):
-        e = at_anchor(past_prologue(fresh()))
+    def test_anchor_conversion_unlock_boon_flow_changes_the_next_life(self):
+        e = past_prologue(fresh())
         e.inventory = {"stick": 3, "boar_hide": 1}
-        e.anchor_action({"type": "trade", "item": "stick"})
-        self.assertEqual(e.dust, 3)
+        at_anchor(e)
+        self.assertEqual(e.ash, 7)
         with self.assertRaises(ValueError) as err:
             e.anchor_action({"type": "unlock", "id": "climbing"})
-        self.assertIn("needs 15 dust", str(err.exception))
-        e.dust, e.blessing, e.ash = 100, 5, 20
+        self.assertIn("needs 15 ash", str(err.exception))
+        e.ash, e.blessing = 100, 5
+        e.anchor_action({"type": "unlock", "id": "return_anchor"})
         e.anchor_action({"type": "unlock", "id": "climbing"})
         e.anchor_action({"type": "boon", "id": "bountiful_path"})
-        e.anchor_action({"type": "mastery", "id": "bramble_berries"})
         with self.assertRaises(ValueError):
             e.anchor_action({"type": "boon", "id": "iron_skin"})  # one boon per life
-        self.assertEqual((e.dust, e.blessing, e.ash, e.mastery), (85, 3, 17, {"bramble_berries": 1}))
+        self.assertEqual((e.ash, e.blessing, e.mastery), (75, 3, {}))
         restored = Expedition.from_dict(json.loads(dump(e)))
         self.assertEqual(dump(restored), dump(e))
         e.anchor_action({"type": "begin_life"})
         self.assertEqual((e.boon, e.boon_next, e.life), ("bountiful_path", None, 2))
-        self.assertEqual(e.ash, 17 + economy.rebirth_ash({"boar_hide": 1}, 0))
+        self.assertEqual(e.ash, 75)
         self.assertEqual(e.log[-1]["type"], "rebirth")
         low, high = BY_ID["bramble_berries"].window
-        self.assertTrue(low + 1 <= e.budget["bramble_berries"] <= high + 1 + 1)
+        self.assertTrue(low + 1 <= e.budget["bramble_berries"] <= high + 1)
         ctx = e.spot_context(ChunkKey("forest", 0, 0))
         self.assertTrue(explain("gnarled_tree", ctx)["eligible"], "the unlock is in this life's bucket")
 
-    def test_idle_rebirth_converts_unoffered_items_and_depth_to_ash(self):
-        e = at_anchor(past_prologue(fresh()))
+    def test_return_converts_all_items_and_depth_to_ash(self):
+        e = past_prologue(fresh())
         e.inventory, e.depth = {"boar_meat": 2}, 4
+        at_anchor(e)
+        self.assertEqual(e.ash, 3 * 2 + 4)
         e.advance(ap.ANCHOR_COUNTDOWN_MS)
-        self.assertEqual((e.life, e.ash, e.dust), (2, 3 + 4, 0))
+        self.assertEqual(e.life, 1)  # first return waits for the anchor dialogue
+        e.anchor_action({"type": "begin_life"})
+        self.assertEqual((e.life, e.ash), (2, 10))
 
     def test_shop_rows_explain_requirements(self):
         e = fresh()
         rows = {(r["kind"], r["id"]): r for r in economy.offers(e)}
         self.assertIn("requires Climbing", rows[("unlock", "mushroom_lore")]["reasons"])
-        self.assertIn("unlock Climbing first", rows[("mastery", "gnarled_tree")]["reasons"])
+        self.assertEqual(rows[("unlock", "return_anchor")]["cost"], 10)
+        self.assertFalse(any(kind == "mastery" for kind, _ in rows))
         self.assertEqual(len([r for r in rows if r[0] == "boon"]), len(BOONS))
+
+    def test_lifetime_conversion_and_manual_return_survive_reload(self):
+        e = past_prologue(fresh())
+        e.inventory = {"stick": 5}
+        at_anchor(e)
+        self.assertEqual((e.ash, e.converted["stick"]), (5, 5))
+        e.ash = 10
+        e.anchor_action({"type": "unlock", "id": "return_anchor"})
+        e.anchor_action({"type": "begin_life"})
+        e.inventory = {"stick": 4}
+        e.anchor_action({"type": "return"})
+        self.assertEqual((e.ash, e.converted["stick"]), (2, 9))
+        restored = Expedition.from_dict(json.loads(dump(e)))
+        self.assertEqual(dump(restored), dump(e))
+        restored.anchor_action({"type": "begin_life"})
+        with self.assertRaisesRegex(ValueError, "cooling down"):
+            restored.anchor_action({"type": "return"})
+
+    def test_mastery_guarantee_uses_one_chosen_region_and_survives_reload(self):
+        e = past_prologue(fresh())
+        e.mastery["bramble_berries"] = 3
+        at_anchor(e)
+        e.anchor_action({"type": "journal_guarantee", "id": "bramble_berries", "region": "old_road"})
+        e.anchor_action({"type": "begin_life"})
+        e._screen()
+        self.assertTrue(e.guarantee_used)
+        self.assertIn("bramble_berries", e.forced["forest:0:0"])
+        self.assertEqual(dump(Expedition.from_dict(json.loads(dump(e)))), dump(e))
+
+    def test_schema_nine_combines_prestige_balances(self):
+        data = fresh().to_dict()
+        self.assertTrue(data["spot_plans"])
+        data["schema_version"] = 9
+        data["encounters"] = "encounters-v8"
+        data["dust"], data["ash"] = 7, 3
+        for key in ("return_ready_ms", "journal_guarantee", "journal_guarantee_region",
+                    "guarantee_used", "converted"):
+            del data[key]
+        restored = Expedition.from_dict(data)
+        self.assertEqual(restored.ash, 10)
+        self.assertEqual(restored.converted, {})
+        self.assertEqual(restored.spot_plans, {})
+        self.assertEqual(restored.to_dict()["schema_version"], 10)
+
+    def test_repeated_spot_actions_earn_all_three_mastery_grades(self):
+        e = fresh()
+        action = BY_ID["bramble_berries"]
+        for prior, grade in ((9, 1), (99, 2), (999, 3)):
+            e.journal["actions"][action.id] = prior
+            e._reward(f"enc:forest:0:0:{prior}", action)
+            self.assertEqual(e.mastery[action.id], grade)
 
 
 class ObservabilityTests(unittest.TestCase):
@@ -278,7 +337,7 @@ class ObservabilityTests(unittest.TestCase):
         refused = session.input({**body, "action": {"type": "unlock", "id": "road_lore"}}, now=3)
         self.assertIn("requires Meditation", refused["expedition"]["action_error"])
         self.assertIsNotNone(refused["expedition"]["shop"])
-        self.assertIn("ash_if_burned", refused["expedition"]["anchor_space"])
+        self.assertTrue(refused["expedition"]["anchor_space"]["first_return"])
         validate_input({**body, "action": {"type": "unlock", "id": "climbing"}})
 
 

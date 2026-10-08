@@ -38,6 +38,8 @@ def first_death(e, step=1000):
     life = e.life
     while e.life == life:
         e.advance(step)
+        if e.anchor_ms is not None and e.anchor_wait:
+            e.anchor_action({"type": "begin_life"})
     return e
 
 
@@ -176,7 +178,7 @@ class SurvivalTests(unittest.TestCase):
 
 
 class LifeTests(unittest.TestCase):
-    def test_anchor_countdown_trade_and_explicit_next_life(self):
+    def test_first_anchor_converts_resources_and_waits_for_dialogue(self):
         e = expedition()
         e.inventory = {"stick": 3, "boar_hide": 1}
         e.regular["strength"] = 70
@@ -188,22 +190,17 @@ class LifeTests(unittest.TestCase):
         self.assertEqual(e.life, 1)
         self.assertEqual(e.anchor_ms, ap.ANCHOR_COUNTDOWN_MS)
         self.assertEqual(e._player(), e.anchor)
-        with self.assertRaises(ValueError):
-            e.anchor_action({"type": "trade", "item": "gold"})
-        e.advance(9000)
-        self.assertEqual(e.anchor_ms, ap.ANCHOR_COUNTDOWN_MS - 9000)
-        e.anchor_action({"type": "trade", "item": "stick"})
-        self.assertEqual((e.dust, e.inventory), (3, {"boar_hide": 1}))
+        self.assertEqual((e.ash, e.inventory), (7, {}))
         self.assertTrue(e.anchor_wait)
+        e.advance(9000)
+        self.assertEqual(e.anchor_ms, ap.ANCHOR_COUNTDOWN_MS)
         restored = Expedition.from_dict(json.loads(dump(e)))
         self.assertEqual(dump(restored), dump(e))
         restored.advance(90_000)
         self.assertEqual(restored.life, 1)
         self.assertEqual(restored.anchor_ms, e.anchor_ms)
-        restored.anchor_action({"type": "trade", "item": "boar_hide"})
-        self.assertEqual(restored.dust, 7)
         restored.anchor_action({"type": "begin_life"})
-        self.assertEqual((restored.life, restored.dust, restored.inventory), (2, 7, {}))
+        self.assertEqual((restored.life, restored.ash, restored.inventory), (2, 7, {}))
         self.assertEqual(restored.regular["strength"], 0)
         self.assertEqual(restored.dimensional["strength"], 14)
 
@@ -212,13 +209,14 @@ class LifeTests(unittest.TestCase):
         for e in (a, b):
             e.health = 0
             e.advance(0)
+            e.anchor_action({"type": "begin_life"})
         a.advance(ap.ANCHOR_COUNTDOWN_MS + 1000)
         for _ in range((ap.ANCHOR_COUNTDOWN_MS + 1000) // 100):
             b.advance(100)
         self.assertEqual(dump(a), dump(b))
         self.assertEqual(a.life, 2)
 
-    def test_anchor_session_snapshot_and_trade_input(self):
+    def test_anchor_session_snapshot_and_unlock_input(self):
         e = expedition()
         e.inventory = {"stick": 2}
         e.health = 0
@@ -227,13 +225,14 @@ class LifeTests(unittest.TestCase):
         frame = session.state(now=1)
         self.assertEqual(frame["expedition"]["anchor_space"]["remaining_ms"], ap.ANCHOR_COUNTDOWN_MS)
         self.assertEqual((frame["spots"], frame["targets"]), ([], []))
+        self.assertEqual(e.ash, 2)
         body = {"move": None, "attack": False, "paused": False, "known": [],
-                "action": {"type": "trade", "item": "stick"}}
+                "action": {"type": "unlock", "id": "return_anchor"}}
         frame = session.input(body, now=1)
-        self.assertEqual(frame["expedition"]["dust"], 2)
+        self.assertIn("needs 10 ash", frame["expedition"]["action_error"])
         self.assertTrue(frame["expedition"]["anchor_space"]["waiting"])
-        session.input(body, now=2)  # a retried whole-stack offer cannot duplicate dust
-        self.assertEqual(e.dust, 2)
+        session.input(body, now=2)
+        self.assertEqual(e.ash, 2)
 
     def test_bulk_ticks_slices_and_reload_identical_across_a_death(self):
         T = 360000
@@ -241,7 +240,7 @@ class LifeTests(unittest.TestCase):
         for e in (bulk, ticks, odd):
             e.hunger, e.health = 0, 30 * P   # starve early: the run crosses a death and an anchor interlude
         bulk.advance(T)
-        self.assertGreaterEqual(bulk.life, 2)
+        self.assertEqual(bulk.life, 1)
         for _ in range(T // 20):
             ticks.advance(20)
         rng, left = random.Random(9), T
@@ -265,6 +264,8 @@ class LifeTests(unittest.TestCase):
         old_game = e.game
         before = (dict(e.dimensional), e.depth, e.best_depth)
         e.advance(ap.ANCHOR_COUNTDOWN_MS)
+        self.assertEqual(e.life, 1)
+        e.anchor_action({"type": "begin_life"})
         self.assertIsNot(e.game, old_game)
         self.assertEqual(e.report["title"], "Life 1 ends")
         self.assertIn("Returning to anchor...", e.report["lines"])
@@ -290,7 +291,7 @@ class LifeTests(unittest.TestCase):
                        lambda d: d.update(ash=-1), lambda d: d.update(unlocked=["flying"]),
                        lambda d: d.update(mastery={"think": 1}), lambda d: d.update(boon="wealth"),
                        lambda d: d.update(forced={"forest:0:0": ["think"]}), lambda d: d["stats"].pop("pity"),
-                       lambda d: d.update(blessing=-1), lambda d: d.update(dust=-1),
+                       lambda d: d.update(blessing=-1), lambda d: d.update(return_ready_ms=-1),
                        lambda d: d.update(anchor_ms=-1), lambda d: d.update(anchor_wait=True),
                        lambda d: d["budget"].pop("bramble_boar"),
                        lambda d: d.update(admitted=[["enc:x", "dragon"]]),
@@ -378,7 +379,7 @@ class SpawnWindowTests(unittest.TestCase):
         self.assertEqual(rolls, set(range(boar.window[0], boar.window[1] + 1)))
         self.assertIsNone(roll_window(BY_ID["animal_tracks"], 1), "non-food stays unlimited")
         low, high = boar.window
-        self.assertEqual(spawn_window(boar, 3), (low + 1, high + 3), "mastery widens the window")
+        self.assertEqual(spawn_window(boar, 3), (low, high), "earned mastery leaves caps unchanged")
         food = {e.id for e in DARK_FOREST if any(ITEMS[l.item].kind == "food" for l in e.loot)}
         self.assertTrue(all(BY_ID[i].window for i in food), "every food source is capped")
 
@@ -397,6 +398,8 @@ class SpawnWindowTests(unittest.TestCase):
         budgets, life = [dict(e.budget)], e.life
         for _ in range(900):
             e.advance(400)
+            if e.anchor_ms is not None and e.anchor_wait:
+                e.anchor_action({"type": "begin_life"})
             if e.life != life:
                 life = e.life
                 budgets.append(dict(e.budget))

@@ -6,9 +6,9 @@ WHY: players and designers need to see, at a glance, what drives the numbers.
 NEVER: change state or roll anything here.
 TESTS: tests/test_world_pages.py.
 """
-from .actions import Context, known
+from .actions import Context, describe_bucket, known
 from .autopilot import INVENTORY_SLOTS, POINT, REGEN, REST_REGEN
-from .catalog import ACTIONS, BOONS, BY_ID, ITEMS, UNLOCKS
+from .catalog import ACTIONS, BOONS, BY_ID, ITEMS, MASTERY_THRESHOLDS, REGIONS, UNLOCKS
 from .encounters import spawn_window
 from .equipment import is_equipped
 from .journal import achievements
@@ -42,7 +42,7 @@ def character(e):
         "hunger_per_minute": _pts(e._drain() * 60_000),
         "regen_per_minute": _pts(REGEN * 60_000), "rest_regen_per_minute": _pts(REST_REGEN * 60_000),
         "inventory_slots": [len(e.inventory), INVENTORY_SLOTS],
-        "currencies": {"dust": e.dust, "ash": e.ash, "blessing": e.blessing},
+        "currencies": {"ash": e.ash, "blessing": e.blessing},
         "unlocked": [UNLOCKS[u].name for u in sorted(e.unlocked)],
     }
 
@@ -110,6 +110,22 @@ def rolls(e):
 
 def journal(e):
     j = e.journal
+    current = {row["id"]: row["share_permille"] for row in describe_bucket(e.spot_context(e.game.player.chunk))}
+    mastery = []
+    for ident, level in sorted(e.mastery.items()):
+        if level < 1:
+            continue
+        action = BY_ID[ident]
+        locations = sorted(chunk_id for chunk_id, plan in e.spot_plans.items()
+                           if any(row[0] == ident for row in plan))
+        regions = [region.name for region in REGIONS.values() if region.biome in action.biomes
+                   and (action.regions is None or region.id in action.regions)
+                   and region.multiplier(ident) > 0]
+        mastery.append({"id": ident, "name": action.name, "level": level,
+                        "done": j["actions"].get(ident, 0),
+                        "next": MASTERY_THRESHOLDS[level] if level < len(MASTERY_THRESHOLDS) else None,
+                        "regions": regions, "current_share_permille": current.get(ident, 0),
+                        "locations": locations, "mode": e.journal_favor.get(ident, "normal")})
     return {"actions": sorted(([BY_ID[a].name, BY_ID[a].category, n] for a, n in j["actions"].items()),
                               key=lambda r: (-r[2], r[0])),
             "items": sorted(([ITEMS[i].name, n] for i, n in j["items"].items()), key=lambda r: (-r[1], r[0])),
@@ -118,7 +134,7 @@ def journal(e):
             "achievements": achievements(e),
             "knowledge": sorted(e.knowledge), "recipes": sorted(e.recipes),
             "disabled": sorted(e.journal_disabled), "favor": dict(e.journal_favor),
-            "leads": [dict(row) for row in e.leads],
+            "mastery": mastery, "leads": [dict(row) for row in e.leads],
             "lead_history": [dict(row) for row in e.lead_history[-20:]]}
 
 

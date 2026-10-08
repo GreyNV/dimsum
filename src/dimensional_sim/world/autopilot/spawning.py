@@ -4,7 +4,7 @@ A chunk is rolled once per life when the avatar first enters it (the roll is sav
 as a spot plan for exact replay). Spawn windows cap how many of an encounter exist
 at once; pity forces a spot of a starved category after a few empty chunks.
 """
-from ..actions import Context, bucket
+from ..actions import Context, bucket, bucket_reasons
 from ..catalog import BY_ID, ITEMS
 from ..encounters import EncounterSpot, chunk_spots, forced_spot, roll_window, spot_id
 from ..models import ChunkKey, chunk_ident
@@ -26,6 +26,28 @@ class SpawningMixin:
         self.screened_chunks = set()   # chunk ids whose spots were screened
         self.spot_plans = {}           # chunk id -> immutable runtime roll, saved for replay
         self.screened_targets = set()  # asset-spawned target ids screened
+        self.guarantee_used = False
+
+    def _guarantee(self, chunk, chunk_id, taken, context):
+        """One extra mastered encounter per life, outside the normal 0..3 draws."""
+        ident = self.journal_guarantee
+        if (self.guarantee_used or ident is None or context.region != self.journal_guarantee_region
+                or bucket_reasons(BY_ID[ident], context)):
+            return None
+        index = len(self.forced.get(chunk_id, ()))
+        spot = forced_spot(chunk, ident, index, taken=taken)
+        if spot is None:
+            return None  # try the next eligible chunk
+        self.forced.setdefault(chunk_id, []).append(ident)
+        self.guarantee_used = True
+        self.admitted[spot.id] = ident  # guarantee bypasses the at-once spawn window
+        if ident in self.budget:
+            self.spawned[ident] += 1
+        category = BY_ID[ident].spawn_category
+        if category:
+            self.stats[f"{category}_spots"] += 1
+        self._note(chunk_id, spot.id, ident, "mastery guarantee")
+        return spot
 
     def region(self, key):
         """RegionDef of a chunk key (pure: world seed, biome, coordinates)."""
@@ -180,6 +202,10 @@ class SpawningMixin:
                 if self._admit(spot.id, spot.encounter, ident):
                     admitted.add(BY_ID[spot.encounter].spawn_category)
             taken = [(s.x, s.y) for s in spots]
+            guaranteed = self._guarantee(chunk, ident, taken, context)
+            if guaranteed is not None:
+                taken.append((guaranteed.x, guaranteed.y))
+                admitted.add(BY_ID[guaranteed.encounter].spawn_category)
             for category in PITY_CHUNKS:
                 if category in admitted:
                     self.drought[category] = 0

@@ -11,13 +11,14 @@
 
 ## Between runs (meta)
 - Dimensional XP (20% of every gain) persists and speeds later lives.
-- Possibility space (dust): climbing 15, scavenging 20, snares 25, meditation 30, mushroom lore 45
+- Possibility space (ash): manual return 10 (5-minute cooldown), climbing 15, scavenging 20, snares 25, meditation 30, mushroom lore 45
   (needs climbing), hide working 50, road lore 70 (needs meditation).
 - Blessing: shrine path 3 (shrines on the old road: reliable prayer), boons 2 (bountiful path: +1 food
   windows; iron skin: boar hits x0.75) for the next life only.
-- Ash: mastery levels 1-3 on any spot action (cost 3, 6, 9): wider spawn window where it has one; level 2
-  lets the Journal disable/enable it in future rolls; level 3 lets the Journal favor (x1.5) or suppress (x0.5) it.
+- Repeating a spot action earns mastery at 10, 100 and 1,000 lifetime completions. Grade 1 reveals
+  its Journal entry, location and current-run chance; grade 2 allows favor (x1.5) or suppress (x0.5);
+  grade 3 adds one guaranteed encounter in a chosen eligible region per life, outside the usual roll bucket.
 
 ## Principle
-Unlocks, knowledge and Journal settings add or shape actions in future buckets; they never force them to exist
-(region pools, rolls and windows still apply). A new unlock is visible in the next life's debug bucket and in spawned spots.
+Unlocks and knowledge add actions to future buckets. Journal favor changes weights; its grade-3 guarantee
+places one extra spot in the first suitable chunk entered in the chosen region each life.

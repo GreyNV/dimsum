@@ -1,4 +1,4 @@
-/** The anchor space between lives: countdown, offerings, the shop and Journal controls.
+/** The anchor space between lives: conversion explanation, shop and Journal controls.
  * Renders server rows only; purchases are validated by the simulation. */
 import {$, el} from './dom.js';
 import {shopSections} from './hud.js';
@@ -12,36 +12,39 @@ export function renderAnchor(ex) {
   document.body.classList.toggle('anchor-active', !!anchor);
   if (!anchor) return;
   $('anchor-countdown').textContent = anchor.waiting ? 'The next life waits for your choice.'
-    : `Next life in ${Math.ceil(anchor.remaining_ms / 1000)}s unless you offer a resource.`;
-  $('anchor-dust').textContent = String(ex.meta?.dust ?? ex.dust);
+    : `Next life in ${Math.ceil(anchor.remaining_ms / 1000)}s.`;
   $('anchor-ash').textContent = String(ex.meta?.ash ?? 0);
   $('anchor-blessing').textContent = String(ex.meta?.blessing ?? 0);
-  const signature = JSON.stringify([ex.inventory, ex.shop, ex.meta, anchor.ash_if_burned]);
+  const signature = JSON.stringify([ex.shop, ex.meta, anchor.first_return]);
   if (panel.dataset.inventory === signature) return;
   panel.dataset.inventory = signature;
-  $('anchor-hint').textContent = ex.inventory.length
-    ? `Offer items for dust (new actions). Keep them and they burn to ${anchor.ash_if_burned} ash (mastery) at rebirth.`
-    : `Nothing carried. Rebirth still leaves ${anchor.ash_if_burned} ash from the road you walked.`;
-  const offers = $('anchor-offers');
-  offers.replaceChildren(...ex.inventory.map(row => {
-    const button = el('button', '', `Offer ${row.count} ${row.name.toLowerCase()} (+${anchor.offer?.[row.id] ?? '?'} dust)`);
-    button.type = 'button'; button.dataset.trade = row.id;
-    return button;
-  }));
-  if (!ex.inventory.length) offers.textContent = 'Nothing left to offer.';
+  $('anchor-dialogue').hidden = !anchor.first_return;
+  $('anchor-hint').textContent = anchor.first_return
+    ? 'All resources carried through a life become dimensional ash here. Repeated copies of the same resource across lives yield less ash. Spend ash to grasp possibilities in coming lives and unlock follow-up actions.'
+    : 'Carried resources became dimensional ash. Repeated copies of the same resource across lives yield less ash.';
   const shop = $('anchor-shop');
   shop.replaceChildren(...shopSections(ex.shop).flatMap(section => [el('h3', '', section.title), ...section.rows.map(shopButton)]));
   const journal = ex.meta?.journal || [];
   if (journal.length) {
     shop.append(el('h3', '', 'Journal · shape future encounters'));
     for (const row of journal) {
-      const toggle = el('button', '', `${row.name}: ${row.enabled ? 'enabled' : 'disabled'} (mastery ${row.mastery})`);
-      toggle.type = 'button'; toggle.dataset.journalToggle = row.id;
-      shop.append(toggle);
-      if (row.mastery >= 3) {
+      shop.append(el('p', 'note', `${row.name}: mastery ${row.mastery}`));
+      if (row.mastery >= 2) {
         const odds = el('button', '', `Appearance odds: ${row.mode} · select to cycle`);
         odds.type = 'button'; odds.dataset.journalFavor = row.id;
         shop.append(odds);
+      }
+      if (row.mastery >= 3) {
+        for (const region of row.regions || []) {
+          const chosen = ex.meta?.journal_guarantee === row.id &&
+            ex.meta?.journal_guarantee_region === region.id;
+          const guarantee = el('button', '', chosen
+            ? `Guaranteed ${row.name} in ${region.name} - select to clear`
+            : `Guarantee ${row.name} once in ${region.name}`);
+          guarantee.type = 'button'; guarantee.dataset.journalGuarantee = row.id;
+          guarantee.dataset.region = region.id;
+          shop.append(guarantee);
+        }
       }
     }
   }
@@ -58,20 +61,20 @@ function shopButton(row) {
 
 /** The anchor action a click inside the offers/shop/begin controls asks for, or null. */
 export function anchorAction(target, expedition) {
-  const item = target.closest('button[data-trade]')?.dataset.trade;
-  if (item) return {type: 'trade', item};
   if (target.closest('#anchor-begin')) return {type: 'begin_life'};
   const journal = id => expedition?.meta?.journal?.find(entry => entry.id === id);
-  const toggle = target.closest('button[data-journal-toggle]')?.dataset.journalToggle;
-  if (toggle) {
-    const row = journal(toggle);
-    return row ? {type: 'journal_toggle', id: toggle, enabled: !row.enabled} : null;
-  }
   const favor = target.closest('button[data-journal-favor]')?.dataset.journalFavor;
   if (favor) {
     const row = journal(favor);
     return row ? {type: 'journal_favor', id: favor,
       mode: JOURNAL_MODES[(JOURNAL_MODES.indexOf(row.mode) + 1) % JOURNAL_MODES.length]} : null;
+  }
+  const guaranteed = target.closest('button[data-journal-guarantee]')?.dataset.journalGuarantee;
+  if (guaranteed) {
+    const region = target.closest('button[data-journal-guarantee]').dataset.region;
+    const chosen = expedition?.meta?.journal_guarantee === guaranteed &&
+      expedition?.meta?.journal_guarantee_region === region;
+    return {type: 'journal_guarantee', id: chosen ? null : guaranteed, region: chosen ? null : region};
   }
   const value = target.closest('button[data-buy]')?.dataset.buy;
   if (!value) return null;

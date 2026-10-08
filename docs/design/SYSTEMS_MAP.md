@@ -2,15 +2,15 @@
 
 | Module | Owns | Reads | Writes |
 |---|---|---|---|
-| `world/catalog.py` | Items, actions, unlocks, boons, regions, mastery cost (validated data) | - | - |
+| `world/catalog.py` | Items, actions, unlocks, boons, regions, mastery thresholds (validated data) | - | - |
 | `world/tuning.py` | Balance numbers for spots, pity, offering, ash, gear, frontier | - | - |
 | `world/regions.py` / `world/repository.py` | Adjacency-weighted region selection, organic per-tile region field (v3), pinned region catalog per world | catalog.REGIONS, seeds | world save schema 5 |
 | `world/water.py` | River overlay (generator v4): one global contour field, fords/bridges where trails cross | seeds | nothing (pure function of world seed) |
 | `world/actions.py` | Known/eligible/bucket/explain (pure) | catalog | - |
 | `world/encounters.py` | Rolled spot, pity spot and temporary lead placement (pure) | actions, tuning | - |
 | `world/equipment.py` | Validated current-life weapon/body slots | catalog.ITEMS | - |
-| `world/economy.py` | Offer value, rebirth ash, anchor shop rows, purchase | catalog, tuning | meta fields |
-| `world/autopilot/` | Expedition (one mixin per concern): life loop, goals, navigation, screening (windows, pity), combat, outcomes/crafting policy, vitals, anchor, saves | all above | expedition state (schema 9) |
+| `world/economy.py` | Lifetime diminishing ash conversion, anchor shop rows, purchase | catalog, tuning | meta fields |
+| `world/autopilot/` | Expedition (one mixin per concern): life loop, goals, navigation, screening (windows, pity, guarantee), combat, outcomes/crafting policy, vitals, anchor, saves | all above | expedition state (schema 10) |
 | `world/session.py` | Snapshot projection (+ region, meta, shop, debug), input validation | expedition | - |
 | `world/journal.py` | Lifetime journal (actions, items, deaths, longest life) and achievements derived from it | catalog.ACHIEVEMENTS | expedition.journal |
 | `world/details.py` | Read-only page projections: character, stats, multipliers, rolls, journal | expedition | - |
@@ -19,7 +19,7 @@
 
 Data flow on entering a chunk: `region_for` -> `Context` -> `bucket` -> runtime `chunk_spots` -> `Expedition._screen`
 (window caps, drought, pity) -> admitted spots -> goals -> tasks -> rewards -> inventory -> crafting / eating /
-anchor economy -> meta (dust, ash, blessing, unlocked, mastery, boon) -> next life's windows and buckets.
+anchor economy -> meta (ash, blessing, unlocks, earned mastery, boon) -> next life's buckets and guarantee.
 
 Determinism: every random choice is derived from saved seed and entry history. Screening order follows
 player entry order. Runtime spot plans, stats, drought, forced pity spots and meta are saved.

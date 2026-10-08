@@ -454,9 +454,14 @@ $('touch-interact').addEventListener('click',()=>{ if (!paused && manualAllowed(
 document.addEventListener('dblclick',event=>event.preventDefault());
 $('report-close').addEventListener('click',()=>{hud.hideReport();setPause(false);canvas.focus();});
 // One anchor action per request: later clicks wait until the server has answered.
-for (const id of ['anchor-offers', 'anchor-begin', 'anchor-shop']) $(id).addEventListener('click', event => {
+for (const id of ['anchor-begin', 'anchor-shop']) $(id).addEventListener('click', event => {
   const action = anchorAction(event.target, state?.expedition);
   if (action && !pendingAction) pendingAction = action;
+});
+$('skill-bar').addEventListener('click', event => {
+  const slot = event.target.closest('button[data-skill-slot]');
+  if (slot?.dataset.skillSlot === '0' && slot.dataset.state === 'ready' && !pendingAction)
+    pendingAction = {type: 'return'};
 });
 $('resume').addEventListener('click',()=>{setPause(false);canvas.focus();});
 $('zoom-in').addEventListener('click',()=>changeZoom(.1));

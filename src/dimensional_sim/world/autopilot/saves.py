@@ -5,9 +5,8 @@ and a re-save are byte-identical. from_dict() validates every field before trust
 it. Older saves are migrated one schema at a time by MIGRATIONS; schemas 1-5
 (before the hosted build) are no longer supported and are rejected.
 """
-from .. import economy
 from ..catalog import BOONS, UNLOCKS
-from ..catalog import ATTRIBUTES, BY_ID, ITEMS
+from ..catalog import ATTRIBUTES, BY_ID, ITEMS, REGIONS
 from ..encounters import ENCOUNTER_VERSION
 from ..equipment import validate_equipped
 from ..journal import new_journal, validate_journal
@@ -20,16 +19,18 @@ from .constants import (ANCHOR_COUNTDOWN_MS, FOOD_COOLDOWN_MS, INVENTORY_SLOTS, 
 
 SAVE_FIELDS = ("schema_version", "encounters", "exploration", "life", "total_ms", "regular",
                "dimensional", "life_gain", "completed", "inventory", "hunger", "health",
-               "food_cooldown_ms", "cause", "depth", "best_depth", "blessing", "dust", "ash", "unlocked",
+               "food_cooldown_ms", "cause", "depth", "best_depth", "blessing", "ash", "unlocked",
                "mastery", "boon", "boon_next", "stats", "drought", "forced", "journal", "anchor_ms", "anchor_wait",
                "monster_ms", "prayers_this_life", "budget", "spawned",
                "admitted", "screened_chunks", "screened_targets", "log", "sequence",
                "decisions", "skills", "report", "task", "goal", "equipped", "knowledge",
-               "recipes", "journal_disabled", "journal_favor", "leads", "lead_history", "spot_plans")
+               "recipes", "journal_disabled", "journal_favor", "leads", "lead_history", "spot_plans",
+               "return_ready_ms", "journal_guarantee", "journal_guarantee_region", "guarantee_used", "converted")
 V7_FIELDS = ("journal",)                       # added by schema 7
 V8_FIELDS = ("equipped", "knowledge", "recipes", "journal_disabled", "journal_favor",
              "leads", "lead_history")         # added by schema 8
 V9_FIELDS = ("spot_plans",)                    # added by schema 9
+V10_FIELDS = ("return_ready_ms", "journal_guarantee", "journal_guarantee_region", "guarantee_used", "converted")
 OLDEST_SUPPORTED_SCHEMA = 6
 
 
@@ -53,7 +54,7 @@ def _reroll_current_life(data):
         task = None
     if isinstance(goal, dict) and goal.get("kind") in ("spot", "target"):
         goal = None
-    return {**data, "schema_version": SCHEMA_VERSION, "encounters": ENCOUNTER_VERSION,
+    return {**data, "schema_version": 9, "encounters": ENCOUNTER_VERSION,
             "exploration": exploration, "completed": completed, "task": task, "goal": goal, "forced": {},
             "budget": None, "spawned": None, "admitted": None, "screened_chunks": None,
             "screened_targets": None, "spot_plans": {}}
@@ -61,13 +62,13 @@ def _reroll_current_life(data):
 
 def _from_v6(data):
     """Schema 6 -> 7 adds the lifetime journal (empty: earlier lives were not counted)."""
-    fields(data, _without(V7_FIELDS, V8_FIELDS, V9_FIELDS))
+    fields(data, _without(V7_FIELDS, V8_FIELDS, V9_FIELDS, V10_FIELDS) + ("dust",))
     return {**data, "schema_version": 7, "journal": new_journal()}
 
 
 def _from_v7(data):
     """New action pool/regions: preserve earned progress, move carried gear into slots."""
-    fields(data, _without(V8_FIELDS, V9_FIELDS))
+    fields(data, _without(V8_FIELDS, V9_FIELDS, V10_FIELDS) + ("dust",))
     if data["encounters"] != "encounters-v6":
         raise ValueError("unsupported expedition save")
     equipped = {ITEMS[item].slot: item for item in dict(data["inventory"]) if ITEMS[item].kind == "gear"}
@@ -77,13 +78,30 @@ def _from_v7(data):
 
 def _from_v8(data):
     """Spots are now rolled on entry and saved as plans: affected plans re-roll."""
-    fields(data, _without(V9_FIELDS))
+    fields(data, _without(V9_FIELDS, V10_FIELDS) + ("dust",))
     if data["encounters"] != "encounters-v7":
         raise ValueError("unsupported expedition save")
     return _reroll_current_life(data)
 
 
-MIGRATIONS = {6: _from_v6, 7: _from_v7, 8: _from_v8}
+def _from_v9(data):
+    """Combine prestige balances and reroll old encounter plans; paid mastery is legacy credit."""
+    fields(data, _without(V10_FIELDS) + ("dust",))
+    if data["encounters"] == "encounters-v8":
+        data = _reroll_current_life(data)
+    elif data["encounters"] != ENCOUNTER_VERSION:
+        raise ValueError("unsupported expedition save")
+    ash = integer(data["ash"], "ash", 0) + integer(data["dust"], "dust", 0)
+    favor = dict(data["journal_favor"])
+    favor.update({ident: "suppress" for ident in data["journal_disabled"]})
+    return {**{key: value for key, value in data.items() if key != "dust"},
+            "schema_version": 10, "ash": ash, "journal_favor": favor,
+            "journal_disabled": [], "return_ready_ms": 0,
+            "journal_guarantee": None, "journal_guarantee_region": None, "guarantee_used": False,
+            "converted": {}}
+
+
+MIGRATIONS = {6: _from_v6, 7: _from_v7, 8: _from_v8, 9: _from_v9}
 
 
 def upgrade(data):
@@ -174,21 +192,41 @@ def _load_life(result, data):
     result.hunger = integer(data["hunger"], "hunger", 0, VITAL_MAX)
     result.health = integer(data["health"], "health", 0, VITAL_MAX)
     result.food_cooldown_ms = integer(data["food_cooldown_ms"], "food cooldown", 0, FOOD_COOLDOWN_MS)
-    if data["cause"] not in (None, "starvation", "boar"):
+    if data["cause"] not in (None, "starvation", "boar", "return"):
         raise ValueError("invalid death cause")
     result.cause = data["cause"]
     result.depth = integer(data["depth"], "depth", 0)
     result.best_depth = integer(data["best_depth"], "best depth", result.depth)
     result.blessing = integer(data["blessing"], "blessing power", 0)
-    result.dust = integer(data["dust"], "dimensional dust", 0)
     result.ash = integer(data["ash"], "ash", 0)
+    if type(data["converted"]) is not dict or any(item not in ITEMS for item in data["converted"]):
+        raise ValueError("invalid converted resources")
+    result.converted = {item: integer(count, "converted resources", 1)
+                        for item, count in data["converted"].items()}
+    result.return_ready_ms = integer(data["return_ready_ms"], "return cooldown", 0)
     if type(data["unlocked"]) is not list or any(u not in UNLOCKS for u in data["unlocked"]) \
             or len(set(data["unlocked"])) != len(data["unlocked"]):
         raise ValueError("invalid unlocks")
     result.unlocked = set(data["unlocked"])
-    if type(data["mastery"]) is not dict or any(a not in economy.MASTERABLE for a in data["mastery"]):
+    if type(data["mastery"]) is not dict or any(a not in BY_ID or BY_ID[a].placement != "spot"
+                                                  for a in data["mastery"]):
         raise ValueError("invalid mastery")
     result.mastery = {a: integer(v, "mastery", 1, 3) for a, v in data["mastery"].items()}
+    selected = data["journal_guarantee"]
+    if selected is not None and (selected not in BY_ID or BY_ID[selected].placement != "spot"
+                                 or result.mastery.get(selected, 0) < 3):
+        raise ValueError("invalid journal guarantee")
+    result.journal_guarantee = selected
+    region = data["journal_guarantee_region"]
+    if (selected is None and region is not None) or (selected is not None and
+            (region not in REGIONS or REGIONS[region].biome not in BY_ID[selected].biomes or
+             (BY_ID[selected].regions is not None and region not in BY_ID[selected].regions) or
+             REGIONS[region].multiplier(selected) == 0)):
+        raise ValueError("invalid journal guarantee region")
+    result.journal_guarantee_region = region
+    if type(data["guarantee_used"]) is not bool:
+        raise ValueError("invalid guarantee state")
+    result.guarantee_used = data["guarantee_used"]
     for name in ("boon", "boon_next"):
         if data[name] is not None and data[name] not in BOONS:
             raise ValueError(f"invalid {name}")
@@ -331,12 +369,17 @@ class SavesMixin:
                 "hunger": self.hunger, "health": self.health,
                 "food_cooldown_ms": self.food_cooldown_ms, "cause": self.cause,
                 "depth": self.depth, "best_depth": self.best_depth, "blessing": self.blessing,
-                "dust": self.dust, "ash": self.ash, "unlocked": sorted(self.unlocked),
+                "ash": self.ash, "converted": dict(sorted(self.converted.items())),
+                "unlocked": sorted(self.unlocked),
                 "mastery": dict(sorted(self.mastery.items())), "boon": self.boon, "boon_next": self.boon_next,
                 "stats": dict(self.stats), "drought": dict(self.drought), "journal": validate_journal(self.journal),
                 "forced": {k: list(v) for k, v in sorted(self.forced.items())},
                 "spot_plans": {k: [list(row) for row in v] for k, v in sorted(self.spot_plans.items())},
                 "anchor_ms": self.anchor_ms, "anchor_wait": self.anchor_wait,
+                "return_ready_ms": self.return_ready_ms,
+                "journal_guarantee": self.journal_guarantee,
+                "journal_guarantee_region": self.journal_guarantee_region,
+                "guarantee_used": self.guarantee_used,
                 "monster_ms": self.monster_ms, "prayers_this_life": self.prayers_this_life,
                 "budget": dict(self.budget), "spawned": dict(self.spawned),
                 "admitted": sorted([i, e] for i, e in self.admitted.items()), "screened_chunks": sorted(self.screened_chunks),

@@ -17,7 +17,7 @@ dimensional XP (persists; 20% of gains). Speed from progression.py shortens
 activities and punch pauses; Endurance slows hunger and softens hits. Hunger and
 health are integer micro-points; every rate change ends a simulation step, so
 vitals are partition-independent. Health 0 -> anchor interlude -> next life:
-remaining inventory can become persistent dust before regular XP, inventory,
+remaining inventory becomes persistent dimensional ash before regular XP, inventory,
 vitals, actors and encounter rolls reset. Dimensional XP, discovery and skills persist.
 
 Prologue (first life of a new expedition): the screen starts dark while the
@@ -37,9 +37,9 @@ Closed loop (docs/design/GAME_LOOP.md): spots come from the action bucket of
 known actions (actions.py) in the chunk's region (regions.py). Food and enemy pity
 forces a spot of a starved category after a few empty chunks. Crafting (self
 actions) turns materials into gear or food. At death, items can be offered for
-dust; whatever is still carried burns to ash at rebirth. Dust buys unlocks (new
-actions), ash buys mastery (wider spawn windows), blessing buys the shrine unlock
-or a next-life boon (economy.py).
+dimensional ash automatically. Ash buys unlocks (new actions), repeated actions
+earn Journal mastery, and blessing buys the shrine unlock or a next-life boon
+(economy.py).
 
 Manual control is the locked skill "take_control"; adapters must ignore player
 movement/attack input until it is unlocked.

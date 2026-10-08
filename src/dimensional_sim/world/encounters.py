@@ -21,7 +21,7 @@ from .models import DELTAS, ChunkKey, integer
 from .seeds import derive_seed
 from .tuning import SPOTS_PER_CHUNK
 
-ENCOUNTER_VERSION = "encounters-v8"  # v8: roll when a chunk is entered, persist the resulting opportunities
+ENCOUNTER_VERSION = "encounters-v9"  # v9: earned Journal odds and one chosen-region guarantee
 NEAR = (None, "T", "^")
 SPOT_ACTIONS = tuple(a for a in ACTIONS if a.placement == "spot")
 POOLS = {"dark_forest": tuple(a for a in SPOT_ACTIONS if "dark_forest" in a.biomes)}
@@ -110,14 +110,14 @@ def roll_loot(entry, seed):
 def spawn_window(entry, mastery=0, bonus=0):
     """(low, high) cap on how many of one encounter exist at once, or None (unlimited).
 
-    Mastery (bought with ash) widens the window: +1 high per level and +1 low every
-    second level. `bonus` (e.g. the bountiful-path boon) adds to both ends."""
+    Mastery now changes Journal knowledge and roll control, not caps. `bonus`
+    (e.g. the bountiful-path boon) adds to both ends."""
     if entry.window is None:
         return None
     integer(mastery, "mastery", 0, 1000)
     integer(bonus, "window bonus", 0, 1000)
     low, high = entry.window
-    return low + mastery // 2 + bonus, high + mastery + bonus
+    return low + bonus, high + bonus
 
 
 def roll_window(entry, seed, mastery=0, bonus=0):

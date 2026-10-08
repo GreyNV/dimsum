@@ -22,10 +22,10 @@ BIOME (dark_forest)
   -> GENERATED LOCATION   region of the chunk (regions.py, pinned per world)
   -> LOCATION POOL        action.regions + RegionDef.weights (percent, 0 = never here)
   -> KNOWN / UNLOCKED     unlock bought, knowledge learned, recipe discovered      actions.known()
-  -> JOURNAL / MASTERY    disabled (mastery 2+) removes it; favor/suppress (3+) x1.5 / x0.5
+  -> JOURNAL / MASTERY    favor/suppress (grade 2+) x1.5 / x0.5
   -> BUCKET               positive effective weight                               actions.bucket()
   -> ROLL / SPAWN         first entry: 0-3 spots from current bucket, seeded by life + entry order + chunk
-  -> SCREENING            spawn windows (at-once caps) and pity        autopilot/spawning.py _screen
+  -> SCREENING            spawn windows (at-once caps), pity and one grade-3 chosen-region guarantee
   -> CONTEXT              ingredients, hunger, carried food, live play, once per life, live lead token
   -> AVAILABLE ACTION     the auto-pilot walks there / starts it
   -> OUTCOME              loot, XP, heal, blessing, gear (equipped), knowledge, recipe, temporary lead
@@ -54,8 +54,8 @@ be turned away by its spawn window (screening log says why).
   `outcomes` (`OutcomeDef(kind, id, at_count, chance, ttl_ms)`: knowledge, recipe, lead), biomes, regions,
   near, window, loot, heal, blessing, cost, effect (gear), need policy fields, roles (descriptive).
 - `RegionDef`: biome, selection weight, tint, action weight percents, `canopy`, `brush`, `landmark` (terrain).
-- `UnlockDef` (dust/blessing, anchor), `BoonDef` (next life), mastery (ash, `MASTERY_MAX` 3,
-  `JOURNAL_TOGGLE_MASTERY` 2, `JOURNAL_FAVOR_MASTERY` 3).
+- `UnlockDef` (ash/blessing, anchor), `BoonDef` (next life), earned mastery at 10/100/1000
+  lifetime spot completions (Journal entry, odds control, one chosen-region guarantee).
 - `validate_catalog()` checks every cross reference at import (leads point at lead actions, knowledge and
   recipes have a source, items have a source, regions exist).
 
