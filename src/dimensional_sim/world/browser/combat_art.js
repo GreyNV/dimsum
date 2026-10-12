@@ -10,28 +10,31 @@ export const ENEMY = Object.freeze({paint: [
   ' dfwfffwfd ', '  dd   dd  '], glyph: [
   ' /       \\ ', ' (\\ ^^^ /) ', '  ;;;;;;;  ', ' ;;o;;;o;; ', '/;;;vvv;;;\\',
   " \\;V;;;V;/ ", "  ''   ''  "]});
+/** Enemy art by catalog sprite key (catalog.EnemyDef.sprite); unknown keys draw ENEMY. */
+export const ENEMY_SPRITES = Object.freeze({boar: ENEMY});
 
 /** Enemy at tile center (x, y). `hit` = ms since last HP loss; `dying` = 0..1 progress. */
 export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying = null, maxHp = 3, reducedMotion = false, ghost = false} = {}) {
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
-  const {width, height} = spriteSize(ENEMY);
+  const sprite = ENEMY_SPRITES[target.sprite] || ENEMY;
+  const {width, height} = spriteSize(sprite);
   const seed = visualHash(target.x, target.y, 77);
   const breathe = reducedMotion ? 0 : Math.floor((clock + seed % 1000) / 500) % 2;
   const shake = !reducedMotion && hit < 160 ? (Math.floor(hit / 40) % 2 ? 2 : -2) : 0;
   const left = x - width / 2 + shake, top = y + ACTOR_FOOT - height + breathe;
   if (dying !== null) {
-    paintSprite(ctx, ENEMY, left, top - Math.round(dying * 6), {dissolve: dying, alpha: 1 - dying * .6, seed});
+    paintSprite(ctx, sprite, left, top - Math.round(dying * 6), {dissolve: dying, alpha: 1 - dying * .6, seed});
     return {left, top, width, height};
   }
   if (ghost) {
     // X-ray pass for an enemy hidden behind the player: translucent, no shadow.
-    paintSprite(ctx, ENEMY, left, top, {flash: hit < 110, alpha: .42, seed});
+    paintSprite(ctx, sprite, left, top, {flash: hit < 110, alpha: .42, seed});
     drawHealth(ctx, x, top - 7, target.hp, Math.max(maxHp, target.hp));
     return {left, top, width, height};
   }
   drawShadow(ctx, x, y, 17);
-  paintSprite(ctx, ENEMY, left, top, {flash: hit < 110, seed});
+  paintSprite(ctx, sprite, left, top, {flash: hit < 110, seed});
   // Breath and horn glints distinguish a living boar from a static encounter prop.
   if (hit >= 110) {
     ctx.fillStyle = '#fff0c2';

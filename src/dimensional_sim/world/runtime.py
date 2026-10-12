@@ -21,6 +21,7 @@ DIAGONALS = {"northeast": ("north", "east"), "southeast": ("south", "east"),
              "southwest": ("south", "west"), "northwest": ("north", "west")}
 MOVE_DIRECTIONS = DIRECTIONS + tuple(DIAGONALS)
 DIAGONAL_PERCENT = 141
+REVEAL_RADIUS = 5
 from .seeds import derive_seed
 
 
@@ -85,6 +86,7 @@ class Exploration:
         self.player = Player(key, spawn.x, spawn.y)
         self.targets = {}
         self.initialized_chunks = set()
+        self.seen = {}
         self.elapsed_ms = 0
         self.move_elapsed_ms = 0
         self.last_move = None
@@ -93,6 +95,32 @@ class Exploration:
         # Adapter presentation choice, not saved: a new move press steps at once.
         self.step_on_press = False
         self._enter(key)
+        self._reveal()
+
+    def _reveal(self):
+        """Remember nearby cells, including those across a chunk edge, without generating terrain."""
+        asset = self.current_chunk().asset
+        width, height = asset.width, asset.height
+        gx = self.player.chunk.x * width + self.player.x
+        gy = self.player.chunk.y * height + self.player.y
+        for dy in range(-REVEAL_RADIUS, REVEAL_RADIUS + 1):
+            for dx in range(-REVEAL_RADIUS, REVEAL_RADIUS + 1):
+                if dx * dx + dy * dy > REVEAL_RADIUS * REVEAL_RADIUS:
+                    continue
+                x, y = gx + dx, gy + dy
+                key = ChunkKey(self.player.chunk.dimension, x // width, y // height)
+                if self.world.status(key) == "unknown":
+                    continue
+                rows = self.seen.setdefault(key, [0] * height)
+                rows[y % height] |= 1 << (x % width)
+
+    def visibility_rows(self, key):
+        """Browser-safe row strings; absent cells remain hidden."""
+        rows = self.seen.get(key)
+        if rows is None:
+            return None
+        width = next(spec.width for spec in self.world.dimensions if spec.id == key.dimension)
+        return ["".join("1" if row & (1 << x) else "0" for x in range(width)) for row in rows]
 
     @property
     def movement_interval_ms(self):
@@ -195,6 +223,7 @@ class Exploration:
         self.player.chunk, self.player.x, self.player.y = key, x, y
         if entered:
             self._enter(key)
+        self._reveal()
 
     @staticmethod
     def facing_for(direction, current):
@@ -290,8 +319,8 @@ class Exploration:
             self._set_animation("walk" if command.move else "idle")
 
     def to_dict(self):
-        """Schema1 is self-contained; resident cache and renderer state are not saved."""
-        return {"schema_version": 1, "world": self.world.to_dict(),
+        """Schema2 saves cell discovery; resident cache and renderer state are not saved."""
+        return {"schema_version": 2, "world": self.world.to_dict(),
                 "config": {name: getattr(self, name) for name in (
                     "movement_interval_ms", "animation_rate_percent", "attack_rate_percent", "attack_damage")},
                 "animations": animations_to_dict(self.animations), "player": asdict(self.player),
@@ -300,17 +329,21 @@ class Exploration:
                     key=lambda k: (k.dimension, k.x, k.y))],
                 "elapsed_ms": self.elapsed_ms, "move_elapsed_ms": self.move_elapsed_ms,
                 "last_move": self.last_move, "attack_held": self.attack_held,
-                "hit_targets": sorted(self.hit_targets)}
+                "hit_targets": sorted(self.hit_targets),
+                "seen": [{"dimension": key.dimension, "x": key.x, "y": key.y,
+                          "rows": self.visibility_rows(key)} for key in sorted(self.seen,
+                              key=lambda k: (k.dimension, k.x, k.y))]}
 
     @classmethod
     def from_dict(cls, data):
         """Reject corrupt/future saves before returning a newly owned simulation."""
         from .repository import WorldRepository
+        if type(data) is not dict or type(data.get("schema_version")) is not int or data["schema_version"] not in (1, 2):
+            raise ValueError("unsupported exploration schema")
+        version = data["schema_version"]
         fields(data, ("schema_version", "world", "config", "animations", "player",
                       "targets", "initialized_chunks", "elapsed_ms", "move_elapsed_ms",
-                      "last_move", "attack_held", "hit_targets"))
-        if type(data["schema_version"]) is not int or data["schema_version"] != 1:
-            raise ValueError("unsupported exploration schema")
+                      "last_move", "attack_held", "hit_targets") + (("seen",) if version == 2 else ()))
         try:
             fields(data["config"], ("movement_interval_ms", "animation_rate_percent",
                                     "attack_rate_percent", "attack_damage"))
@@ -395,6 +428,34 @@ class Exploration:
             result.hit_targets = set(hits)
             result.world.stream(result.player.chunk)
             result.world.get(result.player.chunk)
+            result.seen = {}
+            if version == 1:
+                # Old saves revealed every visited chunk. Keep that progress on upgrade.
+                specs = {spec.id: spec for spec in result.world.dimensions}
+                for raw in data["world"]["discovery"]:
+                    if raw["status"] == "visited":
+                        key = ChunkKey(raw["dimension"], raw["x"], raw["y"])
+                        spec = specs[key.dimension]
+                        result.seen[key] = [(1 << spec.width) - 1] * spec.height
+            else:
+                if type(data["seen"]) is not list:
+                    raise ValueError("seen must be an array")
+                specs = {spec.id: spec for spec in result.world.dimensions}
+                for raw in data["seen"]:
+                    fields(raw, ("dimension", "x", "y", "rows"))
+                    key = ChunkKey(raw["dimension"], raw["x"], raw["y"])
+                    if key in result.seen or key.dimension not in specs or result.world.status(key) == "unknown":
+                        raise ValueError("invalid seen chunk")
+                    spec = specs[key.dimension]
+                    rows = raw["rows"]
+                    if type(rows) is not list or len(rows) != spec.height or any(
+                            type(row) is not str or len(row) != spec.width or set(row) - {"0", "1"}
+                            for row in rows):
+                        raise ValueError("invalid seen rows")
+                    result.seen[key] = [sum(1 << x for x, bit in enumerate(row) if bit == "1") for row in rows]
+                rows = result.seen.get(result.player.chunk)
+                if rows is None or not rows[result.player.y] & (1 << result.player.x):
+                    raise ValueError("player cell must be seen")
             return result
         except (KeyError, TypeError, AttributeError, StopIteration) as exc:
             raise ValueError("malformed exploration save") from exc

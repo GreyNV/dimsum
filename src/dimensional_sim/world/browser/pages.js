@@ -5,11 +5,8 @@ import {LABEL} from './hud.js';
 
 export const PAGES = Object.freeze([
   {id: 'world', label: 'World', icon: '◈'},
-  {id: 'character', label: 'Hero', icon: '☺'},
   {id: 'stats', label: 'Stats', icon: '▤'},
-  {id: 'speed', label: 'Speed', icon: '»'},
   {id: 'journal', label: 'Journal', icon: '✎'},
-  {id: 'life', label: 'This life', icon: '⚄'},
   {id: 'settings', label: 'Settings', icon: '⚙'},
 ]);
 export const PAGE_IDS = Object.freeze(PAGES.map(p => p.id));
@@ -49,9 +46,11 @@ function character(d) {
       ['Regeneration', `${c.regen_per_minute} per min`, `${c.rest_regen_per_minute} per min resting at camp`],
     ]},
     {title: 'Combat', kind: 'rows', rows: [
-      ['Punch damage', String(c.punch_damage), 'Boars have 3 HP'],
-      ['Boar hit at the frontier', `${c.boar_hit_at_frontier} health`, `ring ${c.frontier}`],
-      ['Full fight at the frontier', `${c.fight_cost_at_frontier} health`, 'expected cost of one boar'],
+      ['Punch damage', String(c.punch_damage)],
+      ...c.threats.flatMap(t => [
+        [`${t.name} at the frontier`, `${t.hit_at_frontier} health per bite`, `${t.hp} HP in ring ${c.frontier}`],
+        [`Full fight with a ${t.name.toLowerCase()}`, `${t.fight_cost_at_frontier} health`, 'expected cost of one fight'],
+      ]),
     ]},
     {title: 'Journey', kind: 'rows', rows: [
       ['Life', String(c.life)], ['Ring now', String(c.depth)], ['Frontier (safe push)', `ring ${c.frontier}`],
@@ -93,8 +92,8 @@ function speed(d) {
     {title: 'Action speed', kind: 'table', head: ['Action', 'Attribute', 'Speed', 'Base', 'Now'],
       rows: m.actions.map(a => [a.name, label(a.attribute), times(a.speed), seconds(a.base_ms), seconds(a.effective_ms)]),
       note: 'Only actions you know are listed. Prayer and reflection take fixed time.'},
-    {title: 'Damage taken from boars', kind: 'rows',
-      rows: [...m.boar_hit.map(([name, v]) => [name, `×${v}`]), ['Total', `×${product(m.boar_hit).toFixed(3)}`]]},
+    {title: 'Damage taken from enemies', kind: 'rows',
+      rows: [...m.enemy_hit.map(([name, v]) => [name, `×${v}`]), ['Total', `×${product(m.enemy_hit).toFixed(3)}`]]},
     {title: 'Punch damage', kind: 'rows',
       rows: [...m.punch_parts.filter(([, v]) => v).map(([name, v]) => [name, `+${v}`]), ['Total', String(m.punch_damage)]]},
     {title: 'Hunger', kind: 'rows', rows: [['Drain multiplier', `×${m.hunger_drain}`, 'from endurance']]},
@@ -182,7 +181,7 @@ function settings(state, host) {
   return sections;
 }
 
-const BUILDERS = {character, stats, speed, journal, life};
+const BUILDERS = {stats, journal};
 
 /** {title, sections} for one page, or {title, loading: true} while the detail block is on its way. */
 export function pageModel(page, state, host = null) {
@@ -191,5 +190,5 @@ export function pageModel(page, state, host = null) {
   if (page === 'settings') return {title: 'Settings', sections: settings(state, host)};
   const detail = state?.expedition?.detail;
   if (!detail) return {title: meta.label, loading: true, sections: []};
-  return {title: meta.label === 'Hero' ? 'Character' : meta.label, sections: BUILDERS[page](detail)};
+  return {title: meta.label, sections: BUILDERS[page](detail)};
 }

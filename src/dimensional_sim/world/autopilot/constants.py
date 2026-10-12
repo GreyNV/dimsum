@@ -17,27 +17,22 @@ MAX_EVENTS_PER_ADVANCE = 1_000_000
 
 POINT = 1_000_000                  # one vital point in micro-units
 VITAL_MAX = 100 * POINT
-HUNGER_DRAIN = 750                 # micro/ms at base Endurance (0.75 points per second)
+HUNGER_DRAIN = 850                 # micro/ms at base Endurance (0.85 points per second)
 STARVATION = 1_500                 # health micro/ms at zero hunger (1.5 points/s)
 REGEN = 200                        # health micro/ms while hunger is above half
 REST_REGEN = 1_000                 # extra health micro/ms while resting at the camp
 REGEN_ABOVE = 50 * POINT
 EAT_AT = 40 * POINT                # auto-eat only after hunger is genuinely low
 FOOD_COOLDOWN_MS = 15_000
-BOAR_HIT = 6 * POINT               # per punch exchanged with a living boar, at the anchor
-# Danger rises with distance from the anchor: hits x1.5 and +1 boar HP per ring.
-DANGER_RING_CAP = 40
 RETREAT_BELOW = 35 * POINT         # badly hurt -> go home and rest
 FOOD_HEALS_DIVISOR = 3             # eating restores food/3 health points
 RESTED_AT = 90 * POINT
 REST_MS = 10_000
 INVENTORY_SLOTS = 12
 STACK_LIMIT = 20
-BOAR_ENCOUNTER = "bramble_boar"    # rare spot monsters use this spawn window
-MONSTER_STEP_MS = 300             # boars take one step this often while they chase
-BOAR_AGGRO_RADIUS = 9             # a live boar this close (in steps) charges the avatar
-BOAR_PATH_LIMIT = 2 * BOAR_AGGRO_RADIUS + 2        # chasing boars path-find this far (steps) around obstacles
-CAMP_SAFE_RADIUS = 5              # boars stop at the edge of the anchor camp
+# Enemy numbers (hit, aggro radius) live on catalog.EnemyDef; danger growth on catalog.BiomeDef.
+MONSTER_STEP_MS = 300             # chasing enemies take one step this often
+CAMP_SAFE_RADIUS = 5              # enemies stop at the edge of the anchor camp
 LEGACY_MONSTER_MAX_MS = 999       # saves before 2026-10-05 used a 1000 ms monster clock
 AFTER_LOCATION_REST_WEIGHT = 26   # weight of "just pause" inside the after-location bucket
 SELF_ACTIONS = tuple(a.id for a in BY_ID.values() if a.placement == "self")

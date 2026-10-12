@@ -8,14 +8,13 @@ TESTS: tests/test_world_pages.py.
 """
 from .actions import Context, describe_bucket, known
 from .autopilot import INVENTORY_SLOTS, POINT, REGEN, REST_REGEN
-from .catalog import ACTIONS, BOONS, BY_ID, ITEMS, MASTERY_THRESHOLDS, REGIONS, UNLOCKS
+from . import effects
+from .catalog import ACTIONS, BOONS, BY_ID, ENEMIES, ITEMS, MASTERY_THRESHOLDS, REGIONS, UNLOCKS
 from .encounters import spawn_window
-from .equipment import is_equipped
 from .journal import achievements
 from .models import ChunkKey
 from .progression import attribute_report, scaled_ms, speed_permille
-from .tuning import (BOUNTY_WINDOW_BONUS, IRON_SKIN_HIT_PERCENT, PITY_CHUNKS, SPOTS_PER_CHUNK, STAFF_PUNCH_BONUS,
-                     WRAP_HIT_PERCENT)
+from .tuning import PITY_CHUNKS, SPOTS_PER_CHUNK
 
 
 def _pts(micro):
@@ -37,8 +36,10 @@ def character(e):
         "punch_damage": e.punch_damage(), "gear": gear,
         "boon": BOONS[e.boon].name if e.boon else None,
         "boon_next": BOONS[e.boon_next].name if e.boon_next else None,
-        "boar_hit_at_frontier": _pts(e.boar_hit(ChunkKey(e.dimension, frontier, 0))),
-        "fight_cost_at_frontier": _pts(e.fight_damage(frontier)),
+        "threats": [{"id": a.id, "name": ENEMIES[a.enemy].name,
+                     "hp": e.enemy_hp(a, ChunkKey(e.dimension, frontier, 0)),
+                     "hit_at_frontier": _pts(e.enemy_hit(ChunkKey(e.dimension, frontier, 0), ENEMIES[a.enemy])),
+                     "fight_cost_at_frontier": _pts(e.fight_damage(frontier, a))} for a in e.threats()],
         "hunger_per_minute": _pts(e._drain() * 60_000),
         "regen_per_minute": _pts(REGEN * 60_000), "rest_regen_per_minute": _pts(REST_REGEN * 60_000),
         "inventory_slots": [len(e.inventory), INVENTORY_SLOTS],
@@ -72,24 +73,22 @@ def multipliers(e):
                         "base_ms": base, "effective_ms": effective})
     endurance = e.speed("endurance")
     hit_parts = [["Endurance", round(1000 / endurance, 3)]]
-    if is_equipped(e.equipped, "hide_wrap"):
-        hit_parts.append(["Hide wrap", WRAP_HIT_PERCENT / 100])
-    if e.boon == "iron_skin":
-        hit_parts.append(["Iron skin boon", IRON_SKIN_HIT_PERCENT / 100])
+    hit_parts += [[name, percent / 100] for name, percent in effects.breakdown(e.equipped, e.boon,
+                                                                               "enemy_hit_percent")]
     punch = e.punch_damage()
-    staff = STAFF_PUNCH_BONUS if is_equipped(e.equipped, "walking_staff") else 0
+    bonuses = effects.breakdown(e.equipped, e.boon, "punch_damage")
     return {"actions": actions,
             "hunger_drain": round(1000 / endurance, 3),
-            "boar_hit": hit_parts,
+            "enemy_hit": hit_parts,
             "punch_damage": punch,
-            "punch_parts": [["Base", 1], ["Strength levels", punch - 1 - staff],
-                            *([["Walking staff", staff]] if staff else [])]}
+            "punch_parts": [["Base", 1], ["Strength levels", punch - 1 - sum(n for _, n in bonuses)],
+                            *[[name, n] for name, n in bonuses]]}
 
 
 def rolls(e):
     """This life's rolled caps against the possible range, spot counts and pity."""
     known_ctx = _known_context(e)
-    bonus = BOUNTY_WINDOW_BONUS if e.boon == "bountiful_path" else 0
+    bonus = effects.total({}, e.boon, "food_window_bonus")
     windows = []
     for ident, spawned, limit in e.bounty():
         action = BY_ID[ident]

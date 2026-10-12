@@ -1,5 +1,13 @@
 # Browser character world - scope and contract
 
+## Current playtest fog
+
+The browser uses saved tile discovery for fog. A five-tile radius reveals gradually
+as the character moves, including across chunk borders. Hidden tiles conceal terrain,
+props, encounter markers, and actors in the scene and minimap. Explored tiles persist
+through saves and deaths in the same world. Schema 1 exploration saves retain their
+previously visited chunks on upgrade. The visible tabs are World, Stats, Journal, and Settings.
+
 ## Scope and direction
 User direction: detailed character art in a browser, smaller cells, seamless
 scrolling. Use the first generated forest concept as the engineering default;

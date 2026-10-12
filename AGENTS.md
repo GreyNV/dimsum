@@ -25,11 +25,14 @@ world/browser_server.py, world/browser/: browser client (module map: docs/techni
   anchor_ui, page_ui, minimap, scene_fx, transport, dom = focused UI pieces.
 world/encounters.py: biome encounter spots. world/autopilot/ (package): the auto-pilot
 expedition (docs/technical/world-autopilot.md), one mixin per concern: expedition (loops),
-planning, navigation, spawning, combat, outcomes, vitals, lives (anchor), saves (schema 6-9
-migrations; older saves are rejected), presentation, constants. Manual control = locked skill.
+planning, navigation, spawning, combat (catalog enemies/biomes), outcomes, vitals, lives (anchor), saves
+(schema migrations; older saves are rejected), presentation, constants. Manual control = locked skill.
 world/progression.py: regular/dimensional levels, softcap and speed (owns its curve; no idle-sim import).
 core.py/content.py/balance.py: the Phase One idle sim, standalone; the world does not depend on it.
-world/catalog.py: ALL forest content as validated data (items, actions, recipes/knowledge/lead outcomes, unlocks, boons, regions).
+world/catalog.py: ALL content as validated data: biomes (danger curve), enemies, effects, items, actions,
+  recipes/knowledge/lead outcomes, unlocks (actions or abilities), boons, regions, category styles and art keys.
+  How to add content without engine edits: docs/design/CONTENT_SYSTEMS.md.
+world/effects.py: gear/boon Effects combined per stat (no item or boon is named in engine code).
 world/equipment.py: current-life weapon/body slots. Leads, knowledge and Journal roll controls live in autopilot state.
 world/actions.py: action bucket (known -> eligible -> weighted) and explain(); regions.py: chunk regions.
 world/economy.py: dimensional ash/blessing rules and anchor purchases; tuning.py: balance numbers.
@@ -51,6 +54,8 @@ test negative transitions and snapshot replay. Add animations via validated fram
 durations/active-window/hitbox metadata; test bulk/split timing, never infer damage
 from pixels. Register only through validation; freeze catalog for existing worlds.
 Content rules live in catalog/actions, never in generators or the auto-pilot by id.
+Never name an enemy, item, boon, unlock or biome in engine/client code: add a catalog field or
+Effect stat instead. Every catalog art key needs client art (tests/test_world_systems.py).
 Bump encounters.ENCOUNTER_VERSION + add a save upgrade when existing worlds' spot rolls change.
 Run focused tests before/after a subsystem, then full unittest and `node --test tests/*.test.mjs`. Preserve existing
 idle save/return/progression rules. No credentials or new runtime dependencies needed.

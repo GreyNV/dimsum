@@ -49,7 +49,8 @@ class JournalTests(unittest.TestCase):
                 validate_journal(bad)
 
     def test_achievements_cover_catalog_and_metrics_resolve(self):
-        e = played(120_000)
+        e = fresh()
+        e._reward("enc:forest:0:0:777", BY_ID["fallen_branches"])
         rows = achievements(e)
         self.assertEqual([r["id"] for r in rows], [a.id for a in ACHIEVEMENTS])
         for a, r in zip(ACHIEVEMENTS, rows):
@@ -78,9 +79,9 @@ class DetailTests(unittest.TestCase):
         d = detail(played(30_000))
         self.assertEqual(set(d["character"]), {
             "life", "depth", "best_depth", "frontier", "health", "hunger", "punch_damage", "gear", "boon",
-            "boon_next", "boar_hit_at_frontier", "fight_cost_at_frontier", "hunger_per_minute", "regen_per_minute",
+            "boon_next", "threats", "hunger_per_minute", "regen_per_minute",
             "rest_regen_per_minute", "inventory_slots", "currencies", "unlocked"})
-        self.assertEqual(set(d["multipliers"]), {"actions", "hunger_drain", "boar_hit", "punch_damage", "punch_parts"})
+        self.assertEqual(set(d["multipliers"]), {"actions", "hunger_drain", "enemy_hit", "punch_damage", "punch_parts"})
         self.assertEqual(set(d["rolls"]), {"life", "windows", "spots_per_chunk", "pity", "stats", "loot"})
         self.assertEqual(set(d["journal"]), {"actions", "items", "deaths", "best_life_min", "lives", "best_depth",
                                              "achievements", "knowledge", "recipes", "disabled", "favor",

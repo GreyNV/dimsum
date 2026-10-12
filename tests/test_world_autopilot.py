@@ -2,6 +2,7 @@
 import json
 import random
 import unittest
+
 from dataclasses import replace
 
 from dimensional_sim.core import new_demo_game
@@ -10,13 +11,19 @@ from dimensional_sim.world.autopilot import Expedition
 from dimensional_sim.world.browser_server import MANUAL_HOLD, BrowserSession
 from dimensional_sim.world.catalog import BY_ID, ITEMS, ItemDef, Loot
 from dimensional_sim.world.encounters import DARK_FOREST, chunk_spots, roll_loot, validate_pools
-from dimensional_sim.world.catalog import REGIONS, UNLOCKS
+from dimensional_sim.world.catalog import ENEMIES, REGIONS, UNLOCKS
 from dimensional_sim.world.models import DELTAS, DIRECTIONS, ChunkKey, DimensionSpec
 from dimensional_sim.world.open_terrain import open_assets
 from dimensional_sim.world.progression import attribute_report, scaled_ms, speed_permille
 from dimensional_sim.world.repository import WorldRepository
 from dimensional_sim.world.runtime import Exploration, Target
 from dimensional_sim.world.seeds import canonical_json
+
+
+def boar_hit(e, key):
+    """Damage of one bramble boar bite in chunk `key` (catalog enemy)."""
+    return e.enemy_hit(key, ENEMIES["bramble_boar"])
+
 
 P = ap.POINT
 
@@ -173,7 +180,7 @@ class SurvivalTests(unittest.TestCase):
 
     def test_danger_rises_with_depth(self):
         e = expedition()
-        near, far = e.boar_hit(ChunkKey("forest", 0, 1)), e.boar_hit(ChunkKey("forest", 4, -2))
+        near, far = boar_hit(e, ChunkKey("forest", 0, 1)), boar_hit(e, ChunkKey("forest", 4, -2))
         self.assertGreater(far, near * 3)  # x1.5 per ring: ring 4 vs ring 1
 
 
@@ -367,6 +374,29 @@ class PrologueTests(unittest.TestCase):
 
 
 class SpawnWindowTests(unittest.TestCase):
+    def test_origin_fight_roll_is_screened_and_old_live_boar_retires_without_reward(self):
+        from dimensional_sim.world.web import new_world
+        e = Expedition(Exploration(new_world(482910), "forest"))
+        e.advance(0)
+        origin = "forest:0:0"
+        plan = e.spot_plans[origin]
+        index = next(i for i, row in enumerate(plan) if row[0] == "bramble_boar")
+        ident = f"enc:{origin}:{index}"
+        self.assertNotIn(ident, e.admitted)
+        self.assertNotIn(ident, e.game.targets)
+        self.assertIn("rejected: camp sanctuary", [row["result"] for row in e.screen_log])
+
+        # A save created before this rule can still contain that admitted boar.
+        self.assertTrue(e._admit(ident, "bramble_boar", origin))
+        _, x, y = plan[index]
+        e.game.targets[ident] = Target(ident, ChunkKey("forest", 0, 0), x, y, 3)
+        loaded = Expedition.from_dict(json.loads(dump(e)))
+        xp = dict(loaded.regular)
+        loaded.advance(0)
+        self.assertNotIn(ident, loaded.admitted)
+        self.assertNotIn(ident, loaded.game.targets)
+        self.assertEqual(loaded.regular, xp)
+
     def test_windows_validate_and_roll_inside_their_range(self):
         from dimensional_sim.world.encounters import roll_window, spawn_window
         for bad in ({"window": (3, 1)}, {"window": [1, 2]}, {"window": (-1, 2)}):
@@ -524,11 +554,11 @@ class PursuitTests(unittest.TestCase):
         self.assertEqual(steps[0], 2)
         self.assertEqual(steps[-1], 1)
         self.assertEqual(e.strikes[ident], 1)
-        self.assertEqual(e.health, before - e.boar_hit(e.game.targets[ident].chunk))
+        self.assertEqual(e.health, before - boar_hit(e, e.game.targets[ident].chunk))
 
     def test_boars_ignore_the_avatar_beyond_range_and_at_camp(self):
         e = skip_prologue(expedition())
-        far = self._boar_at(e, ap.BOAR_AGGRO_RADIUS + 1)
+        far = self._boar_at(e, ENEMIES["bramble_boar"].aggro_radius + 1)
         spot = (e.game.targets[far].x, e.game.targets[far].y)
         e.monster_ms = ap.MONSTER_STEP_MS
         e._settle()
@@ -543,7 +573,7 @@ class PursuitTests(unittest.TestCase):
     def test_too_hurt_to_win_runs_for_the_camp(self):
         e = skip_prologue(expedition())
         self._boar_at(e, 1)
-        e.health = e.fight_damage(e.ring(e.game.player.chunk)) + e.boar_hit(e.game.player.chunk)
+        e.health = e.fight_damage(e.ring(e.game.player.chunk), BY_ID["bramble_boar"]) + boar_hit(e, e.game.player.chunk)
         e.monster_ms = ap.MONSTER_STEP_MS
         e._settle()
         self.assertEqual(e.goal["kind"], "home")

@@ -6,10 +6,8 @@ from it on demand, never stored, so editing their thresholds never breaks saves.
 OWNER: autopilot.Expedition writes through record_* ; details.py reads.
 TESTS: tests/test_world_pages.py.
 """
-from .catalog import ACHIEVEMENTS, BY_ID, ITEMS
+from .catalog import ACHIEVEMENTS, BY_ID, DEATH_CAUSES, ITEMS   # noqa: F401 (DEATH_CAUSES re-exported)
 from .models import integer
-
-DEATH_CAUSES = ("starvation", "boar", "exhaustion")
 
 
 def new_journal():

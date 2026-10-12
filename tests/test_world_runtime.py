@@ -207,7 +207,7 @@ class RuntimeTests(unittest.TestCase):
         game.targets["target"] = Target("target", game.player.chunk, 4, 2)
         base = snapshot(game)
         mutations = [
-            lambda s: s.update(schema_version=2),
+            lambda s: s.update(schema_version=3),
             lambda s: s["player"].update(x=0, y=0),
             lambda s: s["player"].update(animation_elapsed_ms=-1),
             lambda s: s.update(move_elapsed_ms=120),
@@ -316,6 +316,7 @@ class DiagonalMovementTests(unittest.TestCase):
             for x in range(1, a.width - 1):
                 if not any(a.collision[y + dy][x + dx] for dx, dy in ((0, 0), (1, 0), (0, -1), (1, -1))):
                     game.player.x, game.player.y = x, y
+                    game._reveal()
                     return game
         self.skipTest("no open 2x2 patch")
 

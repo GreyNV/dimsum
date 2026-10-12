@@ -12,7 +12,7 @@ from ..progression import scaled_ms, speed_permille
 from ..runtime import InputCommand, Target
 from ..tuning import PITY_CHUNKS
 from .combat import CombatMixin
-from .constants import (DANGER_RING_CAP, MAX_EVENTS_PER_ADVANCE, MONSTER_STEP_MS, PAUSE_BETWEEN_PUNCHES_MS,
+from .constants import (MAX_EVENTS_PER_ADVANCE, MONSTER_STEP_MS, PAUSE_BETWEEN_PUNCHES_MS,
                         PROLOGUE_MS, PROLOGUE_NEXT, REST_MS, RESTED_AT, SELF_ACTIONS, SKILLS, STAT_KEYS,
                         VITAL_MAX, attribute_table, ceil_div)
 from .lives import LivesMixin
@@ -166,7 +166,7 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
             for spot in self._live(chunk):
                 entry = BY_ID[spot.encounter]
                 if entry.category == "fight" and spot.id not in self.game.targets and spot.id not in self.completed:
-                    hp = entry.hp + min(self.ring(spot.chunk), DANGER_RING_CAP)
+                    hp = self.enemy_hp(entry, spot.chunk)
                     self.game.targets[spot.id] = Target(spot.id, spot.chunk, spot.x, spot.y, hp)
         kinds = None
         for t in sorted(self.game.targets.values(), key=lambda t: t.id):
@@ -323,7 +323,7 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         step = max(1, min(cap, left))
         self._run(step, InputCommand(attack=True))
         if game.player.animation != "attack":
-            self._boar_strikes_back()
+            self._enemy_strikes_back()
             self._start_task("pause", scaled_ms(PAUSE_BETWEEN_PUNCHES_MS, self.speed("strength")))
         return step
 

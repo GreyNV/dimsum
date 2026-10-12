@@ -1,5 +1,13 @@
 # Balancing
 
+## Current first-life playtest adjustment
+
+Base hunger drain is 0.85 points per second, a boar hit starts at 8 health, and
+boars pursue from 11 steps. In a seeded 20-minute local trial, seed 482910's
+first life ended at 6.76 simulated minutes (previously about 12.22). Across
+seeds 1-5, this trial completed 9 lives versus 2 with the prior values. This is
+a small sample; longer-run balance remains open.
+
 All numbers live in `world/tuning.py` (systems), `world/catalog.py` (content values) and the vitals block at
 `world/autopilot/constants.py`. Measure with:
 

@@ -17,12 +17,8 @@ OFFER_FULL = 5
 # Each ring of depth also grants ASH_PER_RING at the end of a life.
 ASH_PER_RING = 1
 
-# Crafted gear effects.
+# Gear and boon numbers are catalog Effects (catalog.py ItemDef/BoonDef.effects).
 UNARMED_REACH = 1             # one cardinal cell; the default punch hitbox
-STAFF_PUNCH_BONUS = 1
-WRAP_HIT_PERCENT = 70          # hide wrap: boar hits deal 70%
-IRON_SKIN_HIT_PERCENT = 75     # boon: boar hits deal 75%
-BOUNTY_WINDOW_BONUS = 1        # boon: +1 low/high on food spawn windows
 
 # Need-driven crafting thresholds (autopilot policy, not rules).
 SNARE_WHEN_HUNGER_BELOW = 60   # points; only when no food is carried

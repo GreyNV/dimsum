@@ -9,8 +9,7 @@ import time
 from .animation import rotate
 from .autopilot import INVENTORY_SLOTS, Expedition
 from . import details
-from .catalog import BOONS, UNLOCKS, REGIONS
-from .catalog import BY_ID
+from .catalog import BOONS, BY_ID, ENEMIES, ITEMS, REGIONS, UNLOCKS
 from .models import ChunkKey, chunk_ident, integer
 from .progression import attribute_report
 from .runtime import InputCommand
@@ -21,6 +20,7 @@ TICK_MS = 20
 INPUT_LEASE = 0.3
 MANUAL_HOLD = 2.5  # seconds of manual control before auto-pilot resumes
 LOG_ENTRIES = 6
+ITEM_COLORS = {item.id: item.color for item in ITEMS.values()}   # reward popups and HUD text
 
 
 def _tile_tints(world, key, asset):
@@ -71,16 +71,26 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual",
     frame_extra = {}
     if expedition is not None:
         kinds = expedition.target_kinds()
+        for t in targets:   # how to draw and name each enemy (catalog EnemyDef)
+            enemy = ENEMIES[BY_ID[kinds[t["id"]]].enemy]
+            t["name"], t["sprite"] = enemy.name, enemy.sprite
         frame_extra = {"spots": [] if in_anchor else expedition.visible_spots(),
-                       "target_kinds": {t["id"]: kinds.get(t["id"], "bramble_boar") for t in targets},
+                       "target_kinds": {t["id"]: kinds[t["id"]] for t in targets},
                        "expedition": _expedition_view(expedition, control, debug=debug, detail=detail)}
+    minimap = game.world.minimap(center, 2)
+    fog = {}
+    for entry in minimap:
+        key = ChunkKey(entry["dimension"], entry["x"], entry["y"])
+        rows = game.visibility_rows(key)
+        if rows is not None:
+            fog[f"{key.x}:{key.y}"] = rows
     return {**frame_extra, "world_seed": str(game.world.world_seed), "clock_ms": game.elapsed_ms,
         "movement_interval_ms": game.movement_interval_ms,
         "player": {"x": px, "y": py, "facing": p.facing, "animation": p.animation,
                    "animation_ms": p.animation_elapsed_ms * rate // 100, "active": frame.active},
         "targets": targets,
         "effects": effects, "chunks": chunks, "resident": resident,
-        "minimap": game.world.minimap(center, 2), "chunk_width": w, "chunk_height": h,
+        "minimap": minimap, "fog": fog, "chunk_width": w, "chunk_height": h,
         "paused": paused}
 
 
@@ -120,7 +130,7 @@ def _expedition_view(e, control, *, debug, detail):
             "attack_radius": UNARMED_REACH,
             "auto_target": unarmed_target[1] if unarmed_target else None,
             "skill_slots": [{"name": "Return to anchor", "state":
-                             "locked" if "return_anchor" not in e.unlocked else
+                             "locked" if not e.has_ability("return_to_anchor") else
                              "disabled" if in_anchor or e.in_prologue else
                              "cooldown" if e.total_ms < e.return_ready_ms else "ready",
                              "remaining_ms": max(0, e.return_ready_ms - e.total_ms)},
@@ -133,7 +143,8 @@ def _expedition_view(e, control, *, debug, detail):
             "debug": e.debug_info() if debug else None,
             "detail": details.detail(e) if detail else None,
             "bounty": [{"id": i, "name": BY_ID[i].name, "spawned": n, "limit": limit}
-                       for i, n, limit in e.bounty()]}
+                       for i, n, limit in e.bounty()],
+            "opponent": e.opponent(), "item_colors": ITEM_COLORS}
 
 
 def _meta_view(e):

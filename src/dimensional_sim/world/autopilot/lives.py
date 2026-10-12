@@ -1,7 +1,7 @@
 """Death, the anchor interlude between lives, anchor purchases and rebirth."""
 from .. import economy
 from ..catalog import JOURNAL_FAVOR_MASTERY, JOURNAL_GUARANTEE_MASTERY, REGIONS
-from ..catalog import ATTRIBUTES, BY_ID
+from ..catalog import ATTRIBUTES, BY_ID, ENEMIES, UNLOCKS
 from ..generation import GENERATOR_VERSION
 from ..journal import record_death, validate_journal
 from ..repository import WorldRepository
@@ -9,7 +9,19 @@ from ..runtime import Exploration
 from .constants import ANCHOR_COUNTDOWN_MS, RETURN_COOLDOWN_MS
 
 
+def death_cause_text(cause):
+    """Life-report line for a death cause (enemy causes come from the catalog)."""
+    enemy = next((e for e in ENEMIES.values() if e.cause == cause), None)
+    if enemy is not None:
+        return f"Cause: {enemy.cause_text}"
+    return {"starvation": "Cause: starvation", "return": "Returned by choice"}.get(cause, "Cause: exhaustion")
+
+
 class LivesMixin:
+    def has_ability(self, ability):
+        """Whether an owned unlock grants `ability` (catalog.ABILITIES)."""
+        return any(UNLOCKS[u].ability == ability for u in self.unlocked)
+
     def _die(self):
         """Health hit zero: write the life report, then wait at the anchor in a fresh Exploration."""
         record_death(self.journal, self.cause or "exhaustion", self.game.elapsed_ms)
@@ -17,7 +29,7 @@ class LivesMixin:
 
     def return_to_anchor(self):
         """End a life by choice after buying the skill; uses simulation time for cooldown."""
-        if "return_anchor" not in self.unlocked or self.anchor_ms is not None or self.in_prologue:
+        if not self.has_ability("return_to_anchor") or self.anchor_ms is not None or self.in_prologue:
             raise ValueError("return to anchor is unavailable")
         if self.total_ms < self.return_ready_ms:
             raise ValueError("return to anchor is cooling down")
@@ -46,11 +58,10 @@ class LivesMixin:
         lived = self.game.elapsed_ms // 1000
         lines = [f"{name.capitalize()} experience gained: {self.regular[name]}"
                  f" (dimensional +{self.life_gain[name]})" for name in ATTRIBUTES]
-        cause = {"starvation": "Cause: starvation", "boar": "Cause: a bramble boar",
-                 "return": "Returned by choice"}.get(self.cause, "Cause: exhaustion")
+        cause = death_cause_text(self.cause)
         bounty = ", ".join(f"{BY_ID[i].name.lower()} {n} (max {limit} at once)" for i, n, limit in self.bounty())
         lines += [f"Forest bounty this life: {bounty}",
-                  f"Spots found: {self.stats['food_spots']} food, {self.stats['enemy_spots']} boars"
+                  f"Spots found: {self.stats['food_spots']} food, {self.stats['enemy_spots']} enemies"
                   f" ({self.stats['pity']} by pity), {self.stats['rejected']} turned away by caps",
                   f"Crafted {self.stats['crafted']}, ate {self.stats['eaten']}, prayed {self.stats['prayers']}",
                   f"Carried resources and depth became {gained} dimensional ash.",
@@ -67,8 +78,14 @@ class LivesMixin:
             "movement_interval_ms", "animation_rate_percent", "attack_rate_percent", "attack_damage")}
         press = self.game.step_on_press
         previous_world = self.game.world
+        previous_seen = self.game.seen
         world = self._current_generator_world(self.game.world)
         self.game = Exploration(world, self.dimension, animations=self.game.animations, **config)
+        if world is previous_world:
+            for key, rows in previous_seen.items():
+                current = self.game.seen.setdefault(key, [0] * len(rows))
+                for y, mask in enumerate(rows):
+                    current[y] |= mask
         self.game.step_on_press = press
         if world is not previous_world:
             self.anchor = self._anchor()

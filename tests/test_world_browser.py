@@ -10,6 +10,7 @@ import threading
 import unittest
 
 from dimensional_sim.world.assets import AssetRegistry
+from dimensional_sim.world.autopilot import Expedition
 from dimensional_sim.world.browser_server import BrowserSession, make_server, snapshot
 from dimensional_sim.world.models import (ChunkKey, DimensionSpec, asset_from_dict,
     asset_to_dict, chunk_to_dict, validate_asset, DELTAS)
@@ -111,6 +112,7 @@ class OpenWorldTests(unittest.TestCase):
         g = game()
         e, key, x, y = crossing(g, "east")
         g.player.x, g.player.y, g.player.facing = e.x, e.y, "east"
+        g._reveal()
         g.world.visit(key)
         g.initialized_chunks.add(key)
         g.targets["neighbor"] = Target("neighbor", key, x, y)
@@ -125,6 +127,34 @@ class OpenWorldTests(unittest.TestCase):
 
 
 class BrowserAdapterTests(unittest.TestCase):
+    def test_fog_reveals_gradually_across_edges_and_survives_save(self):
+        g = game()
+        origin = g.player.chunk
+        a = g.current_chunk().asset
+        initial = sum(row.bit_count() for row in g.seen[origin])
+        self.assertLess(initial, a.width * a.height)
+        e, neighbor, _, _ = crossing(g, "east")
+        g._place(origin, e.x, e.y)
+        self.assertIn(neighbor, g.seen)
+        self.assertGreater(sum(row.bit_count() for row in g.seen[origin]), initial)
+        projected = snapshot(g)
+        self.assertEqual(projected["fog"][f"{neighbor.x}:{neighbor.y}"], g.visibility_rows(neighbor))
+        self.assertEqual(g.to_dict(), Exploration.from_dict(g.to_dict()).to_dict())
+        remembered = {key: rows[:] for key, rows in g.seen.items()}
+        expedition = Expedition(g)
+        expedition._respawn_at_anchor()
+        for key, rows in remembered.items():
+            self.assertTrue(all(after & before == before for after, before in zip(expedition.game.seen[key], rows)))
+        old = g.to_dict()
+        old["schema_version"] = 1
+        del old["seen"]
+        upgraded = Exploration.from_dict(old)
+        self.assertTrue(all(row == "1" * a.width for row in upgraded.visibility_rows(origin)))
+        broken = g.to_dict()
+        broken["seen"][0]["rows"][0] = "x" * a.width
+        with self.assertRaises(ValueError):
+            Exploration.from_dict(broken)
+
     def test_frame_projection_is_pure_and_transmits_only_missing_chunks(self):
         g = game()
         before, count = g.to_dict(), g.world.generation_count

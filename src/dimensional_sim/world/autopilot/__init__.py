@@ -49,7 +49,7 @@ Package layout (Expedition is assembled from one mixin per concern):
     planning.py      goal choice: spots, home, wander
     navigation.py    global cells, resident grid, memoized distance fields
     spawning.py      spot rolls, spawn windows, pity, action contexts
-    combat.py        punch damage, danger by ring, frontier, boar pursuit
+    combat.py        punch damage, enemy danger by biome and ring, frontier, pursuit
     outcomes.py      rewards, loot, leads, eating, self actions
     vitals.py        hunger/health integer rates
     lives.py         death, anchor interlude and purchases, rebirth
@@ -58,7 +58,7 @@ Package layout (Expedition is assembled from one mixin per concern):
     constants.py     tunables, prologue text, schema version
 """
 from .constants import (
-    ANCHOR_COUNTDOWN_MS, BOAR_AGGRO_RADIUS, BOAR_HIT, CAMP_SAFE_RADIUS, DANGER_RING_CAP, EAT_AT, ELDER_LINES,
+    ANCHOR_COUNTDOWN_MS, CAMP_SAFE_RADIUS, EAT_AT, ELDER_LINES,
     FOOD_COOLDOWN_MS, HUNGER_DRAIN, INVENTORY_SLOTS, LOG_TYPES, MEMORIES, MONSTER_STEP_MS, POINT, PROLOGUE_MS,
     PROLOGUE_NAMES, REGEN, REST_REGEN, RETREAT_BELOW, SCHEMA_VERSION, SKILLS, STACK_LIMIT, STARVATION,
     VITAL_MAX)
@@ -67,10 +67,7 @@ from .saves import OLDEST_SUPPORTED_SCHEMA, upgrade
 
 __all__ = [
     "ANCHOR_COUNTDOWN_MS",
-    "BOAR_AGGRO_RADIUS",
-    "BOAR_HIT",
     "CAMP_SAFE_RADIUS",
-    "DANGER_RING_CAP",
     "EAT_AT",
     "ELDER_LINES",
     "FOOD_COOLDOWN_MS",

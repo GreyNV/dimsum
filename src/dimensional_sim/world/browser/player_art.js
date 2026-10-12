@@ -165,7 +165,7 @@ export function pixelPlayerStamp(player, compact = false, reducedMotion = false)
 export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null, clock = 0, reducedMotion = false} = {}) {
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
-  const pose = activity && player.animation !== 'attack' ? POSE[activity.kind] : null;
+  const pose = activity && player.animation !== 'attack' ? (activity.pose ?? POSE[activity.kind]) : null;
   const compact = pose === 'crouch' || pose === 'sit' || pose === 'kneel';
   const {width, height} = pixelPlayerFrame(compact);
   // Only climbing moves the whole body; walk frames carry their own motion in whole art pixels.
@@ -238,14 +238,14 @@ function drawActionInteraction(ctx, activity, x, y, clock, reducedMotion, {armDr
   const colors = {forage:'#e96c75', gather:'#d6ac6a', observe:'#e6d6a2', climb:'#b5d58b',
     drink:'#a9eaff', meditate:'#c8c5ff', study:'#d3b6ff', pray:'#fff0b4',
     think:'#b6bed1', contemplate:'#c8c5ff'};
-  const color = colors[activity.kind];
+  const color = activity.color || colors[activity.kind];
   if (!color || !Number.isFinite(activity.x) || !Number.isFinite(activity.y)) return;
   const tx = (activity.x + .5) * TILE_W, ty = (activity.y + .5) * TILE_H;
   const distance = Math.hypot(tx - x, ty - y);
   if (distance > TILE_W * 1.6) return;
   const ux = distance ? (tx - x) / distance : 0, uy = distance ? (ty - y) / distance : 1;
   const beat = reducedMotion ? 0 : Math.sin(clock / (activity.kind === 'climb' ? 170 : 145));
-  const touch = ['forage','gather','climb','drink','study'].includes(activity.kind);
+  const touch = ['forage','gather','climb','drink','study','hunt'].includes(activity.kind);
   if (touch && !armDrawn) {   // climbing: the standing sprite reaches up from the chest
     const sx = x + ux * 5, sy = y - 11 + uy * 2;
     const reach = 8 + beat * 3;

@@ -252,6 +252,13 @@ custom-target rules. Encounter version v5 and expedition schema 5 migrate v4
 saves by retaining progression/inventory and rerolling current-life spots; the
 old shrine log keeps its earned blessing with no new map shrine.
 
+Current camp rule: the anchor's chunk screens out fight spots, including pity and
+Journal guarantees. The underlying seeded spot plan is unchanged; the guarantee
+waits for another eligible chunk. This keeps the recovery camp free of boars that
+would otherwise stand idle at its no-chase boundary. Loading an older save retires
+an admitted camp fight without granting its reward. Boars still appear beyond the
+camp under the normal spawn window and pity rules.
+
 ## Code layout (refactor, 2026-10-07)
 Behavior-preserving split of the former 2,100-line autopilot.py: same seeds, same saves,
 byte-identical frames (checked by a golden capture of seeded runs, reloads and web frames).

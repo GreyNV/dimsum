@@ -10,7 +10,8 @@ const SPOT_ROLES = Object.freeze({
   o: {fill: '#7a5532', ink: '#c39a62'}, a: {fill: '#3c6f8f', ink: '#bfe8ff'},
   g: {fill: '#6d7468', ink: '#b9bfae'}, q: {fill: '#55743c', ink: '#a9c97a'},
   u: {fill: '#3b2a1c', ink: '#8b6b4a'}, x: {fill: '#6d7468', ink: '#f2d27a'},
-  y: {fill: '#e5c772', ink: '#fff3bc'}, c: {fill: '#a6bacc', ink: '#e8f5ff'}
+  y: {fill: '#e5c772', ink: '#fff3bc'}, c: {fill: '#a6bacc', ink: '#e8f5ff'},
+  d: {fill: '#9a6a3c', ink: '#d9b07a'}, w: {fill: '#e8dcc4', ink: '#fff8e8'}, k: {fill: '#4a3626', ink: '#a88a64'}
 });
 export const SPOTS = Object.freeze({
   bramble_berries: {paint: ['  l r l  ', ' lrlrlrl ', 'lrrllrrll', ' lllrlll '], glyph: ['  / o \\  ', ' /o/o/o\\ ', ';o;v;o;v;', ' \\;o;;;/ ']},
@@ -28,6 +29,11 @@ export const SPOTS = Object.freeze({
     glyph: ['  /++\\   ', '  |::|   ', ' /|::|\\  ', ' |/__\\|  ', ' /_//_\\  ']},
   mushroom_ring: {paint: [' r r r r ', 'rggrggrgr', ' gg gg gg', 'rgggggggr'],
     glyph: [' ^ ^ ^ ^ ', '/o\\/o\\/o\\', ' .. .. ..', '^.......^']},
+  // Temporary deer leads: a fresh hoof trail, then the deer itself at the crossing.
+  deer_trail: {paint: ['k   k     ', '  k   k   ', '    k   k ', ' oo     k '],
+    glyph: ['"   "     ', '  "   "   ', '    "   " ', ' /=     " ']},
+  deer: {paint: ['       k k', '       dd ', ' wddddddd ', '  ddddddd ', '  d d  d d', '  k k  k k'],
+    glyph: ['       Y Y', '       o> ', ' ,=====/  ', '  ;:;:;:  ', '  | |  | |', '  " "  " "']},
   wayside_shrine: {paint: ['    y    ', '  ggggg  ', ' ggggggg ', '  gxyxg  ', '  ggggg  ', ' qgggggq '],
     glyph: ['    +    ', '  /^^^\\  ', ' /_____\\ ', '  |*i*|  ', '  |___|  ', ' ;/___\\; ']}
 });
@@ -149,9 +155,16 @@ export function drawAmbushSite(ctx, x, y) {
 }
 
 /** Spot at tile center (x, y); a sparkle marks it, brighter when it is the goal. */
+/** Drawn for a spot whose art key has no sprite yet, so content is never invisible. */
+export const FALLBACK_SPOT = Object.freeze({paint: ['  ggg  ', ' gxxxg ', '  ggg  '],
+  glyph: ['  .-.  ', ' ( ? ) ', "  '-'  "]});
+
+/** Sprite for a spot: its catalog art key (ActionDef.art, default the action id). */
+export const spotSprite = spot => SPOTS[spot.art || spot.encounter] || FALLBACK_SPOT;
+
 export function drawSpot(ctx, spot, x, y, {clock = 0, goal = false, fade = 0} = {}) {
-  const sprite = SPOTS[spot.encounter];
-  if (!sprite) return;
+  if (!spot.encounter && !spot.art) return;
+  const sprite = spotSprite(spot);
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
   const w = sprite.paint[0].length * CELL_W, h = sprite.paint.length * CELL_H;
@@ -182,8 +195,7 @@ export function drawSpotCompletion(ctx, spot, x, y, age, reducedMotion = false) 
   if (age < 0 || age >= 650) return;
   const t = age / 650;
   ctx.save(); ctx.globalAlpha = Math.max(0, 1 - t);
-  const color = spot.encounter === 'forest_spring' ? '#a9eaff'
-    : spot.encounter === 'old_carvings' ? '#d3b6ff' : '#ffe5a0';
+  const color = spot.seal || '#ffe5a0';   // catalog CategoryStyle.seal
   ctx.strokeStyle = color; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.ellipse(x, y + 4, reducedMotion ? 19 : 6 + t * 23,
     reducedMotion ? 8 : 3 + t * 9, 0, 0, Math.PI * 2); ctx.stroke();

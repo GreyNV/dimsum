@@ -5,7 +5,7 @@ and a re-save are byte-identical. from_dict() validates every field before trust
 it. Older saves are migrated one schema at a time by MIGRATIONS; schemas 1-5
 (before the hosted build) are no longer supported and are rejected.
 """
-from ..catalog import BOONS, UNLOCKS
+from ..catalog import BOONS, DEATH_CAUSES, UNLOCKS
 from ..catalog import ATTRIBUTES, BY_ID, ITEMS, REGIONS
 from ..encounters import ENCOUNTER_VERSION
 from ..equipment import validate_equipped
@@ -192,7 +192,7 @@ def _load_life(result, data):
     result.hunger = integer(data["hunger"], "hunger", 0, VITAL_MAX)
     result.health = integer(data["health"], "health", 0, VITAL_MAX)
     result.food_cooldown_ms = integer(data["food_cooldown_ms"], "food cooldown", 0, FOOD_COOLDOWN_MS)
-    if data["cause"] not in (None, "starvation", "boar", "return"):
+    if data["cause"] is not None and data["cause"] not in DEATH_CAUSES:
         raise ValueError("invalid death cause")
     result.cause = data["cause"]
     result.depth = integer(data["depth"], "depth", 0)

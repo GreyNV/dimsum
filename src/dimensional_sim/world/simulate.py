@@ -17,7 +17,7 @@ from statistics import mean
 
 from .actions import Context, describe_bucket, explain
 from .autopilot import Expedition
-from .catalog import BY_ID, REGION_CELL, REGIONS
+from .catalog import BY_ID, ENEMIES, ITEMS, REGION_CELL, REGIONS
 from . import economy
 from .encounters import chunk_spots
 from .models import ChunkKey
@@ -51,7 +51,7 @@ def run(seed, minutes=30, policy="spend", step_ms=1000):
     e = Expedition(Exploration(new_world(seed), "forest"))
     e.crafting_enabled = policy != "hoard"
     lives, start, total, recorded = [], 0, minutes * 60_000, 0
-    lead_log, staff_before = set(), 0
+    lead_log, crafted_before = set(), dict(e.journal["actions"])
     while e.total_ms < total:
         e.advance(step_ms)
         lead_log.update((row["id"], row["action"], row["status"]) for row in e.lead_history)
@@ -67,10 +67,10 @@ def run(seed, minutes=30, policy="spend", step_ms=1000):
             lives.append({"life": e.life, "minutes": round((e.total_ms - start) / 60000, 2),
                           "cause": e.cause or "exhaustion", "depth": e.depth, **e.stats,
                           "regions_visited": len(visited), "leads": leads,
-                          "staff": e.journal["actions"].get("craft_staff", 0) > staff_before,
+                          "gear": _gear_crafted(e.journal["actions"], crafted_before),
                           "converted_ash": economy.rebirth_ash(e.inventory, e.depth, e.converted),
                           "title": report["title"]})
-            lead_log, staff_before = set(), e.journal["actions"].get("craft_staff", 0)
+            lead_log, crafted_before = set(), dict(e.journal["actions"])
             anchor_policy(e, policy)
             if policy == "idle" and e.anchor_wait:
                 break  # first return requires the anchor dialogue interaction
@@ -79,6 +79,16 @@ def run(seed, minutes=30, policy="spend", step_ms=1000):
             "final": {"life": e.life, "ash": e.ash, "blessing": e.blessing,
                       "unlocked": sorted(e.unlocked), "mastery": dict(e.mastery),
                       "dimensional_xp": sum(e.dimensional.values())}}
+
+
+GEAR = tuple(item for item, row in ITEMS.items() if row.kind == "gear")
+ENEMY_CAUSES = {enemy.cause for enemy in ENEMIES.values()}
+
+
+def _gear_crafted(actions, before):
+    """Gear items crafted since `before` (journal action counts)."""
+    return sorted({BY_ID[a].effect for a, n in actions.items()
+                   if BY_ID[a].effect and n > before.get(a, 0)})
 
 
 def summarize(results):
@@ -96,11 +106,11 @@ def summarize(results):
             "per_life_mean": {k: round(mean(l[k] for l in lives), 2) for k in (
                 "depth", "chunks", "food_spots", "enemy_spots", "pity", "rejected", "completed",
                 "eaten", "crafted", "fights", "prayers", "converted_ash", "regions_visited")},
-            "lives_with_staff": sum(1 for l in lives if l["staff"]),
+            "lives_with_gear": {item: sum(1 for l in lives if item in l["gear"]) for item in GEAR},
             "leads": {k: sum(l["leads"].get(k, 0) for l in lives) for k in sorted(
                 {k for l in lives for k in l["leads"]})},
-            "boar_deaths_with_staff": sum(1 for l in lives if l["staff"] and l["cause"] == "boar"),
-            "boar_deaths_without_staff": sum(1 for l in lives if not l["staff"] and l["cause"] == "boar"),
+            "enemy_deaths_with_gear": sum(1 for l in lives if l["gear"] and l["cause"] in ENEMY_CAUSES),
+            "enemy_deaths_without_gear": sum(1 for l in lives if not l["gear"] and l["cause"] in ENEMY_CAUSES),
             "lives_without_food_spot": sum(1 for l in lives if l["food_spots"] == 0),
             "lives_without_enemy": sum(1 for l in lives if l["enemy_spots"] == 0),
             "unlocks_mean": round(mean(len(r["final"]["unlocked"]) for r in results), 2),

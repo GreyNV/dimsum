@@ -41,7 +41,7 @@ export function groundMarks(glyph, x, y, seed) {
     else if (glyph === 'H') marks.push({col, row,
       glyph: col === 0 || col === 5 ? '|' : row % 2 ? '=' : '-', color: PALETTE.plank[h % 3]});
     else if (glyph === '*' && h % 4 === 0) marks.push({col, row,
-      glyph: ['*', "'", 'o', ','][(h >> 2) % 4], color: PALETTE.bloom[(h >> 3) % 4]});
+      glyph: ['*', "'", 'o', ','][(h >>> 2) % 4], color: PALETTE.bloom[(h >>> 3) % 4]});  // >>>: h is unsigned
     else if (glyph === '~' && h % 3 !== 0) marks.push({col, row,
       glyph: ['~', '.', '~', ','][h % 4], color: PALETTE.wet[h % 3]});
     else if (h % 5 !== 0) marks.push({col, row,

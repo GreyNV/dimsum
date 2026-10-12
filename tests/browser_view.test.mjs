@@ -5,9 +5,31 @@ import {groundMarks, paintChunk, TREE, terrainColor, OBJECT_PAD, clearStamps, st
 import {ENEMY, ROLE, spriteSize, paintSprite, punchReach, hiddenBehind, occludingTreeTiles, SPOTS, POSE, drawSpot, CAMP, ELDER} from '../src/dimensional_sim/world/browser/actors.js';
 import {activityText, newRewards, ATTRIBUTES, rewardTexts, reportIsFresh, reportStorageKey, ExpeditionHud, prologueView, shopSections, debugText} from '../src/dimensional_sim/world/browser/hud.js';
 import {anchorAction} from '../src/dimensional_sim/world/browser/anchor_ui.js';
+import {drawMinimap, visibleAt} from '../src/dimensional_sim/world/browser/minimap.js';
 const pose = (facing, animation='idle', animation_ms=0) => ({facing, animation, animation_ms, active:false});
 const chunk = (x=0,y=0) => ({id:'forest:'+x+':'+y,x,y,width:32,height:16,seed:1234,
   tiles:Array(16).fill('.'.repeat(32)),collision:Array(16).fill('0'.repeat(32))});
+
+test('fog reveals individual tiles, including across chunk borders',()=>{
+  const entries=[{x:0,y:0,status:'visited'},{x:1,y:0,status:'generated'},
+    {x:-1,y:0,status:'unknown'}];
+  const fog={'0:0':['10','01'],'1:0':['10','00']};
+  assert.equal(visibleAt(fog,0,0,2,2),true);
+  assert.equal(visibleAt(fog,1,0,2,2),false);
+  assert.equal(visibleAt(fog,2,0,2,2),true);
+  assert.equal(visibleAt(fog,3,0,2,2),false);
+  assert.equal(visibleAt(fog,-1,0,2,2),false);
+  const fills=[];
+  const map={fillStyle:'',setTransform(){},fillRect(...rect){fills.push([this.fillStyle,...rect]);},strokeRect(){}};
+  const chunks=new Map([[0,{x:0,y:0,width:2,height:2,tiles:['..','..']}],
+    [1,{x:1,y:0,width:2,height:2,tiles:['TT','TT']}]]);
+  drawMinimap(map,{minimap:entries,fog,chunk_width:2,chunk_height:2,
+    player:{x:0,y:0},spots:[{x:2,y:0},{x:3,y:0}],targets:[{x:2,y:1,hp:1}]},chunks,1);
+  assert.equal(fills.filter(([color])=>color===terrainColor('.')).length,2);
+  assert.equal(fills.filter(([color])=>color===terrainColor('T')).length,1);
+  assert.equal(fills.filter(([color])=>color==='#e2c066').length,1);
+  assert.equal(fills.some(([color])=>color==='#e0604f'),false);
+});
 
 test('visual detail repeats exactly for negative global coordinates and varies with seed',()=>{
   assert.equal(visualHash(-123,41,482910),visualHash(-123,41,482910));
@@ -189,12 +211,13 @@ test('encounter spot sprites are well-formed and activity poses crouch the body'
   assert.ok(pixelPlayerFrame(true).height<pixelPlayerFrame(false).height,'working poses crouch');
   for(const kind of ['forage','gather','observe','climb','drink','meditate','study']) assert.ok(POSE[kind],kind);
   const calls=[];const ctx=new Proxy({},{get:(_,k)=>k==='save'||k==='restore'||k==='fillRect'||k==='fillText'?(...a)=>calls.push(k):undefined,set:()=>true});
-  drawSpot(ctx,{encounter:'unknown',x:0,y:0},0,0); assert.equal(calls.length,0,'unknown spots draw nothing');
+  drawSpot(ctx,{encounter:'unknown',x:0,y:0},0,0); assert.ok(calls.length>0,'spots without art draw the fallback marker');
+  calls.length=0; drawSpot(ctx,{x:0,y:0},0,0); assert.equal(calls.length,0,'a spot with no action draws nothing');
 });
 test('HUD describes the auto-pilot from snapshot fields only',()=>{
   const base={spots:[{x:3,y:4,name:'Bramble berries'}],expedition:{mode:'travel',goal:{x:3,y:4},activity:null,control:'auto',log:[],xp:{},skills:[]}};
   assert.equal(activityText(base),'Heading for bramble berries');
-  assert.equal(activityText({...base,expedition:{...base.expedition,activity:{name:'Forest spring',kind:'drink',progress:456}}}),'Drinking at forest spring - 45%');
+  assert.equal(activityText({...base,expedition:{...base.expedition,activity:{name:'Forest spring',kind:'drink',verb:'Drinking at',progress:456}}}),'Drinking at forest spring - 45%');
   assert.match(activityText({...base,expedition:{...base.expedition,mode:'fight'}}),/punching/);
   assert.equal(activityText(base,true),'Paused - the forest can wait');
   assert.equal(activityText({}),null,'legacy manual frames fall back');
@@ -416,4 +439,15 @@ test('stick and keys move in eight directions', async () => {
   assert.equal(input.payload(false, []).move, 'northeast');
   input.release('KeyW');
   assert.equal(input.payload(false, []).move, 'east');
+});
+
+test('terrain marks never draw undefined glyphs or colors, for every terrain glyph', () => {
+  // Regression: an unsigned hash shifted with `>>` went negative and drew the word "undefined".
+  for (const glyph of '.T=;*^xwo:%H~') for (let x = -40; x < 40; x++) for (let y = -4; y < 4; y++) {
+    for (const seed of [0, 0x5eed, 4294967295]) for (const mark of groundMarks(glyph, x, y, seed)) {
+      assert.equal(typeof mark.glyph, 'string', `${glyph} ${x},${y}`);
+      assert.equal(mark.glyph.length, 1);
+      assert.match(mark.color, /^#[0-9a-f]{6}$/);
+    }
+  }
 });

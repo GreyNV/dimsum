@@ -1,8 +1,10 @@
-"""Content catalog for the forest expedition: items, actions, unlocks, boons, regions.
+"""Content catalog for the forest expedition: biomes, enemies, effects, items, actions,
+unlocks, boons, regions and their presentation styles.
 
 WHAT: every piece of world content the auto-pilot can meet, as validated data.
-WHY: adding an item, action, recipe, unlock, boon or region must be a data edit,
-not a change to generation, the auto-pilot or the client.
+WHY: adding an item, action, recipe, unlock, boon, enemy, biome or region must be a data
+edit, not a change to generation, the auto-pilot or the client. The client draws by the
+art keys declared here (tests check every key has art).
 OWNS: definitions only. Rules that read them live in actions.py (eligibility and
 buckets), regions.py (region per chunk), encounters.py (spot placement),
 economy.py (currency conversion and anchor purchases) and autopilot/ (execution).
@@ -15,6 +17,70 @@ from dataclasses import dataclass, field
 from .models import identifier, integer
 
 ATTRIBUTES = ("strength", "endurance", "agility", "intelligence", "perception", "willpower")
+
+COLOR_DEFAULT = "#e7d7b0"
+
+
+def _color(value, what):
+    if not isinstance(value, str) or len(value) != 7 or value[0] != "#" or \
+            any(c not in "0123456789abcdef" for c in value[1:]):
+        raise ValueError(f"{what} must be #rrggbb")
+
+
+# ----- biomes ------------------------------------------------------------------
+@dataclass(frozen=True)
+class BiomeDef:
+    """A kind of land. Danger grows with distance from the anchor in rings: enemy hits
+    scale by danger_num/danger_den per ring and enemies gain hp_per_ring hit points."""
+    id: str
+    name: str
+    danger_num: int = 3
+    danger_den: int = 2
+    hp_per_ring: int = 1
+    ring_cap: int = 40             # rings past this add no more danger
+
+    def __post_init__(self):
+        identifier(self.id, "biome ID")
+        integer(self.danger_num, "danger growth numerator", 1, 100)
+        integer(self.danger_den, "danger growth denominator", 1, 100)
+        integer(self.hp_per_ring, "enemy HP per ring", 0, 100)
+        integer(self.ring_cap, "danger ring cap", 0, 1000)
+
+
+BIOMES = {b.id: b for b in (
+    BiomeDef("dark_forest", "Dark forest"),
+    BiomeDef("ash_plain", "Ash plain"),        # terrain exists (assets.py); no content yet
+)}
+
+
+# ----- effects -----------------------------------------------------------------
+# Gear and boons change numbers only through effects. "add" stats sum; "percent" stats
+# multiply in turn (integer floor after each source, gear in slot order, then the boon).
+EFFECT_STATS = {
+    "punch_damage": "add",          # extra damage per punch
+    "enemy_hit_percent": "percent", # damage enemies deal to the avatar
+    "food_window_bonus": "add",     # extra at-once cap (low and high) for every food source
+}
+
+
+@dataclass(frozen=True)
+class Effect:
+    stat: str
+    amount: int
+
+    def __post_init__(self):
+        if self.stat not in EFFECT_STATS:
+            raise ValueError(f"unknown effect stat: {self.stat}")
+        if EFFECT_STATS[self.stat] == "percent":
+            integer(self.amount, "effect percent", 1, 1000)
+        else:
+            integer(self.amount, "effect amount", 0, 100)
+
+
+def _effects(value, what):
+    if type(value) is not tuple or any(not isinstance(e, Effect) for e in value):
+        raise ValueError(f"{what} effects must be a tuple of Effect")
+
 
 # ----- items ------------------------------------------------------------------
 ITEM_KINDS = ("food", "material", "gear")
@@ -31,9 +97,15 @@ class ItemDef:
     glyph: str = "*"
     ash_value: int = 1  # dimensional ash before duplicate-resource diminishing returns
     slot: str | None = None   # gear occupies an explicit equipment slot
+    effects: tuple = ()       # gear: active while equipped
+    color: str = COLOR_DEFAULT   # HUD text and reward popups
 
     def __post_init__(self):
         identifier(self.id, "item ID")
+        _effects(self.effects, f"item {self.id}")
+        _color(self.color, f"item {self.id} color")
+        if self.effects and self.kind != "gear":
+            raise ValueError(f"only gear has effects: {self.id}")
         if self.kind not in ITEM_KINDS or not isinstance(self.name, str) or not 1 <= len(self.name) <= 40:
             raise ValueError("invalid item kind/name")
         integer(self.food, "food value", 0, 100)
@@ -47,18 +119,20 @@ class ItemDef:
 
 
 ITEMS = {item.id: item for item in (
-    ItemDef("wild_berries", "Wild berries", "food", 12, "o", ash_value=1),
-    ItemDef("bird_egg", "Bird egg", "food", 20, "0", ash_value=2),
-    ItemDef("boar_meat", "Boar meat", "food", 35, "%", ash_value=3),
-    ItemDef("venison", "Venison", "food", 28, "v", ash_value=3),
-    ItemDef("pale_mushroom", "Pale mushroom", "food", 15, "n", ash_value=2),
-    ItemDef("snared_hare", "Snared hare", "food", 30, "&", ash_value=3),
-    ItemDef("stick", "Stick", "material", glyph="/", ash_value=1),
-    ItemDef("bramble_thorn", "Bramble thorn", "material", glyph="^", ash_value=2),
-    ItemDef("boar_hide", "Boar hide", "material", glyph="#", ash_value=4),
+    ItemDef("wild_berries", "Wild berries", "food", 12, "o", ash_value=1, color="#e0505e"),
+    ItemDef("bird_egg", "Bird egg", "food", 20, "0", ash_value=2, color="#efe6cf"),
+    ItemDef("boar_meat", "Boar meat", "food", 35, "%", ash_value=3, color="#d9776a"),
+    ItemDef("venison", "Venison", "food", 28, "v", ash_value=3, color="#c9785a"),
+    ItemDef("pale_mushroom", "Pale mushroom", "food", 15, "n", ash_value=2, color="#e8dcc0"),
+    ItemDef("snared_hare", "Snared hare", "food", 30, "&", ash_value=3, color="#c7a27a"),
+    ItemDef("stick", "Stick", "material", glyph="/", ash_value=1, color="#c39a62"),
+    ItemDef("bramble_thorn", "Bramble thorn", "material", glyph="^", ash_value=2, color="#a9c97a"),
+    ItemDef("boar_hide", "Boar hide", "material", glyph="#", ash_value=4, color="#a6845d"),
     # Gear is worth less than its inputs: crafting spends resources you could carry home.
-    ItemDef("walking_staff", "Walking staff", "gear", glyph="|", ash_value=2, slot="weapon"),
-    ItemDef("hide_wrap", "Hide wrap", "gear", glyph="]", ash_value=6, slot="body"),
+    ItemDef("walking_staff", "Walking staff", "gear", glyph="|", ash_value=2, slot="weapon",
+            effects=(Effect("punch_damage", 1),), color="#d6b27a"),
+    ItemDef("hide_wrap", "Hide wrap", "gear", glyph="]", ash_value=6, slot="body",
+            effects=(Effect("enemy_hit_percent", 70),), color="#b58c62"),
 )}
 
 
@@ -87,6 +161,76 @@ PLACEMENTS = ("spot", "lead", "self")
 RARITIES = ("common", "uncommon", "rare")
 NEAR = (None, "T", "^")   # spot needs a tree / rock beside its cell
 TRIGGERS = (None, "after_location", "need")   # self actions only
+
+POSES = ("crouch", "sit", "climb", "kneel")   # how the avatar's body looks while working
+
+
+@dataclass(frozen=True)
+class CategoryStyle:
+    """How the client shows an action category: activity verb, body pose, work-mark
+    color, and the color of the seal left when a spot is finished (None = default)."""
+    verb: str
+    pose: str | None = None
+    color: str | None = None
+    seal: str | None = None
+
+    def __post_init__(self):
+        if self.pose is not None and self.pose not in POSES:
+            raise ValueError(f"unknown pose: {self.pose}")
+        for value in (self.color, self.seal):
+            if value is not None:
+                _color(value, "category color")
+
+
+CATEGORY_STYLES = {
+    "forage": CategoryStyle("Foraging", "crouch", "#e96c75"),
+    "gather": CategoryStyle("Gathering", "crouch", "#d6ac6a"),
+    "observe": CategoryStyle("Studying", "crouch", "#e6d6a2"),
+    "climb": CategoryStyle("Climbing", "climb", "#b5d58b"),
+    "drink": CategoryStyle("Drinking at", "crouch", "#a9eaff", seal="#a9eaff"),
+    "meditate": CategoryStyle("Meditating by", "sit", "#c8c5ff"),
+    "study": CategoryStyle("Deciphering", "crouch", "#d3b6ff", seal="#d3b6ff"),
+    "scavenge": CategoryStyle("Searching", "crouch"),
+    "pray": CategoryStyle("Praying at", "kneel", "#fff0b4"),
+    "fight": CategoryStyle("Fighting"),
+    "hunt": CategoryStyle("Hunting", "crouch", "#c9785a"),
+    "craft": CategoryStyle("Crafting", "crouch"),
+    "reflect": CategoryStyle("Reflecting", "sit", "#c8c5ff"),
+}
+
+
+# ----- enemies -----------------------------------------------------------------
+@dataclass(frozen=True)
+class EnemyDef:
+    """A creature that hunts the avatar. Its fight spot (ActionDef.enemy) sets where it
+    appears, its HP and its loot; this sets how it fights. `hit` is vital points per bite
+    at ring 0 (the biome scales it); `cause` is the journal's death-cause id."""
+    id: str
+    name: str
+    hit: int
+    aggro_radius: int              # steps: a live enemy this close charges the avatar
+    cause: str
+    cause_text: str                # "Cause: <cause_text>" in the life report
+    sprite: str                    # client art key (combat_art.js ENEMY_SPRITES)
+
+    def __post_init__(self):
+        identifier(self.id, "enemy ID")
+        identifier(self.cause, "death cause")
+        identifier(self.sprite, "enemy sprite")
+        integer(self.hit, "enemy hit", 1, 100)
+        integer(self.aggro_radius, "aggro radius", 1, 30)
+        if not 1 <= len(self.name) <= 40 or not 1 <= len(self.cause_text) <= 60:
+            raise ValueError(f"invalid enemy text: {self.id}")
+
+
+ENEMIES = {e.id: e for e in (
+    EnemyDef("bramble_boar", "Bramble boar", hit=8, aggro_radius=11, cause="boar",
+             cause_text="a bramble boar", sprite="boar"),
+)}
+# Enemies placed by map assets (not by spot rolls) count against this fight spot's window.
+ASSET_ENEMY_ACTION = "bramble_boar"
+DEATH_CAUSES = ("starvation", "exhaustion", "return", *dict.fromkeys(e.cause for e in ENEMIES.values()))
+
 
 REQUIREMENT_KINDS = ("action_count", "item_count", "knowledge", "unlock", "recipe", "level")
 OUTCOME_KINDS = ("knowledge", "recipe", "lead")
@@ -161,9 +305,18 @@ class ActionDef:
     need_priority: int = 0            # lower positive value is considered first
     need_hunger_below: int | None = None
     need_no_food: bool = False
+    enemy: str | None = None          # fights: the EnemyDef that appears here
+    art: str | None = None            # client sprite key (place_art.js SPOTS); default = id
+    color: str | None = None          # overrides the category's work-mark color
 
     def __post_init__(self):
         identifier(self.id, "action ID")
+        if self.art is not None:
+            identifier(self.art, "action art")
+        if self.color is not None:
+            _color(self.color, f"action {self.id} color")
+        if (self.category == "fight") != (self.enemy is not None):
+            raise ValueError(f"fights, and only fights, name an enemy: {self.id}")
         for name, value, limit in (("name", self.name, 60), ("description", self.description, 160),
                                    ("log", self.log, 120)):
             if not isinstance(value, str) or not 1 <= len(value) <= limit:
@@ -231,6 +384,15 @@ class ActionDef:
             raise ValueError(f"tags must be a tuple: {self.id}")
 
     @property
+    def sprite(self):
+        """Client art key for this action's spot."""
+        return self.art or self.id
+
+    @property
+    def style(self):
+        return CATEGORY_STYLES[self.category]
+
+    @property
     def kind(self):
         """Compatibility name for `category` (older code and the browser client)."""
         return self.category
@@ -266,17 +428,17 @@ ACTIONS = (
     ActionDef("follow_deer_tracks", "Follow deer tracks", "observe", "lead", "perception", 35, 3800, 1,
               "Follow a fresh trail before the deer moves on.", "Followed the tracks to a quiet deer crossing.",
               knowledge="deer_sign", roles=("lead", "contextual"),
-              outcomes=(OutcomeDef("lead", "hunt_deer", chance=60, ttl_ms=60_000),)),
+              outcomes=(OutcomeDef("lead", "hunt_deer", chance=60, ttl_ms=60_000),), art="deer_trail"),
     ActionDef("hunt_deer", "Hunt deer", "hunt", "lead", "agility", 80, 5500, 1,
               "Approach the deer while this trail is still fresh.", "Brought down a deer at the crossing.",
               knowledge="deer_sign", roles=("lead", "combat", "contextual"),
-              loot=(L("venison", 1, 1),)),
+              loot=(L("venison", 1, 1),), art="deer"),
     ActionDef("forest_spring", "Forest spring", "drink", "spot", "endurance", 40, 2000, 9,
               "Drink and catch your breath.", "Drank from a cold spring and caught your breath.",
               window=(1, 2), heal=10, roles=("base",)),
     ActionDef("bramble_boar", "Bramble boar", "fight", "spot", "strength", 100, 1, 9,
               "A territorial boar that charges anything nearby. Meat and hide.",
-              "Drove off a bramble boar with your bare fists.", window=(1, 2), hp=3,
+              "Drove off a bramble boar with your bare fists.", window=(1, 2), hp=3, enemy="bramble_boar",
               loot=(L("boar_meat", 1, 1), L("boar_hide", 1, 1, 60)), roles=("base", "combat")),
     # --- unlocked with dimensional ash ----------------------------------------
     ActionDef("gnarled_tree", "Gnarled tree", "climb", "spot", "agility", 60, 3200, 10,
@@ -318,7 +480,7 @@ ACTIONS = (
     # --- self actions -----------------------------------------------------------
     ActionDef("think", "Think about the road", "reflect", "self", "intelligence", 0, 3000, 40,
               "A quiet thought after a task.", "Thought about the road behind you.", trigger="after_location",
-              roles=("reflection", "contextual")),
+              roles=("reflection", "contextual"), color="#b6bed1"),
     ActionDef("contemplate", "Contemplate the forest", "reflect", "self", "willpower", 0, 5000, 30,
               "A longer, wordless pause.", "Contemplated the forest for a while.", trigger="after_location",
               roles=("reflection", "contextual")),
@@ -349,6 +511,7 @@ BY_ID = {action.id: action for action in ACTIONS}
 
 # ----- unlocks, boons, mastery ---------------------------------------------------
 CURRENCIES = ("ash", "blessing")
+ABILITIES = ("return_to_anchor",)   # engine capabilities an unlock can grant
 
 
 @dataclass(frozen=True)
@@ -360,16 +523,20 @@ class UnlockDef:
     currency: str
     cost: int
     requires: tuple = ()
+    ability: str | None = None     # a capability the engine checks (ABILITIES), not an action
 
     def __post_init__(self):
         identifier(self.id, "unlock ID")
+        if self.ability is not None and self.ability not in ABILITIES:
+            raise ValueError(f"unknown ability: {self.ability}")
         if self.currency not in CURRENCIES or not 1 <= len(self.name) <= 40 or not 1 <= len(self.description) <= 160:
             raise ValueError(f"invalid unlock: {self.id}")
         integer(self.cost, "unlock cost", 1, 10000)
 
 
 UNLOCKS = {u.id: u for u in (
-    UnlockDef("return_anchor", "Return to anchor", "End this life by choice; available every 5 minutes.", "ash", 10),
+    UnlockDef("return_anchor", "Return to anchor", "End this life by choice; available every 5 minutes.", "ash", 10,
+              ability="return_to_anchor"),
     UnlockDef("climbing", "Climbing", "Gnarled trees appear: bird eggs and sticks.", "ash", 15),
     UnlockDef("scavenging", "Scavenging", "Abandoned camps appear: thorns, sticks and old hide.", "ash", 20),
     UnlockDef("snares", "Snares", "Craft a bramble snare (2 sticks, 1 thorn) when hungry: usually a hare.", "ash", 25),
@@ -390,15 +557,19 @@ class BoonDef:
     name: str
     description: str
     cost: int
+    effects: tuple = ()            # active for the whole next life
 
     def __post_init__(self):
         identifier(self.id, "boon ID")
         integer(self.cost, "boon cost", 1, 100)
+        _effects(self.effects, f"boon {self.id}")
 
 
 BOONS = {b.id: b for b in (
-    BoonDef("bountiful_path", "Bountiful path", "Next life: +1 at-once cap for every food source.", 2),
-    BoonDef("iron_skin", "Iron skin", "Next life: boar hits hurt 25% less.", 2),
+    BoonDef("bountiful_path", "Bountiful path", "Next life: +1 at-once cap for every food source.", 2,
+            (Effect("food_window_bonus", 1),)),
+    BoonDef("iron_skin", "Iron skin", "Next life: enemy hits hurt 25% less.", 2,
+            (Effect("enemy_hit_percent", 75),)),
 )}
 
 # Completing the same encounter earns mastery at tenfold lifetime milestones.
@@ -479,7 +650,18 @@ REGION_ADJACENCY_V2 = {
 
 def validate_catalog():
     """Cross-reference checks; raises ValueError on the first problem."""
+    if set(CATEGORY_STYLES) != set(CATEGORIES):
+        raise ValueError("every action category needs a CategoryStyle")
+    if ASSET_ENEMY_ACTION not in BY_ID or BY_ID[ASSET_ENEMY_ACTION].enemy is None:
+        raise ValueError("ASSET_ENEMY_ACTION must be a fight spot")
+    for region in REGIONS.values():
+        if region.biome not in BIOMES:
+            raise ValueError(f"region {region.id} names unknown biome {region.biome}")
     for action in ACTIONS:
+        if action.enemy is not None and action.enemy not in ENEMIES:
+            raise ValueError(f"action {action.id} names unknown enemy {action.enemy}")
+        if any(biome not in BIOMES for biome in action.biomes):
+            raise ValueError(f"action {action.id} names an unknown biome")
         if action.unlock is not None and action.unlock not in UNLOCKS:
             raise ValueError(f"action {action.id} names unknown unlock {action.unlock}")
         for region in action.regions or ():
@@ -508,8 +690,8 @@ def validate_catalog():
         for required in unlock.requires:
             if required not in UNLOCKS or required == unlock.id:
                 raise ValueError(f"unlock {unlock.id} requires unknown {required}")
-        if unlock.id != "return_anchor" and not any(a.unlock == unlock.id for a in ACTIONS):
-            raise ValueError(f"unlock {unlock.id} opens no action")
+        if unlock.ability is None and not any(a.unlock == unlock.id for a in ACTIONS):
+            raise ValueError(f"unlock {unlock.id} opens no action or ability")
     if ORIGIN_REGION not in REGIONS:
         raise ValueError("origin region missing")
     if set(REGION_ADJACENCY_V2) != set(REGIONS):
@@ -546,7 +728,7 @@ class AchievementDef:
         integer(self.threshold, "achievement threshold", 1, 10**9)
         kind, _, arg = self.metric.partition(":")
         valid = {"action": BY_ID, "category": set(CATEGORIES), "item": ITEMS,
-                 "deaths": {"starvation", "boar", "exhaustion", ""}}
+                 "deaths": set(DEATH_CAUSES)}
         if kind in valid:
             if arg not in valid[kind] and not (kind == "deaths" and arg == ""):
                 raise ValueError(f"achievement {self.id}: unknown metric argument {arg}")

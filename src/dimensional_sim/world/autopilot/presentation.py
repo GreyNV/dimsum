@@ -9,6 +9,12 @@ from ..tuning import PITY_CHUNKS
 from .constants import (ELDER_LINES, FOOD_COOLDOWN_MS, MEMORIES, PROLOGUE_MS, PROLOGUE_NAMES, SELF_ACTIONS)
 
 
+def _style(action):
+    """Client presentation of an activity from the catalog (verb, body pose, work-mark color)."""
+    style = action.style
+    return {"verb": style.verb, "pose": style.pose, "color": action.color or style.color}
+
+
 class PresentationMixin:
     def prologue(self):
         """Presentation of the opening scene, or None once it is over."""
@@ -81,7 +87,7 @@ class PresentationMixin:
             px, py = self._player()
             action = BY_ID[task["type"]]
             return {"encounter": action.id, "name": action.name, "kind": action.id if action.category == "reflect"
-                    else action.category, "x": px, "y": py, "progress": progress}
+                    else action.category, "x": px, "y": py, "progress": progress, **_style(action)}
         if task["type"] == "rest":
             return {"encounter": "anchor_rest", "name": "Resting at the anchor camp", "kind": "rest",
                     "x": self.anchor[0], "y": self.anchor[1], "progress": progress}
@@ -91,7 +97,7 @@ class PresentationMixin:
         entry = BY_ID[spot.encounter]
         gx, gy = self._global(spot.chunk, spot.x, spot.y)
         return {"encounter": entry.id, "name": entry.name, "kind": entry.kind,
-                "x": gx, "y": gy, "progress": progress}
+                "x": gx, "y": gy, "progress": progress, **_style(entry)}
 
     def mode(self):
         if self.anchor_ms is not None:
@@ -119,7 +125,7 @@ class PresentationMixin:
         return [{"id": item, "name": ITEMS[item].name, "kind": ITEMS[item].kind,
                  "glyph": ITEMS[item].glyph, "food": ITEMS[item].food, "count": count,
                  "slot": ITEMS[item].slot, "equipped": is_equipped(self.equipped, item)
-                 if ITEMS[item].kind == "gear" else False}
+                 if ITEMS[item].kind == "gear" else False, "color": ITEMS[item].color}
                 for item, count in self.inventory.items()]
 
     def visible_spots(self):
@@ -132,13 +138,17 @@ class PresentationMixin:
                     continue
                 gx, gy = self._global(spot.chunk, spot.x, spot.y)
                 result.append({"id": spot.id, "encounter": spot.encounter, "name": entry.name,
-                               "kind": entry.kind, "x": gx, "y": gy})
+                               "kind": entry.kind, "x": gx, "y": gy, "art": entry.sprite,
+                               "seal": entry.style.seal})
         return result
 
+    def opponent(self):
+        """Name of the enemy the avatar is fighting (goal target), or None."""
+        goal = self.goal
+        if not goal or goal["kind"] != "target" or goal["id"] not in self.game.targets:
+            return None
+        return self.enemy_of(self.game.targets[goal["id"]]).name
+
     def target_kinds(self):
-        """Encounter id behind each target (asset-spawned enemies are boars)."""
-        kinds = {}
-        for target_id in self.game.targets:
-            spot = self._spot_by_id(target_id) if target_id.startswith("enc:") else None
-            kinds[target_id] = spot.encounter if spot else "bramble_boar"
-        return kinds
+        """Fight-spot id behind each target (see CombatMixin.target_action)."""
+        return {target_id: self.target_action(target_id).id for target_id in self.game.targets}

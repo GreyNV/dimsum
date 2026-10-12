@@ -4,11 +4,8 @@ export const ATTRIBUTES = Object.freeze([
   ['strength', 'Strength', 'STR'], ['endurance', 'Endurance', 'END'], ['agility', 'Agility', 'AGI'],
   ['intelligence', 'Intelligence', 'INT'], ['perception', 'Perception', 'PER'], ['willpower', 'Willpower', 'WIL']]);
 export const LABEL = Object.freeze(Object.fromEntries(ATTRIBUTES.map(([id, name]) => [id, name])));
-const VERB = Object.freeze({forage: 'Foraging', gather: 'Gathering', observe: 'Studying', climb: 'Climbing',
-  drink: 'Drinking at', meditate: 'Meditating by', study: 'Deciphering', scavenge: 'Searching'});
-export const ITEM_COLOR = Object.freeze({wild_berries: '#e0505e', bird_egg: '#efe6cf', boar_meat: '#d9776a',
-  stick: '#c39a62', bramble_thorn: '#a9c97a', boar_hide: '#a6845d', pale_mushroom: '#e8dcc0',
-  snared_hare: '#c7a27a', walking_staff: '#d6b27a', hide_wrap: '#b58c62'});
+/** Text color for items without a catalog color (catalog.ItemDef.color arrives in frames). */
+export const ITEM_COLOR_DEFAULT = '#e7d7b0';
 
 /** One-line description of what the auto-pilot is doing. */
 export function activityText(state, paused = false) {
@@ -29,10 +26,10 @@ export function activityText(state, paused = false) {
     if (ex.activity.kind === 'think') return `Thinking about the road - ${pct}%`;
     if (ex.activity.kind === 'contemplate') return `Contemplating the forest - ${pct}%`;
     if (ex.activity.kind === 'craft') return `${ex.activity.name} - ${pct}%`;
-    return `${VERB[ex.activity.kind] || 'Investigating'} ${ex.activity.name.toLowerCase()} - ${pct}%`;
+    return `${ex.activity.verb || 'Investigating'} ${ex.activity.name.toLowerCase()} - ${pct}%`;
   }
   if (ex.mode === 'home') return 'Badly hurt - heading back to the anchor camp';
-  if (ex.mode === 'fight') return 'Fists up - punching a bramble boar';
+  if (ex.mode === 'fight') return `Fists up - punching a ${(ex.opponent || 'foe').toLowerCase()}`;
   if (ex.control === 'manual') return 'You have taken control';
   if (ex.mode === 'travel' && ex.goal) {
     const spot = state.spots?.find(s => s.x === ex.goal.x && s.y === ex.goal.y);
@@ -42,13 +39,13 @@ export function activityText(state, paused = false) {
 }
 
 /** Floating texts for new log entries: XP, items gained, food eaten. */
-export function rewardTexts(entry) {
+export function rewardTexts(entry, colors = {}) {
   const texts = [];
   if (entry.type === 'encounter' && entry.xp) texts.push({text: `+${entry.xp} ${LABEL[entry.attribute]}`, color: '#bfe39a'});
   if (entry.blessing) texts.push({text: `+${entry.blessing} blessing`, color: '#ffe9a8'});
   if (entry.type === 'blessing') texts.push({text: 'Prayer completed', color: '#fff3c4'});
   for (const [item, count] of entry.items || []) {
-    if (count > 0) texts.push({text: `+${count} ${item.replaceAll('_', ' ')}`, color: ITEM_COLOR[item] || '#e7d7b0'});
+    if (count > 0) texts.push({text: `+${count} ${item.replaceAll('_', ' ')}`, color: colors[item] || ITEM_COLOR_DEFAULT});
   }
   if (entry.type === 'eat') texts.push({text: entry.text.replace(/^Ate /, '').replace(/\.$/, ''), color: '#f0c56a'});
   return texts;
@@ -193,7 +190,7 @@ export class ExpeditionHud {
       li.dataset.name = row.name;
       li.dataset.count = String(row.count);
       li.textContent = row.glyph;
-      li.style.color = ITEM_COLOR[row.id] || '#e7d7b0';
+      li.style.color = row.color || ITEM_COLOR_DEFAULT;
       const count = this.doc.createElement('small'); count.textContent = String(row.count);
       li.append(count);
       slots.push(li);

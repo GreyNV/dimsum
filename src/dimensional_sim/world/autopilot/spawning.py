@@ -5,19 +5,49 @@ as a spot plan for exact replay). Spawn windows cap how many of an encounter exi
 at once; pity forces a spot of a starved category after a few empty chunks.
 """
 from ..actions import Context, bucket, bucket_reasons
-from ..catalog import BY_ID, ITEMS
+from .. import effects
+from ..catalog import ASSET_ENEMY_ACTION, BY_ID, ITEMS
 from ..encounters import EncounterSpot, chunk_spots, forced_spot, roll_window, spot_id
 from ..models import ChunkKey, chunk_ident
 from ..seeds import derive_seed
-from ..tuning import BOUNTY_WINDOW_BONUS, PITY_CHUNKS
-from .constants import BOAR_ENCOUNTER, POINT, ROLL_LOG_LIMIT, SCREEN_LOG_LIMIT
+from ..tuning import PITY_CHUNKS
+from .constants import POINT, ROLL_LOG_LIMIT, SCREEN_LOG_LIMIT
 
 
 class SpawningMixin:
+    def _camp_chunk(self):
+        width, height = self._dims()
+        return ChunkKey(self.dimension, self.anchor[0] // width, self.anchor[1] // height)
+
+    def _camp_excludes(self, chunk, encounter):
+        """The recovery/tutorial camp is not a fight location."""
+        return chunk.key == self._camp_chunk() and BY_ID[encounter].category == "fight"
+
+    def _retire_camp_fights(self):
+        """Clear inert origin fights from saves made before the camp rule."""
+        key = self._camp_chunk()
+        chunk_id = chunk_ident(key)
+        prefix = f"enc:{key.dimension}:{key.x}:{key.y}:"
+        plan = self.spot_plans.get(chunk_id, ())
+        forced = self.forced.get(chunk_id, ())
+        for ident, encounter in list(self.admitted.items()):
+            if not ident.startswith(prefix) or BY_ID[encounter].category != "fight":
+                continue
+            suffix = ident[len(prefix):]
+            if not suffix.isdecimal() or len(suffix) > 5:
+                continue
+            index = int(suffix)
+            rolled = 0 <= index < len(plan) and plan[index][0] == encounter
+            added = 10 <= index < 10 + len(forced) and forced[index - 10] == encounter
+            if rolled or added:
+                self.admitted.pop(ident)
+                self.game.targets.pop(ident, None)
+                self._note(chunk_id, ident, encounter, "retired: camp sanctuary")
+
     def _reset_spawns(self):
         """Roll this life's spawn windows; nothing has been screened yet."""
         seed = derive_seed(self.game.world.world_seed, "spawn-window", self.life)
-        bonus = BOUNTY_WINDOW_BONUS if self.boon == "bountiful_path" else 0
+        bonus = effects.total({}, self.boon, "food_window_bonus")   # gear is not worn yet
         self.budget = {entry.id: limit for entry in BY_ID.values()
                        if (limit := roll_window(entry, seed, self.mastery.get(entry.id, 0),
                                                 bonus if entry.feeds else 0)) is not None}
@@ -31,7 +61,8 @@ class SpawningMixin:
     def _guarantee(self, chunk, chunk_id, taken, context):
         """One extra mastered encounter per life, outside the normal 0..3 draws."""
         ident = self.journal_guarantee
-        if (self.guarantee_used or ident is None or context.region != self.journal_guarantee_region
+        if (self.guarantee_used or ident is None or self._camp_excludes(chunk, ident)
+                or context.region != self.journal_guarantee_region
                 or bucket_reasons(BY_ID[ident], context)):
             return None
         index = len(self.forced.get(chunk_id, ()))
@@ -69,7 +100,7 @@ class SpawningMixin:
         """Context for rolling and explaining world spots in chunk `key`."""
         chunk = self.game.world.peek(key)
         region = self.region(key)
-        return Context(biome=chunk.asset.biome if chunk is not None else "dark_forest",
+        return Context(biome=chunk.asset.biome if chunk is not None else self.game.world.biome_for(key),
                        region=region.id if region else None, placement="spot", region_def=region,
                        mastery=self.mastery, journal_disabled=frozenset(self.journal_disabled),
                        journal_favor=self.journal_favor, **self._progress_fields())
@@ -123,7 +154,7 @@ class SpawningMixin:
         for chunk in self._resident():
             count += sum(1 for spot in self._live(chunk)
                          if spot.encounter == encounter and spot.id not in self.completed)
-        if encounter == BOAR_ENCOUNTER:
+        if encounter == ASSET_ENEMY_ACTION:   # map-placed enemies share this window
             resident = {chunk.key for chunk in self._resident()}
             count += sum(1 for t in self.game.targets.values() if not t.id.startswith("enc:")
                          and t.hp > 0 and t.chunk in resident and t.id in self.admitted)
@@ -152,6 +183,9 @@ class SpawningMixin:
 
     def _pity(self, chunk, chunk_id, category, taken):
         """Force one spot of a starved category into `chunk` (deterministic)."""
+        if chunk.key == self._camp_chunk() and category == "enemy":
+            self._note(chunk_id, None, None, "pity enemy: camp sanctuary")
+            return False
         ctx = self.spot_context(chunk.key)
         choices = [(a, w) for a, w in bucket(ctx) if a.spawn_category == category
                    and (self.budget.get(a.id) is None or self._active(a.id) < self.budget[a.id])]
@@ -177,6 +211,7 @@ class SpawningMixin:
     def _screen(self):
         """Roll when the player enters a chunk, then apply windows and pity.
         Asset-spawned boars are always removed: enemies come only from fight spots."""
+        self._retire_camp_fights()
         for chunk in (self.game.current_chunk(),):
             ident = chunk_ident(chunk.key)
             if ident in self.screened_chunks:
@@ -199,6 +234,9 @@ class SpawningMixin:
             admitted = set()
             spots = self._spots(chunk)
             for spot in spots:
+                if self._camp_excludes(chunk, spot.encounter):
+                    self._note(ident, spot.id, spot.encounter, "rejected: camp sanctuary")
+                    continue
                 if self._admit(spot.id, spot.encounter, ident):
                     admitted.add(BY_ID[spot.encounter].spawn_category)
             taken = [(s.x, s.y) for s in spots]

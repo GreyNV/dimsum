@@ -7,11 +7,11 @@ const stat = name => ({name, level: 2, xp: 250, into: 40, next: 130, dim_level: 
   speed: 1210, speed_regular_only: 1200, speed_dimensional_only: 1010, life_gain: 50});
 const detail = {
   character: {life: 3, depth: 2, best_depth: 5, frontier: 3, health: 80.5, hunger: 41, punch_damage: 2, gear: ['Walking staff'],
-    boon: null, boon_next: 'Iron skin', boar_hit_at_frontier: 20.1, fight_cost_at_frontier: 40.2, hunger_per_minute: 30,
+    boon: null, boon_next: 'Iron skin', threats: [{id: 'bramble_boar', name: 'Bramble boar', hp: 6, hit_at_frontier: 20.1, fight_cost_at_frontier: 40.2}], hunger_per_minute: 30,
     regen_per_minute: 12, rest_regen_per_minute: 60, inventory_slots: [3, 12], currencies: {ash: 2, blessing: 1}, unlocked: ['Climbing']},
   stats: ['strength', 'endurance', 'agility', 'intelligence', 'perception', 'willpower'].map(stat),
   multipliers: {actions: [{id: 'bramble_berries', name: 'Bramble berries', attribute: 'perception', speed: 1410, base_ms: 2400, effective_ms: 1703}],
-    hunger_drain: 0.909, boar_hit: [['Endurance', 0.909], ['Hide wrap', 0.7]], punch_damage: 2, punch_parts: [['Base', 1], ['Strength levels', 1]]},
+    hunger_drain: 0.909, enemy_hit: [['Endurance', 0.909], ['Hide wrap', 0.7]], punch_damage: 2, punch_parts: [['Base', 1], ['Strength levels', 1]]},
   rolls: {life: 3, windows: [
     {id: 'bramble_berries', name: 'Bramble berries', rolled: 2, min: 1, max: 2, active: 1, spawned: 4, mastery: 0, known: true},
     {id: 'gnarled_tree', name: 'Gnarled tree', rolled: 1, min: 1, max: 1, active: 0, spawned: 0, mastery: 0, known: false}],
@@ -27,7 +27,7 @@ const detail = {
 const state = {world_seed: '482910', expedition: {detail}};
 
 test('pages: every tab has a model, world has none, detail pages wait for data', () => {
-  assert.deepEqual(PAGE_IDS, ['world', 'character', 'stats', 'speed', 'journal', 'life', 'settings']);
+  assert.deepEqual(PAGE_IDS, ['world', 'stats', 'journal', 'settings']);
   assert.equal(pageModel('world', state), null);
   assert.equal(pageModel('nope', state), null);
   for (const p of PAGES.filter(p => needsDetail(p.id))) {
@@ -50,12 +50,10 @@ test('pages: journal counts by type, rolls flag max, multipliers multiply', () =
   assert.deepEqual(journal.find(s => s.title === 'Actions by type').rows, [['Forage', 12], ['Gather', 3]]);
   assert.deepEqual(journal.find(s => s.title === 'Discoveries').rows[0], ['Knowledge', 'Deer sign']);
   assert.deepEqual(journal.find(s => s.title === 'Recent leads').rows, [['Follow deer tracks', 'enc:forest:1:0:2', 'expired']]);
-  const life = pageModel('life', state).sections;
-  assert.equal(life[0].rows[0][3], 'max');
-  assert.equal(life[1].title, 'Rolled but not yet known');
-  const speed = pageModel('speed', state).sections;
-  assert.deepEqual(speed[0].rows[0], ['Bramble berries', 'Perception', '×1.41', '2.4s', '1.7s']);
-  assert.deepEqual(speed[1].rows.at(-1), ['Total', '×0.636']);
+  for (const removed of ['character', 'speed', 'life']) {
+    assert.equal(pageModel(removed, state), null);
+    assert.equal(needsDetail(removed), false);
+  }
   assert.equal(times(1000), '×1.00'); assert.equal(seconds(90000), '1.5 min');
 });
 

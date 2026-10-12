@@ -7,7 +7,7 @@ import {debugText, ExpeditionHud, activityText, newRewards, prologueView, reward
 import {regionCue, skillSlots, worldMode} from './world_ui.js';
 import {$, el, readUi, writeUi} from './dom.js';
 import {hosted, request, releaseInput} from './transport.js';
-import {drawMinimap} from './minimap.js';
+import {drawMinimap, visibleAt} from './minimap.js';
 import {anchorAction, renderAnchor} from './anchor_ui.js';
 import {buildTabs, renderSection} from './page_ui.js';
 import {drawEyelids, drawVignette, tintPicture} from './scene_fx.js';
@@ -87,7 +87,7 @@ function updateActivity() {
   if (!state) return;
   const tile = tileAt([...chunks.values()], state.player.x, state.player.y);
   const near = state.targets.find(t => t.hp > 0 && Math.abs(t.x - state.player.x) + Math.abs(t.y - state.player.y) <= 2);
-  const surface = near ? `Bramble boar nearby - ${near.hp} HP` : tile?.glyph === '%' ? 'Fording the river' : tile?.glyph === 'H' ? 'On an old bridge' : tile?.blocked ? 'Obstructed ground' : tile?.glyph === '=' ? 'On the old forest trail' : 'Among the trees';
+  const surface = near ? `${near.name || 'Something'} nearby - ${near.hp} HP` : tile?.glyph === '%' ? 'Fording the river' : tile?.glyph === 'H' ? 'On an old bridge' : tile?.blocked ? 'Obstructed ground' : tile?.glyph === '=' ? 'On the old forest trail' : 'Among the trees';
   const auto = activityText(state, paused);
   const text = auto ?? (paused ? 'Paused - the forest can wait' : state.player.animation === 'attack' ? 'Fists up' : surface);
   if ($('activity').textContent !== text) $('activity').textContent = text;
@@ -143,7 +143,7 @@ function adopt(next, sentControl = null) {
     actor = {...position}; camera = {...position};
   }
   const here = [...chunks.values()].find(c => c.x === Math.floor(next.player.x / c.width) && c.y === Math.floor(next.player.y / c.height));
-  const biome = (here?.biome || 'dark_forest').replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const biome = (here?.biome || 'Unknown').replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
   const region = next.expedition?.region?.name || biome;
   if ($('biome').textContent !== region) $('biome').textContent = region;
   const line = `Dimensional Summoner - ${biome}`;
@@ -185,7 +185,7 @@ function observeExpedition(next) {
   // No reward popups while host.js fast-forwards offline time: they would pile up unreadably.
   if (lastRewardSeq !== null && next.expedition.life === state?.expedition?.life && !window.DIMSUM_FASTFORWARD)
     for (const entry of newRewards(next, lastRewardSeq))
-      rewardTexts(entry).forEach((r, i) => rewards.push({...r, at: now + i * 180}));
+      rewardTexts(entry, next.expedition.item_colors).forEach((r, i) => rewards.push({...r, at: now + i * 180}));
   lastRewardSeq = Math.max(lastRewardSeq ?? 0, seq);
   const prologue = next.expedition.prologue;
   if (prologue) { elder = {...prologue.elder}; elderLeaving = null; }
@@ -304,15 +304,35 @@ function render(now) {
       c.x*c.width*TILE_W-OBJECT_PAD<view.x+width/view.scale/2 &&
       (c.y+1)*c.height*TILE_H+OBJECT_PAD>view.y-height/view.scale/2 &&
       c.y*c.height*TILE_H-OBJECT_PAD<view.y+height/view.scale/2);
+    const fog = state.fog || {};
+    const revealed = visible.filter(c => fog[`${c.x}:${c.y}`]);
+    const inSight = (x, y) => visibleAt(fog, x, y, state.chunk_width, state.chunk_height);
     // Paint any visible chunk that is still missing, then at most one off-screen
     // chunk per frame, so a border crossing never paints 3-5 chunks in one frame.
-    for(const chunk of visible) if(!pictures.has(chunk.id)) pictures.set(chunk.id, paintChunk(chunk));
-    const pending=resident.find(c=>!pictures.has(c.id));
+    for(const chunk of revealed) if(!pictures.has(chunk.id)) pictures.set(chunk.id, paintChunk(chunk));
+    const pending=resident.find(c=>fog[`${c.x}:${c.y}`] && !pictures.has(c.id));
     if(pending) pictures.set(pending.id, paintChunk(pending));
-    for(const chunk of visible) ctx.drawImage(pictures.get(chunk.id).ground,chunk.x*chunk.width*TILE_W,chunk.y*chunk.height*TILE_H);
+    // Clip the painted world to contiguous revealed tile runs. This also keeps tall
+    // props rooted in hidden cells from spilling into explored ground.
+    ctx.save(); ctx.beginPath();
+    for(const chunk of revealed) {
+      const rows=fog[`${chunk.x}:${chunk.y}`];
+      for(let ry=0;ry<chunk.height;ry++) {
+        const row=rows[ry] || '';
+        for(let rx=0;rx<chunk.width;) {
+          if(row[rx] !== '1') { rx++; continue; }
+          const start=rx;
+          while(rx<chunk.width && row[rx] === '1') rx++;
+          ctx.rect((chunk.x*chunk.width+start)*TILE_W,(chunk.y*chunk.height+ry)*TILE_H,
+            (rx-start)*TILE_W,TILE_H);
+        }
+      }
+    }
+    ctx.clip();
+    for(const chunk of revealed) ctx.drawImage(pictures.get(chunk.id).ground,chunk.x*chunk.width*TILE_W,chunk.y*chunk.height*TILE_H);
     // Region tint: a flat, low-alpha wash per chunk so regions read at a glance (VISUAL_STYLE.md effects pass).
     // Organic regions (generator v3) send one tint code per tile; the wash is cached per chunk.
-    for(const chunk of visible) if(chunk.tint) {
+    for(const chunk of revealed) if(chunk.tint) {
       ctx.globalAlpha=.28;
       const tint = chunk.tint_rows ? tintPicture(chunk, pictures.get(chunk.id)) : null;
       if (tint) ctx.drawImage(tint, chunk.x*chunk.width*TILE_W, chunk.y*chunk.height*TILE_H);
@@ -322,29 +342,31 @@ function render(now) {
       }
       ctx.globalAlpha=1;
     }
-    for(const chunk of visible) ctx.drawImage(pictures.get(chunk.id).objects,chunk.x*chunk.width*TILE_W-OBJECT_PAD,chunk.y*chunk.height*TILE_H-OBJECT_PAD);
+    for(const chunk of revealed) ctx.drawImage(pictures.get(chunk.id).objects,chunk.x*chunk.width*TILE_W-OBJECT_PAD,chunk.y*chunk.height*TILE_H-OBJECT_PAD);
+    ctx.restore();
     const anchor = state.expedition?.anchor;
-    if (anchor) {
+    if (anchor && inSight(anchor.x,anchor.y)) {
       drawAmbushSite(ctx, (anchor.x+.5)*TILE_W, (anchor.y+.5)*TILE_H);
       drawCamp(ctx, (anchor.x+.5)*TILE_W, (anchor.y+.5)*TILE_H, {clock: state.clock_ms, reducedMotion});
     }
     const goal = state.expedition?.goal;
-    for (const spot of state.spots || []) drawSpot(ctx, spot, (spot.x+.5)*TILE_W, (spot.y+.5)*TILE_H,
+    for (const spot of state.spots || []) if(inSight(spot.x,spot.y)) drawSpot(ctx, spot, (spot.x+.5)*TILE_W, (spot.y+.5)*TILE_H,
       {clock: state.clock_ms, goal: !!goal && goal.x === spot.x && goal.y === spot.y});
     for (const [id, f] of fadingSpots) {
       const age = now - f.at;
       if (age >= 650) { fadingSpots.delete(id); continue; }
+      if (!inSight(f.spot.x,f.spot.y)) continue;
       drawSpot(ctx, f.spot, (f.spot.x+.5)*TILE_W, (f.spot.y+.5)*TILE_H, {fade: Math.min(1, age / 500)});
       drawSpotCompletion(ctx, f.spot, (f.spot.x+.5)*TILE_W, (f.spot.y+.5)*TILE_H, age, reducedMotion);
     }
     // Actors are depth-sorted by feet row; canopies south of each actor are repainted over it.
-    const actors=state.targets.filter(t=>t.hp>0 || (deaths.has(t.id) && now-deaths.get(t.id).at<600))
+    const actors=state.targets.filter(t=>inSight(t.x,t.y) && (t.hp>0 || (deaths.has(t.id) && now-deaths.get(t.id).at<600)))
       .map(t=>({kind:'enemy',row:t.y,tx:t.x,ty:t.y,target:t}));
     actors.push({kind:'player',row:actor.y/TILE_H-.5,tx:state.player.x,ty:state.player.y});
     const prologue = state.expedition?.prologue ?? null;
-    if (elder) actors.push({kind:'elder',row:elder.y,tx:elder.x,ty:elder.y,alpha:1,shift:0,
+    if (elder && inSight(elder.x,elder.y)) actors.push({kind:'elder',row:elder.y,tx:elder.x,ty:elder.y,alpha:1,shift:0,
       facing:state.player.x < elder.x ? 'west' : 'east',talking:prologue?.stage === 'listen'});
-    else if (elderLeaving) {
+    else if (elderLeaving && inSight(elderLeaving.x,elderLeaving.y)) {
       const age = now - elderLeaving.at;
       if (age >= ELDER_LEAVE_MS) elderLeaving = null;
       else actors.push({kind:'elder',row:elderLeaving.y,tx:elderLeaving.x,ty:elderLeaving.y,
@@ -366,15 +388,15 @@ function render(now) {
         drawEnemy(ctx,t,at.x,at.y,{clock:state.clock_ms,reducedMotion,
           hit:hit?now-hit.at:Infinity,dying:t.hp===0&&death?Math.min(1,(now-death.at)/600):null});
       }
-      repaintCanopies(item.tx,item.ty,resident);
+      repaintCanopies(item.tx,item.ty,revealed);
     }
-    for(const t of state.targets) if(hiddenBehind(t,state.player)) {
+    for(const t of state.targets) if(inSight(t.x,t.y) && hiddenBehind(t,state.player)) {
       const hit=hits.get(t.id);
       const at=enemyXY(t,now);
       drawEnemy(ctx,t,at.x,at.y,{clock:state.clock_ms,reducedMotion,ghost:true,hit:hit?now-hit.at:Infinity});
     }
     if (state.expedition?.control === 'manual' && !prologue) {
-      const target = state.targets.find(t=>t.id===state.expedition.auto_target && t.hp>0);
+      const target = state.targets.find(t=>t.id===state.expedition.auto_target && t.hp>0 && inSight(t.x,t.y));
       drawUnarmedReach(ctx,actor.x,actor.y,target ? [(target.x+.5)*TILE_W,(target.y+.5)*TILE_H] : null,
         state.player.animation === 'attack');
     }
@@ -382,11 +404,29 @@ function render(now) {
     if(swing.slashAt!==null) {
       const age=now-swing.slashAt;
       if(!reducedMotion) drawPunchLines(ctx,actor.x,actor.y,swing.facing,age);
-      if(age<220) for(const e of swing.effects) drawEffect(ctx,(e.x+.5)*TILE_W,(e.y+.5)*TILE_H-TORSO_LIFT,age);
+      if(age<220) for(const e of swing.effects) if(inSight(e.x,e.y))
+        drawEffect(ctx,(e.x+.5)*TILE_W,(e.y+.5)*TILE_H-TORSO_LIFT,age);
     }
     for(const t of state.targets) {
       const hit=hits.get(t.id);
-      if(hit && now-hit.at<600) { const at=enemyXY(t,now); drawDamage(ctx,at.x,at.y-44,hit.amount,reducedMotion?0:now-hit.at); }
+      if(hit && now-hit.at<600 && inSight(t.x,t.y)) {
+        const at=enemyXY(t,now); drawDamage(ctx,at.x,at.y-44,hit.amount,reducedMotion?0:now-hit.at);
+      }
+    }
+    // Mask actor art and effects that cross from a revealed tile into hidden ground.
+    ctx.fillStyle='#101b17';
+    for(const chunk of visible) {
+      const x=chunk.x*chunk.width*TILE_W, y=chunk.y*chunk.height*TILE_H;
+      const rows=fog[`${chunk.x}:${chunk.y}`];
+      for(let row=0;row<chunk.height;row++) {
+        const mask=rows?.[row] || '';
+        for(let col=0;col<chunk.width;) {
+          if(mask[col] === '1') { col++; continue; }
+          const start=col;
+          while(col<chunk.width && mask[col] !== '1') col++;
+          ctx.fillRect(x+start*TILE_W,y+row*TILE_H,(col-start)*TILE_W,TILE_H);
+        }
+      }
     }
     for (let i = rewards.length - 1; i >= 0; i--) {
       const age = now - rewards[i].at;
@@ -415,7 +455,10 @@ addEventListener('keydown', event=>{
   else if(event.code==='KeyP' && !event.repeat) { event.preventDefault(); setPause(!paused); }
   else if(event.code==='Backquote' && !event.repeat) { event.preventDefault(); toggleDebug(); }
   else if(event.code==='Escape' && page !== 'world') { event.preventDefault(); openPage('world'); }
-  else if(/^Digit[1-7]$/.test(event.code) && !event.repeat) { event.preventDefault(); openPage(PAGES[Number(event.code.slice(5)) - 1].id); }
+  else if(/^Digit[1-9]$/.test(event.code) && !event.repeat) {
+    const selected = PAGES[Number(event.code.slice(5)) - 1];
+    if (selected) { event.preventDefault(); openPage(selected.id); }
+  }
   else if((event.code==='Equal' || event.code==='NumpadAdd') && !event.repeat) changeZoom(.1);
   else if((event.code==='Minus' || event.code==='NumpadSubtract') && !event.repeat) changeZoom(-.1);
 });
