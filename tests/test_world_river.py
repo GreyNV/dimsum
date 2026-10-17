@@ -52,8 +52,7 @@ class RiverbankTests(unittest.TestCase):
         self.assertLess(lurker.step_ms, boar.step_ms)
         self.assertLess(lurker.hit, boar.hit)
         self.assertLess(BY_ID["river_lurker"].hp, BY_ID["bramble_boar"].hp)
-        self.assertIsNotNone(lurker.leash, "territorial: a short chase")
-        self.assertIsNone(boar.leash)
+        self.assertLess(lurker.aggro_radius, boar.aggro_radius, "it notices you late")
         e = expedition()
         steps = []
         for tick in range(6):
@@ -62,7 +61,7 @@ class RiverbankTests(unittest.TestCase):
         self.assertEqual(sum(steps), 9, "1.5 steps per boar step over time")
         self.assertEqual({e._steps_this_tick(boar)}, {1})
 
-    def test_a_lurker_chases_but_never_past_its_leash(self):
+    def test_a_lurker_that_notices_you_keeps_chasing(self):
         e = expedition()
         while e.in_prologue:
             e.advance(500)
@@ -84,16 +83,16 @@ class RiverbankTests(unittest.TestCase):
         e.game.targets[target.id] = target
         e.admitted[target.id] = "river_lurker"
         home = e._global(here, start + 4, e.game.player.y)
-        lurker, moved = ENEMIES["river_lurker"], False
+        lurker, farthest = ENEMIES["river_lurker"], 0
         for tick in range(12):
             e.monster_ms, e.total_ms = 300, e.total_ms + 300
             if tick % 2 and e.game.player.x > 2:
                 e.game.player.x -= 1   # the avatar backs away
             e._pursue()
             tx, ty = e._global(target.chunk, target.x, target.y)
-            moved = moved or (tx, ty) != home
-            self.assertLessEqual(abs(tx - home[0]) + abs(ty - home[1]), lurker.leash)
-        self.assertTrue(moved, "it does give chase")
+            farthest = max(farthest, abs(tx - home[0]) + abs(ty - home[1]))
+        self.assertEqual(e.hunting[target.id]["mode"], "hunt")
+        self.assertGreater(farthest, 3, "no territory any more: it follows the avatar")
 
     def test_a_trail_to_the_river_heads_for_a_chunk_with_water(self):
         from tests.test_world_chains import started

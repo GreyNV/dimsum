@@ -430,7 +430,6 @@ class EnemyDef:
     cause_text: str                # "Cause: <cause_text>" in the life report
     sprite: str                    # client art key (combat_art.js ENEMY_SPRITES)
     step_ms: int = 300             # one chasing step this often (lower = faster)
-    leash: int | None = None       # territorial: never chases further than this from where it appeared
     drains: str = "health"         # what a touch takes: "health" (a bite) or "hunger" (it feeds on you)
     fears_fire: bool = False       # never chases into the light of the anchor camp's or a campfire's flames
 
@@ -441,8 +440,6 @@ class EnemyDef:
         integer(self.hit, "enemy hit", 1, 100)
         integer(self.aggro_radius, "aggro radius", 1, 30)
         integer(self.step_ms, "enemy step", 100, 2000)
-        if self.leash is not None:
-            integer(self.leash, "enemy leash", 1, 30)
         if type(self.fears_fire) is not bool:
             raise ValueError(f"fears_fire must be boolean: {self.id}")
         if self.drains not in ("health", "hunger"):
@@ -454,15 +451,15 @@ class EnemyDef:
 ENEMIES = {e.id: e for e in (
     EnemyDef("bramble_boar", "Wild boar", hit=8, aggro_radius=11, cause="boar",
              cause_text="a wild boar", sprite="boar"),
-    # Fast and fragile: hides by the water, bites lighter, gives up the chase quickly.
+    # Fast and fragile: hides by the water, bites lighter, notices you late (small aggro radius).
     EnemyDef("river_lurker", "River lurker", hit=4, aggro_radius=4, cause="lurker",
-             cause_text="a river lurker", sprite="lurker", step_ms=200, leash=3),
-    # Slow and stubborn: guards its ruin, takes many blows, never leaves the stones.
+             cause_text="a river lurker", sprite="lurker", step_ms=200),
+    # Slow and stubborn: rises at ruins, takes many blows, walks you down slowly.
     EnemyDef("restless_bones", "Restless bones", hit=6, aggro_radius=5, cause="bones",
-             cause_text="restless bones", sprite="skeleton", step_ms=450, leash=5),
+             cause_text="restless bones", sprite="skeleton", step_ms=450),
     # Gentle but draining: it does not bite, it feeds - each touch takes hunger, not health.
     EnemyDef("pale_wisp", "Pale wisp", hit=6, aggro_radius=6, cause="wisp",
-             cause_text="a pale wisp", sprite="wisp", step_ms=350, leash=6, drains="hunger"),
+             cause_text="a pale wisp", sprite="wisp", step_ms=350, drains="hunger"),
     # Night only: quick and keen-nosed, it hunts whoever walks the dark, but keeps out of firelight.
     EnemyDef("wolf", "Wolf", hit=9, aggro_radius=10, cause="wolf", cause_text="a wolf in the night",
              sprite="wolf", step_ms=250, fears_fire=True),

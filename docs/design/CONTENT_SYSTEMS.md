@@ -129,9 +129,9 @@ spots only enter the bucket of a chunk that has water (`encounters.features`,
   Hidden ford (a neighbouring chunk with water; reveals the map; 25% a lurker waits) /
   washed away. A spreading lead with `near="w"` heads for a neighbouring chunk that has
   water when there is one; a water lead with nowhere to stand never appears.
-- **River lurker** (`EnemyDef` `step_ms=200`, `leash=3`): faster than the boar (3 steps
+- **River lurker** (`EnemyDef` `step_ms=200`, no leash since PURSUIT.md): faster than the boar (3 steps
   for its 2), lighter bite (4 vs 8), less HP (2 vs 3), short aggro (4); territorial - it
-  never chases more than 3 tiles from where it appeared (`CombatMixin._target_home`), so
+  notices you late (aggro 4) but, like every enemy, hunts you once it does (docs/design/PURSUIT.md), so
   walking away up the bank escapes it. Drops fish and `lurker_spoils` (river scales).
 - **New items:** River fish (food 25), River scales (treasure).
 
@@ -194,7 +194,7 @@ after a reload and new each life.
 
 Ruins are guarded by **restless bones** (`EnemyDef("restless_bones")`, sprite `skeleton`): a slow
 (450 ms per step), stubborn skeleton that bites for 6 at ring 0, notices you at 5 steps and never
-leaves its ruin (leash 5). Site fight actions (placement `site` with an `enemy`) put them inside
+is slow (once it notices you it hunts you, PURSUIT.md). Site fight actions (placement `site` with an `enemy`) put them inside
 the clearing: **Restless bones** at burial mounds (5 HP + ring scaling, weight 9) and the **Fallen
 guard** at fallen watchtowers (4 HP, weight 5). They need no unlock, so a ruin is dangerous long
 before it is worth searching (a locked site shows only its guards). Loot: carved bones (treasure, 5 ash),

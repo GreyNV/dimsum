@@ -111,6 +111,7 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.shimmer = set()   # "dimension:cx:cy" region cells where rare spots roll more often this life
         self.life_recipes = set()   # recipes found this life: kept with ash at the anchor, or lost
         self.campfire = None   # {"dimension", "x", "y", "fire_x", "fire_y"}: this life's campfire (global cells)
+        self.hunting = {}      # target id -> {"mode": "hunt" | "flee", "since": ms}: enemies after the avatar (combat._pursue)
         if not any(BUILDINGS[b].function == "storage" for b in self.bound_buildings):
             self.chest = {}   # an unbound chest does not outlast its life
         self._reset_spawns()

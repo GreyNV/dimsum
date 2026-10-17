@@ -149,7 +149,7 @@ class NightSpawnTests(unittest.TestCase):
 
     def test_schema_eighteen_saves_start_watching_from_now(self):
         e = started()
-        old = {k: v for k, v in e.to_dict().items() if k != "night_tick"}
+        old = {k: v for k, v in e.to_dict().items() if k not in ("night_tick", "hunting")}
         old["schema_version"] = 18
         loaded = Expedition.from_dict(json.loads(json.dumps(old)))
         self.assertEqual(loaded.night_tick, night.world_clock(e.total_ms) // tuning.NIGHT_SPAWN_EVERY_MS)

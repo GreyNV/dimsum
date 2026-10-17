@@ -34,7 +34,9 @@ V18_DROPPED = ("blessing", "boon", "boon_next", "prayers_this_life", "skills", "
 V18_FIELDS = ("contact_ready_ms", "possess_end_ms", "possess_ready_ms", "opening")
 V18_SAVE_FIELDS = tuple(f for f in V17_SAVE_FIELDS if f not in V18_DROPPED) + V18_FIELDS
 V19_FIELDS = ("night_tick",)       # schema 19: the night watch's last world-clock tick
-SAVE_FIELDS = V18_SAVE_FIELDS + V19_FIELDS
+V19_SAVE_FIELDS = V18_SAVE_FIELDS + V19_FIELDS
+V20_FIELDS = ("hunting",)          # schema 20: enemies hunting or fleeing the avatar
+SAVE_FIELDS = V19_SAVE_FIELDS + V20_FIELDS
 V7_FIELDS = ("journal",)                       # added by schema 7
 V8_FIELDS = ("equipped", "knowledge", "recipes", "journal_disabled", "journal_favor",
              "leads", "lead_history")         # added by schema 8
@@ -225,9 +227,15 @@ def _from_v18(data):
     return {**data, "schema_version": 19, "night_tick": (total + DAY_START_MS) // NIGHT_SPAWN_EVERY_MS}
 
 
+def _from_v19(data):
+    """Nobody is hunting yet: enemies notice the avatar again under the new rules."""
+    fields(data, V19_SAVE_FIELDS)
+    return {**data, "schema_version": 20, "hunting": {}}
+
+
 MIGRATIONS = {6: _from_v6, 7: _from_v7, 8: _from_v8, 9: _from_v9, 10: _from_v10, 11: _from_v11, 12: _from_v12,
               13: _from_v13, 14: _from_v14, 15: _from_v15, 16: _from_v16,
-              17: _from_v17, 18: _from_v18}
+              17: _from_v17, 18: _from_v18, 19: _from_v19}
 
 
 def upgrade(data):
@@ -366,6 +374,15 @@ def _load_life(result, data):
     result.opening = data["opening"]
     result.night_tick = integer(data["night_tick"], "night tick", 0,
                                 (result.total_ms + DAY_START_MS) // NIGHT_SPAWN_EVERY_MS)
+    hunting = data["hunting"]
+    if type(hunting) is not dict:
+        raise ValueError("invalid hunting enemies")
+    result.hunting = {}
+    for ident, row in hunting.items():
+        fields(row, ("mode", "since"))
+        if ident not in result.game.targets or row["mode"] not in ("hunt", "flee"):
+            raise ValueError("invalid hunting enemy")
+        result.hunting[ident] = {"mode": row["mode"], "since": integer(row["since"], "hunt start", 0, result.total_ms)}
     if type(data["unlocked"]) is not list or any(u not in UNLOCKS for u in data["unlocked"]) \
             or len(set(data["unlocked"])) != len(data["unlocked"]):
         raise ValueError("invalid unlocks")
@@ -538,6 +555,7 @@ class SavesMixin:
                 "anchor_ms": self.anchor_ms, "anchor_wait": self.anchor_wait,
                 "contact_ready_ms": self.contact_ready_ms, "possess_end_ms": self.possess_end_ms,
                 "possess_ready_ms": self.possess_ready_ms, "opening": self.opening, "night_tick": self.night_tick,
+                "hunting": {k: dict(v) for k, v in sorted(self.hunting.items())},
                 "journal_guarantee": self.journal_guarantee,
                 "journal_guarantee_region": self.journal_guarantee_region,
                 "guarantee_used": self.guarantee_used,

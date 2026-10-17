@@ -37,7 +37,7 @@ class RuinGuardTests(unittest.TestCase):
         bones, boar = ENEMIES["restless_bones"], ENEMIES["bramble_boar"]
         self.assertGreater(bones.step_ms, boar.step_ms, "slower than a boar: you can walk away")
         self.assertLess(bones.hit, boar.hit)
-        self.assertIsNotNone(bones.leash, "it guards the ruin")
+        self.assertGreater(bones.step_ms, ENEMIES["bramble_boar"].step_ms, "it walks you down slowly")
         self.assertGreater(BY_ID["barrow_dead"].hp, BY_ID["bramble_boar"].hp)
         self.assertIn("bones", DEATH_CAUSES)
         self.assertEqual(ENEMIES["restless_bones"].sprite, "skeleton")

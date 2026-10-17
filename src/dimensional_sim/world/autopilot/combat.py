@@ -11,6 +11,7 @@ from .constants import CAMP_SAFE_RADIUS, EAT_AT, MONSTER_STEP_MS, POINT, VITAL_M
 
 # Chasing enemies path-find this far (steps) around obstacles.
 PURSUIT_PATH_LIMIT = 2 * max(e.aggro_radius for e in ENEMIES.values()) + 2
+FLEE_UNLOAD_MS = 20_000   # a frightened enemy that cannot get out of range is gone after this long
 
 
 class CombatMixin:
@@ -178,37 +179,28 @@ class CombatMixin:
         tick = self.total_ms // MONSTER_STEP_MS
         return (tick + 1) * MONSTER_STEP_MS // enemy.step_ms - tick * MONSTER_STEP_MS // enemy.step_ms
 
-    def _target_home(self, target):
-        """Where a territorial enemy appeared, as a global cell: its lead or its rolled spot
-        (from the saved plan, so it holds even after the chunk is evicted)."""
-        for lead in self.leads:
-            if lead["id"] == target.id:
-                return self._global(ChunkKey(lead["dimension"], lead["chunk_x"], lead["chunk_y"]),
-                                    lead["x"], lead["y"])
-        parts = target.id.split(":")
-        if len(parts) == 5 and parts[0] == "enc" and parts[4].isdecimal():
-            plan = self.spot_plans.get(":".join(parts[1:4]), ())
-            index = int(parts[4])
-            if index < len(plan):
-                key = ChunkKey(parts[1], int(parts[2]), int(parts[3]))
-                return self._global(key, plan[index][1], plan[index][2])
-        spot = self._spot_by_id(target.id)
-        if spot is not None:
-            return self._global(spot.chunk, spot.x, spot.y)
-        return self._global(target.chunk, target.x, target.y)
-
     def _pursue(self):
-        """Live enemies within their aggro radius charge the avatar one step per MONSTER_STEP_MS.
-        Reaching it, an enemy bites first and interrupts whatever the avatar was doing."""
+        """Enemies hunt the avatar one step per MONSTER_STEP_MS (docs/design/PURSUIT.md).
+
+        An enemy that notices the avatar (within its aggro radius, the avatar out of the camp
+        and firelight) becomes a hunter: it chases wherever the avatar goes - no aggro limit,
+        no territory - and cannot be outrun, only left behind beyond the loaded area around
+        the avatar (its chunk out of the resident 3x3), where it is unloaded. If the avatar
+        reaches the anchor camp or a campfire, every hunter takes fright: it flees until it
+        is out of range and unloaded (or, cornered, after FLEE_UNLOAD_MS it is gone anyway).
+        Reaching the avatar, a hunter bites first and interrupts whatever it was doing."""
         if self.monster_ms < MONSTER_STEP_MS:
             return
         self.monster_ms -= MONSTER_STEP_MS
         if self.in_prologue:
             return
+        self._unload_far_enemies()
         px, py = self._player()
-        if self._near_camp(px, py) or not any(   # cheap check first: most steps nothing is close
-                self._hostile(t) and self._steps_to(t, px, py) <= self.enemy_of(t).aggro_radius
-                for t in self.game.targets.values()):
+        safe = self.in_firelight(px, py)
+        quiet = not self.hunting and (safe or not any(
+            self._hostile(t) and self._steps_to(t, px, py) <= self.enemy_of(t).aggro_radius
+            for t in self.game.targets.values()))
+        if quiet:   # cheap check first: most steps nothing is close and nothing hunts
             return
         grid = self._grid()
         w, h = self._dims()
@@ -219,30 +211,33 @@ class CombatMixin:
             enemy = self.enemy_of(target)
             tx, ty = self._global(target.chunk, target.x, target.y)
             distance = abs(tx - px) + abs(ty - py)
-            if distance > enemy.aggro_radius or self._near_camp(px, py) or self._near_camp(tx, ty):
+            mode = self.hunting.get(target.id, {}).get("mode")
+            if mode is None:
+                if safe or distance > enemy.aggro_radius or self.in_firelight(tx, ty):
+                    continue
+                mode = "hunt"
+                self.hunting[target.id] = {"mode": "hunt", "since": self.total_ms}
+            if mode == "hunt" and safe:
+                mode = "flee"
+                self.hunting[target.id] = {"mode": "flee", "since": self.total_ms}
+                self._entry("lore", f"The {enemy.name.lower()} shies from the "
+                            f"{'camp' if self._near_camp(px, py) else 'fire'} and slinks away.")
+            if mode == "flee":
+                if self.total_ms - self.hunting[target.id]["since"] >= FLEE_UNLOAD_MS:
+                    self._unload(target)
+                    continue
+                for _ in range(self._steps_this_tick(enemy)):
+                    moved = self._enemy_step(target, grid, w, h, px, py, away=True)
+                    if moved is None:
+                        break
                 continue
-            if enemy.fears_fire and (self._near_fire(px, py) or self._near_fire(tx, ty)):
-                continue   # it will not step into the firelight
-            home = self._target_home(target) if enemy.leash is not None else None
             for _ in range(self._steps_this_tick(enemy)):
                 if distance <= 1:
                     break
-                choices = []
-                blocked = self._blocked()
-                for direction in DIRECTIONS:
-                    dx, dy = DELTAS[direction]
-                    nx, ny = tx + dx, ty + dy
-                    key = ChunkKey(self.dimension, nx // w, ny // h)
-                    if home is not None and abs(nx - home[0]) + abs(ny - home[1]) > enemy.leash:
-                        continue   # territorial: it will not leave its stretch of bank
-                    if (nx, ny) != (px, py) and key in self.game.initialized_chunks and \
-                            self._can_move(grid, blocked, tx, ty, direction) and (nx, ny) in field:
-                        choices.append((field[nx, ny], direction, nx, ny, key))
-                if not choices:
+                moved = self._enemy_step(target, grid, w, h, px, py, field=field)
+                if moved is None:
                     break
-                _, _, tx, ty, key = min(choices)
-                target.chunk, target.x, target.y = key, tx % w, ty % h
-                self._field_cache.clear()
+                tx, ty = moved
                 distance = abs(tx - px) + abs(ty - py)
             # An enemy that catches a fleeing avatar bites it in passing but does not stop it;
             # retreat is safer than a losing fight, never free.
@@ -259,7 +254,62 @@ class CombatMixin:
                 if self.health > self.fight_damage(self.ring(target.chunk), self.target_action(target.id)):
                     self.goal = {"kind": "target", "id": target.id, "x": tx, "y": ty}
                     self._entry("ambush", f"A {name} attacks you!")
-                else:   # this fight would kill: outrun it to the camp (enemies are slower)
+                else:   # this fight would kill: run for the camp - it cannot follow you in
                     self.goal = self._home_goal()
                     self._entry("ambush", f"A {name} attacks you - too hurt to fight, you run for the camp!")
                 break
+
+    def _enemy_step(self, target, grid, w, h, px, py, *, field=None, away=False):
+        """One step of a hunter toward the avatar (down the distance field when it is near,
+        otherwise any step that closes in) or of a frightened enemy away from it. Never into
+        the camp or a campfire's light, never onto the avatar, only over loaded ground.
+        Returns the new global cell, or None when no step helps."""
+        tx, ty = self._global(target.chunk, target.x, target.y)
+        here = abs(tx - px) + abs(ty - py)
+        blocked = self._blocked()
+        choices = []
+        for direction in DIRECTIONS:
+            dx, dy = DELTAS[direction]
+            nx, ny = tx + dx, ty + dy
+            key = ChunkKey(self.dimension, nx // w, ny // h)
+            if (nx, ny) == (px, py) or key not in self.game.initialized_chunks \
+                    or not self._can_move(grid, blocked, tx, ty, direction) or self.in_firelight(nx, ny):
+                continue
+            there = abs(nx - px) + abs(ny - py)
+            if away:
+                if there > here:
+                    choices.append((-there, direction, nx, ny, key))
+            elif field is not None and (tx, ty) in field and (nx, ny) in field:
+                choices.append((field[nx, ny], direction, nx, ny, key))
+            elif there < here and ((tx, ty) not in (field or {})):
+                choices.append((there, direction, nx, ny, key))
+        if not choices:
+            return None
+        _, _, nx, ny, key = min(choices)
+        target.chunk, target.x, target.y = key, nx % w, ny % h
+        self._field_cache.clear()
+        return nx, ny
+
+    def _unload_far_enemies(self):
+        """Hunting or fleeing enemies whose chunk left the loaded area around the avatar are
+        unloaded: a rolled spot comes back at home when its chunk is entered again; a lead
+        (a wolf) is gone."""
+        resident = {chunk.key for chunk in self._resident()}
+        for target in sorted(self.game.targets.values(), key=lambda t: t.id):
+            if target.id in self.hunting and (target.chunk not in resident or target.hp == 0):
+                self._unload(target)
+        for ident in [i for i in self.hunting if i not in self.game.targets]:
+            del self.hunting[ident]
+
+    def _unload(self, target):
+        self.hunting.pop(target.id, None)
+        if target.hp == 0:
+            return
+        del self.game.targets[target.id]
+        self._field_cache.clear()
+        gone = [lead for lead in self.leads if lead["id"] == target.id]
+        if gone:
+            self.leads = [lead for lead in self.leads if lead["id"] != target.id]
+            self._record_leads(gone, "expired")
+        if (self.goal or {}).get("id") == target.id:
+            self.goal = None
