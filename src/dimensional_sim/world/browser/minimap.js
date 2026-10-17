@@ -48,8 +48,17 @@ export function drawMinimap(map, state, chunks, dpr) {
   };
   for(const spot of state.spots||[]) if(visibleAt(fog, spot.x, spot.y, state.chunk_width, state.chunk_height))
     mark(spot.x,spot.y,'#e2c066',1.1);
-  for(const t of state.targets) if(t.hp>0 && visibleAt(fog, t.x, t.y, state.chunk_width, state.chunk_height))
-    mark(t.x,t.y,'#e0604f',1.1);
+  // Enemies: hunters always show (pulsing ring), fleeing ones fade; others only where explored.
+  const pulse = 1.6 + (Math.floor(performance.now() / 250) % 2) * .6;
+  for(const t of state.targets) {
+    if (t.hp <= 0) continue;
+    if (t.hunting === 'hunt') {
+      mark(t.x,t.y,'#ff5a46',1.4);
+      const mx=left+(t.x-minX*state.chunk_width+.5)*scale, my=top+(t.y-minY*state.chunk_height+.5)*scale;
+      map.strokeStyle='#ff5a46'; map.lineWidth=.8; map.strokeRect(mx-pulse-1.4,my-pulse-1.4,(pulse+1.4)*2,(pulse+1.4)*2);
+    } else if (t.hunting === 'flee') mark(t.x,t.y,'#8a5a50',1);
+    else if (visibleAt(fog, t.x, t.y, state.chunk_width, state.chunk_height)) mark(t.x,t.y,'#e0604f',1.1);
+  }
   // The anchor camp (and this life's campfire), kept on the map's edge when outside it.
   const place=(gx,gy,color)=>{
     const mx=Math.max(3,Math.min(MAP_W-3,left+(gx-minX*state.chunk_width+.5)*scale));

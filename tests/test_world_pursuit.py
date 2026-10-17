@@ -131,6 +131,15 @@ class HuntTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Expedition.from_dict(bad)
 
+    def test_the_minimap_is_the_loaded_range_and_shows_hunters(self):
+        from dimensional_sim.world.session import snapshot
+        e, boar = boar_beside()
+        tick(e)
+        frame = snapshot(e.game, expedition=e)
+        self.assertEqual({(m["x"], m["y"]) for m in frame["minimap"]},
+                         {(c.key.x, c.key.y) for c in e._resident()}, "what the minimap shows is what is loaded")
+        self.assertEqual(next(t for t in frame["targets"] if t["id"] == boar.id)["hunting"], "hunt")
+
     def test_schema_nineteen_saves_start_with_nobody_hunting(self):
         e, _ = boar_beside()
         old = {k: v for k, v in e.to_dict().items() if k != "hunting"}

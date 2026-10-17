@@ -11,7 +11,7 @@ is out of range and unloaded.
   it takes any step that closes in. It never steps into the camp or firelight, or onto the avatar.
 - **Unload**: a hunting or fleeing enemy whose chunk leaves the loaded 3x3 chunks around the avatar is
   removed. A rolled spot enemy comes back, calm, at its spot when its chunk is entered again; a lead
-  (a night wolf) is gone for good. The loaded area is the inner 3x3 of the 5x5 minimap.
+  (a night wolf) is gone for good. The minimap shows exactly this loaded 3x3 (`session.MINIMAP_RADIUS = 1`), so an enemy that leaves the minimap is unloaded. Hunters show on the minimap with a pulsing red ring even in fog; fleeing ones are dimmed.
 - **Fright**: when the avatar stands in the camp or a campfire's light, every hunter turns to flee
   ("The boar shies from the camp and slinks away."), stepping away each tick until it is out of
   range; one that is cornered is gone after `FLEE_UNLOAD_MS` (20 s). Nothing notices the avatar

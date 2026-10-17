@@ -230,7 +230,9 @@ def _from_v18(data):
 def _from_v19(data):
     """Nobody is hunting yet: enemies notice the avatar again under the new rules."""
     fields(data, V19_SAVE_FIELDS)
-    return {**data, "schema_version": 20, "hunting": {}}
+    total = integer(data["total_ms"], "total time", 0)   # early schema-19 saves used a 20 s tick
+    tick = min(integer(data["night_tick"], "night tick", 0), (total + DAY_START_MS) // NIGHT_SPAWN_EVERY_MS)
+    return {**data, "schema_version": 20, "hunting": {}, "night_tick": tick}
 
 
 MIGRATIONS = {6: _from_v6, 7: _from_v7, 8: _from_v8, 9: _from_v9, 10: _from_v10, 11: _from_v11, 12: _from_v12,

@@ -19,6 +19,9 @@ from .seeds import derive_seed
 TICK_MS = 20
 INPUT_LEASE = 0.3
 LOG_ENTRIES = 6
+# The minimap shows exactly the loaded 3x3 chunks around the avatar: what is on it is what is
+# simulated, so a hunter that leaves the minimap is unloaded (combat._unload_far_enemies).
+MINIMAP_RADIUS = 1
 ITEM_COLORS = {item.id: item.color for item in ITEMS.values()}   # reward popups and HUD text
 ITEM_GLINTS = {item.id: glint for item in ITEMS.values() if (glint := rarity_glint(item.rarity))}  # reveal burst
 
@@ -103,10 +106,11 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual",
         for t in targets:   # how to draw and name each enemy (catalog EnemyDef)
             enemy = ENEMIES[BY_ID[kinds[t["id"]]].enemy]
             t["name"], t["sprite"] = enemy.name, enemy.sprite
+            t["hunting"] = expedition.hunting.get(t["id"], {}).get("mode")   # "hunt" | "flee" | None
         frame_extra = {"spots": [] if in_anchor else expedition.visible_spots(),
                        "target_kinds": {t["id"]: kinds[t["id"]] for t in targets},
                        "expedition": _expedition_view(expedition, control, debug=debug, detail=detail)}
-    minimap = game.world.minimap(center, 2)
+    minimap = game.world.minimap(center, MINIMAP_RADIUS)
     fog = {}
     for entry in minimap:
         key = ChunkKey(entry["dimension"], entry["x"], entry["y"])
