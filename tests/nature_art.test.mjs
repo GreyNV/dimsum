@@ -53,3 +53,19 @@ test('shores draw only where water meets land', () => {
   drawShores(g, {width: 3, height: 1, seed: 1, tiles: ['.ww']});
   assert.ok(rects.length > 0);
 });
+
+test('every tree kind draws its own stamp and pines stay inside the stamp', async () => {
+  const {TREE_ART, TREE_KIND_LETTERS, pineCells} = await import('../src/dimensional_sim/world/browser/nature_art.js');
+  assert.deepEqual(Object.keys(TREE_ART).sort(), Object.values(TREE_KIND_LETTERS).sort());
+  for (const v of [0, 3, 7]) {
+    const cells = pineCells(v);
+    assert.deepEqual(cells, pineCells(v), 'deterministic');
+    assert.ok(cells.length > 40);
+    for (const c of cells) assert.ok(c.x >= 0 && c.x < TREE_W && c.y >= 0 && c.y < 52);
+    const top = Math.min(...cells.map(c => c.y)), widthAt = y => cells.filter(c => c.y === y).length;
+    assert.ok(widthAt(top) < widthAt(top + 36), 'a pine narrows to its tip');
+  }
+  const calls = [];
+  const ctx = new Proxy({}, {get: (_, k) => k === 'fillText' || k === 'fillRect' ? (...a) => calls.push(k) : undefined, set: () => true});
+  for (const draw of Object.values(TREE_ART)) { calls.length = 0; draw(ctx, 2); assert.ok(calls.length > 20); }
+});

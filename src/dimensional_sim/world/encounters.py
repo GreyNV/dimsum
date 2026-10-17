@@ -273,3 +273,22 @@ def lead_spot(chunk, action_id, life, source_id, index, source_xy):
     x, y = options[seed % len(options)]
     ident = f"lead:{key.dimension}:{key.x}:{key.y}:{action_id}:{index}:{seed}"
     return EncounterSpot(ident, action_id, key, x, y)
+
+
+def night_spot(chunk, action_id, life, tick, source_xy, near, far):
+    """A night creature's cell in `chunk`: reachable, between `near` and `far` steps (Manhattan)
+    from the avatar at `source_xy`, chosen by the chunk seed, life and night tick (save-stable).
+    None when the chunk has no such cell. Placed as a lead (see autopilot/night.py)."""
+    if action_id not in BY_ID or BY_ID[action_id].placement != "lead":
+        raise ValueError("lead action required")
+    integer(life, "life", 1)
+    integer(tick, "night tick", 0)
+    asset, key = chunk.asset, chunk.key
+    sx, sy = source_xy
+    options = [cell for cell in _candidates(asset, _reachable(asset), None)
+               if near <= abs(cell[0] - sx) + abs(cell[1] - sy) <= far]
+    if not options:
+        return None
+    seed = derive_seed(chunk.seed, ENCOUNTER_VERSION, "night", life, action_id, tick)
+    x, y = options[seed % len(options)]
+    return EncounterSpot(f"lead:{key.dimension}:{key.x}:{key.y}:{action_id}:night{tick}:{seed}", action_id, key, x, y)

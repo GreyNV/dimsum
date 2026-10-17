@@ -221,6 +221,8 @@ class CombatMixin:
             distance = abs(tx - px) + abs(ty - py)
             if distance > enemy.aggro_radius or self._near_camp(px, py) or self._near_camp(tx, ty):
                 continue
+            if enemy.fears_fire and (self._near_fire(px, py) or self._near_fire(tx, ty)):
+                continue   # it will not step into the firelight
             home = self._target_home(target) if enemy.leash is not None else None
             for _ in range(self._steps_this_tick(enemy)):
                 if distance <= 1:

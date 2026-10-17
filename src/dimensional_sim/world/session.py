@@ -10,7 +10,7 @@ from .animation import rotate
 from .autopilot import INVENTORY_SLOTS, Expedition
 from .autopilot.constants import CONTACT_COOLDOWN_MS, POSSESS_COOLDOWN_MS, POSSESS_MS, POSSESS_SPEED_PERCENT
 from . import details
-from .catalog import BY_ID, ENEMIES, ITEMS, REGIONS, UNLOCKS, rarity_glint
+from .catalog import BY_ID, DEFAULT_TREES, ENEMIES, ITEMS, REGION_TREES, REGIONS, TREE_KINDS, UNLOCKS, rarity_glint
 from .models import ChunkKey, chunk_ident, integer
 from .progression import attribute_report
 from .runtime import InputCommand
@@ -38,6 +38,35 @@ def _tile_tints(world, key, asset):
             row.append(code)
         rows.append("".join(row))
     return rows, {code: tint for tint, code in legend.items() if tint}
+
+
+TREE_LETTERS = {kind: kind[0] if kind != "old" else "m" for kind in TREE_KINDS}   # o p b d m
+if len(set(TREE_LETTERS.values())) != len(TREE_LETTERS):
+    raise ValueError("tree kinds need distinct letters")
+
+
+def _tree_kinds(world, key, asset, chunk_seed, fallback):
+    """One letter per tile: the kind of tree on each "T" cell ("." elsewhere), from the tile's
+    region tree mix (catalog.REGION_TREES) and the chunk seed - stable for the world."""
+    grid = world.region_grid(key) if hasattr(world, "region_grid") else None
+    rows = []
+    for y in range(asset.height):
+        row = []
+        for x in range(asset.width):
+            obj = asset.objects[y][x]
+            if (obj or asset.environment[y][x]).glyph != "T":
+                row.append(".")
+                continue
+            region = grid[y][x] if grid is not None else fallback
+            mix = REGION_TREES.get(region.id, DEFAULT_TREES) if region is not None else DEFAULT_TREES
+            roll = derive_seed(chunk_seed, "tree-kind-v1", x, y) % sum(w for _, w in mix)
+            for kind, weight in mix:
+                if roll < weight:
+                    row.append(TREE_LETTERS[kind])
+                    break
+                roll -= weight
+        rows.append("".join(row))
+    return rows
 
 
 def snapshot(game, known=(), *, paused=False, expedition=None, control="manual", debug=False, detail=False):
@@ -102,6 +131,7 @@ def _chunk_view(world, chunk, expedition):
     return {"id": chunk_ident(key), "x": key.x, "y": key.y,
             "region": region.id if region else None, "tint": region.tint if region else None,
             "tint_rows": tint_rows, "tint_legend": tint_legend,
+            "trees": _tree_kinds(world, key, a, chunk.seed, region),
             "width": a.width, "height": a.height, "biome": a.biome,
             "seed": derive_seed(chunk.seed, "browser-art-v1") % 2**32,
             "tiles": ["".join((obj or env).glyph for obj, env in zip(orow, erow))
@@ -128,7 +158,7 @@ def _expedition_view(e, control, *, debug, detail):
                 "first_return": e.life == 1 and not e.opening and not e.contact},
             "punch_damage": e.punch_damage(), "report": e.report,
             "anchor": {"x": e.anchor[0], "y": e.anchor[1]},
-            "control": control, "possession": e.possession(),
+            "control": control, "possession": e.possession(), "clock": e.clock_view(),
             "attack_radius": e.attack().reach,
             "weapon": _weapon_view(e),
             "auto_target": unarmed_target[1] if unarmed_target else None,

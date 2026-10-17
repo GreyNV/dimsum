@@ -1,6 +1,6 @@
 /** Browser adapter: snapshots in, character art out. Python owns all game rules. */
 import {TILE_W, TILE_H, ZOOM, clamp, residentBounds, cameraView, follow, retainResident, tileAt, visualHash, stickDirection, Controls} from './view.js';
-import {PALETTE, OBJECT_PAD, paintChunk, drawTree} from './art.js';
+import {PALETTE, OBJECT_PAD, paintChunk, drawTree, treeKind} from './art.js';
 import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawUnarmedReach, drawDamage, drawFloat, drawReveal, drawSpot, drawSpotCompletion, drawCamp, drawBuildings, drawCampfire, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
 import {PAGES, needsDetail, pageModel, PANELS, COLLAPSE_KEY, loadCollapsed, toggleCollapsed, defaultCollapsed, subtabsOf} from './pages.js';
 import {debugText, ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
@@ -10,7 +10,7 @@ import {hosted, request, releaseInput} from './transport.js';
 import {drawMinimap, visibleAt} from './minimap.js';
 import {anchorAction, renderAnchor} from './anchor_ui.js';
 import {buildTabs, journalAction, renderSection, renderSubtabs} from './page_ui.js';
-import {drawEdgeMarker, drawEyelids, drawPossessionAura, drawPossessionGround, drawPossessionTint, drawVignette, edgePoint, possessionGlow, tintPicture} from './scene_fx.js';
+import {drawNight, nightAlpha, drawEdgeMarker, drawEyelids, drawPossessionAura, drawPossessionGround, drawPossessionTint, drawVignette, edgePoint, possessionGlow, tintPicture} from './scene_fx.js';
 import {drawMotes, drawReflection, drawWaterGlints, isWater} from './nature_art.js';
 import {ACTOR_FOOT} from './sprites.js';
 import {SOUND_KEY, SoundEngine, VOLUMES, loadSettings, soundEvents, surfaceOf} from './sound.js';
@@ -273,7 +273,7 @@ function repaintCanopies(tx, ty, resident) {
     const chunk = resident.find(c => Math.floor(tile.x / c.width) === c.x && Math.floor(tile.y / c.height) === c.y);
     if (!chunk) continue;
     const lx = tile.x - chunk.x * chunk.width, ly = tile.y - chunk.y * chunk.height;
-    if (chunk.tiles[ly][lx] === 'T') drawTree(ctx, tile.x * TILE_W, tile.y * TILE_H, visualHash(tile.x, tile.y, chunk.seed));
+    if (chunk.tiles[ly][lx] === 'T') drawTree(ctx, tile.x * TILE_W, tile.y * TILE_H, visualHash(tile.x, tile.y, chunk.seed), undefined, treeKind(chunk, lx, ly));
   }
 }
 /** Exactly one request in flight. Server fixed ticks and input lease own timing. */
@@ -529,6 +529,19 @@ function render(now) {
         {color: rewards[i].color, duration: 1600, size: rewards[i].glint ? 11 : 9});
     }
     ctx.setTransform(dpr,0,0,dpr,0,0);
+    // Night: darkness with holes of light around the avatar, the anchor camp and a campfire.
+    const dark = nightAlpha(state.expedition?.clock);
+    if (dark > 0) {
+      const toScreen = (wx, wy) => ({x: width / 2 + (wx - view.x) * view.scale, y: height / 2 + (wy - view.y) * view.scale});
+      const tileLight = (place, r, warm) => place && {...toScreen((place.x + .5) * TILE_W, (place.y + .5) * TILE_H), r: r * view.scale, warm};
+      const me = toScreen(actor.x, actor.y);
+      const possessed = state.expedition?.possession?.active;
+      drawNight(ctx, width, height, dark, [
+        {...me, r: (possessed ? 120 : 84) * view.scale, warm: false},
+        tileLight(state.expedition.anchor, 150, true),
+        tileLight(state.expedition.campfire, 110, true),
+      ].filter(Boolean), {clock: now, reducedMotion});
+    }
     // Off-screen guides: the anchor camp (always) and this life's campfire, at the screen edge.
     if (!prologue && state.expedition) {
       const inset = isMobile() ? {top: 120, right: 24, bottom: 230, left: 24} : {top: 170, right: 260, bottom: 140, left: 340};

@@ -41,6 +41,8 @@ world/actions.py: action bucket (known -> eligible -> weighted) and explain(); r
 world/economy.py: dimensional ash rules and anchor purchases; tuning.py: balance numbers.
 The anchor (docs/design/ANCHOR_AND_POSSESSION.md): new games open there, deaths return there, skill 1 contacts it
   mid-life (world waits). Manual control = possession (skill 3, 30 s, 60 s recharge, +20% speed). No blessings.
+world/autopilot/night.py: day/night clock (12 min, sim time) and night wolves as fight leads, never in firelight;
+  tree kinds per region are presentation (catalog.REGION_TREES -> frame chunk.trees). docs/design/DAY_NIGHT_AND_TREES.md.
 world/simulate.py: `cli simulate` (seeded metrics), `cli inspect` (why a spot did/didn't appear, region provenance), `cli regions` (layout).
 Action pipeline + lifecycle states: docs/design/ACTION_SYSTEM.md; per-action audit: ACTION_ARCHITECTURE_AUDIT.md.
 Unlock/knowledge != always available: never add a permanent action button; extend buckets, outcomes or leads.

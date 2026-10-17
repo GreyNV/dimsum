@@ -1,0 +1,44 @@
+# Day and night, wolves, tree kinds (schema 19, 2026-10-17)
+
+Decisions (Andrew, 2026-10-17): a 12-minute day (8 day / 4 night); at night new night-only
+creatures come to whoever explores - never at the camp or a campfire; several tree kinds,
+mixed by region, looks only (same collision and gameplay).
+
+## Clock
+- World clock = simulation time + `DAY_START_MS` (a new game starts a minute after dawn), so it
+  runs through lives and the anchor and replays exactly. Numbers: `tuning.py` (DAY_MS, NIGHT_MS,
+  TWILIGHT_MS, DAY_START_MS). Rules: `autopilot/night.py` (`time_of_day`, `is_night`,
+  `darkness_permille`, `NightMixin.clock_view`).
+- The frame carries `expedition.clock` {day, time_ms, day_ms, night_at_ms, night, phase
+  (day/dusk/night/dawn), darkness 0-1000, until_ms}.
+
+## Night creatures
+- `EnemyDef("wolf")`: hit 9, aggro 10, quick (step 250 ms), `fears_fire=True` (never chases into
+  the camp or within `FIRE_LIGHT_RADIUS` of a campfire). Fight action `night_wolf` (placement
+  "lead", tag "night", 60 Strength XP, wolf fang 45%).
+- Night watch (`_night_watch`, from `_settle`): once per world-clock tick (`NIGHT_SPAWN_EVERY_MS`,
+  30 s; `night_tick` saved), at night, while the avatar is out (not the camp, not a campfire's light,
+  not the prologue, the anchor or a contact), below `NIGHT_FOES_BY_RING` (1 / 2 from ring 2 / 3 from
+  ring 5), with `NIGHT_SPAWN_PERCENT` (40%): a wolf appears 7-13 steps away (`encounters.night_spot`)
+  as a fight lead that expires at dawn ("slinks back into the trees"). Steps end at clock ticks
+  (`night_step_cap`), so any slicing of time gives the same wolves.
+- Logs: "Night falls..." (type `night`, nightfall chime) and "A wolf howls close by." (howl).
+
+## Tree kinds
+- `catalog.TREE_KINDS` (oak, pine, birch, dead tree, old mossy tree) and `REGION_TREES` weights per
+  region: Old Road oak/birch/dead, Deep Woods pine/old/oak, Bramble Thicket oak/dead/birch, Still
+  Glade birch/old/oak. Kept out of `RegionDef` on purpose: region definitions are pinned into world
+  seeds, and trees are presentation only.
+- The frame sends `chunk.trees`: one letter per tile (o p b d m, "." when no tree), picked from the
+  tile's region mix and the chunk seed (`session._tree_kinds`). Client: `nature_art.js TREE_ART`
+  (pine tiers, pale banded birch, bare forking dead limbs, a wide mossy crown with hanging strands).
+
+## Client
+Night darkness with holes of light (avatar, larger while possessed; warm flickering light at the
+anchor camp and a campfire) in `scene_fx.js drawNight`; the HUD clock "☀ Day 2 · night in 3:10" /
+"☾ Night · dawn in 1:12"; wolf sprite (`combat_art.js WOLF`).
+
+## Save migration 18 -> 19
+Adds `night_tick` = the current clock tick (no retroactive wolves).
+
+Tests: tests/test_world_night.py, JS tree/night tests.

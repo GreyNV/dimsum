@@ -137,3 +137,42 @@ export function drawPossessionTint(ctx, width, height, glow) {
   edge.addColorStop(0, 'rgba(255,210,120,0)'); edge.addColorStop(1, `rgba(255,200,110,${.16 * Math.min(1.4, glow)})`);
   ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = edge; ctx.fillRect(0, 0, width, height); ctx.restore();
 }
+
+/* ---------- day and night (cosmetic; the server owns the clock) ---------- */
+let nightCanvas = null;
+/** Pure (tested): how dark the scene is drawn, 0..1, from the frame clock's darkness (0..1000). */
+export const nightAlpha = clock => clock ? Math.max(0, Math.min(1, (clock.darkness || 0) / 1000)) * .78 : 0;
+
+/** Night over the scene: a deep blue dark with holes of warm light - `lights` are
+ * [{x, y, r, warm}] in screen px (avatar, anchor camp, campfire). Drawn after the world,
+ * before the HUD. Firelight flickers a little unless motion is reduced. */
+export function drawNight(ctx, width, height, alpha, lights = [], {clock = 0, reducedMotion = false} = {}) {
+  if (alpha <= 0) return;
+  if (!nightCanvas) nightCanvas = document.createElement('canvas');
+  if (nightCanvas.width !== Math.ceil(width) || nightCanvas.height !== Math.ceil(height)) {
+    nightCanvas.width = Math.ceil(width); nightCanvas.height = Math.ceil(height);
+  }
+  const n = nightCanvas.getContext('2d');
+  n.globalCompositeOperation = 'source-over';
+  n.clearRect(0, 0, width, height);
+  n.fillStyle = `rgba(6,10,28,${alpha})`; n.fillRect(0, 0, width, height);
+  n.globalCompositeOperation = 'destination-out';
+  for (const l of lights) {
+    const flicker = l.warm && !reducedMotion ? 1 + Math.sin(clock / 90 + l.x) * .03 + Math.sin(clock / 37) * .02 : 1;
+    const r = l.r * flicker, g = n.createRadialGradient(l.x, l.y, r * .15, l.x, l.y, r);
+    g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(.55, 'rgba(0,0,0,.75)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    n.fillStyle = g; n.beginPath(); n.arc(l.x, l.y, r, 0, Math.PI * 2); n.fill();
+  }
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const scale = ctx.canvas.width / width;
+  ctx.drawImage(nightCanvas, 0, 0, width * scale, height * scale);
+  ctx.restore();
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';   // a warm glow where the fires burn
+  for (const l of lights) if (l.warm) {
+    const g = ctx.createRadialGradient(l.x, l.y, 2, l.x, l.y, l.r * .7);
+    g.addColorStop(0, `rgba(255,150,60,${.16 * alpha})`); g.addColorStop(1, 'rgba(255,150,60,0)');
+    ctx.fillStyle = g; ctx.fillRect(l.x - l.r, l.y - l.r, l.r * 2, l.r * 2);
+  }
+  ctx.restore();
+}
+

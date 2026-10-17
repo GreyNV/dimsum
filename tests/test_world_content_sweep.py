@@ -40,6 +40,7 @@ class ReachabilityTests(unittest.TestCase):
     def test_every_lead_has_a_source_and_every_site_has_encounters(self):
         sources = {o.id for a in ACTIONS for o in a.outcomes if o.kind == "lead"}
         sources |= {added for c in SITE_CONDITIONS.values() for added in c.adds}
+        sources |= {a.id for a in ACTIONS if "night" in a.tags}   # autopilot/night.py creates these
         leads = {a.id for a in ACTIONS if a.placement == "lead"}
         self.assertEqual(leads - sources, set(), "leads nothing creates")
         for site in SITES:

@@ -110,7 +110,8 @@ export class ExpeditionHud {
   }
   updateVitals(ex) {
     const v = ex.vitals, cd = v.food_cooldown_ms;
-    const signature = [v.health, v.hunger, Math.ceil(cd / 250), ex.life, ex.depth, ex.best_depth, v.ash].join();
+    const signature = [v.health, v.hunger, Math.ceil(cd / 250), ex.life, ex.depth, ex.best_depth, v.ash,
+      Math.ceil((ex.clock?.until_ms || 0) / 1000), ex.clock?.night].join();
     if (signature === this.vitalsSignature) return;
     this.vitalsSignature = signature;
     for (const [name, value] of [['health', v.health], ['hunger', v.hunger]]) {
@@ -125,6 +126,12 @@ export class ExpeditionHud {
     this.updateFoodCooldown(ex);
     this.$('life').textContent = `Life ${ex.life}`;
     this.$('depth').textContent = `Ring ${ex.depth} - best ${ex.best_depth}`;
+    const clock = this.$('clock');
+    if (clock && ex.clock) {
+      const s = Math.ceil(ex.clock.until_ms / 1000), mmss = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+      clock.textContent = ex.clock.night ? `☾ Night · dawn in ${mmss}` : `☀ Day ${ex.clock.day} · night in ${mmss}`;
+      clock.classList.toggle('night', !!ex.clock.night);
+    }
     const wealth = this.$('wealth');
     if (wealth) wealth.textContent = `◇ ${v.ash ?? 0} dimensional ash`;
   }
@@ -212,7 +219,7 @@ export class ExpeditionHud {
       const head = this.doc.createElement('b');
       head.textContent = entry.type === 'encounter'
         ? `+${entry.xp} ${LABEL[entry.attribute]}` + (entry.dim_xp ? ` (◆+${entry.dim_xp})` : '')
-        : {eat: 'Ate', rest: 'Rested', life: 'Anchor', possess: 'Possessed', lore: 'The road', trade: 'Offered',
+        : {eat: 'Ate', rest: 'Rested', life: 'Anchor', possess: 'Possessed', night: 'Night', lore: 'The road', trade: 'Offered',
           ambush: 'Ambush', craft: entry.xp ? `Crafted +${entry.xp} ${LABEL[entry.attribute] || ''}` : 'Crafted',
           reflect: 'Thought', purchase: 'Anchor', rebirth: 'Rebirth',
           build: entry.xp ? `Built +${entry.xp} ${LABEL[entry.attribute] || ''}` : 'Built', stow: 'Chest'}[entry.type] || entry.type;

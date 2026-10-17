@@ -68,10 +68,10 @@ ELDER_LINES = (
     "Mind your hunger, too. This forest feeds only the lucky.",
     "May the path be smooth. Only you will know what destiny awaits.",
 )
-LOG_TYPES = ("encounter", "eat", "rest", "life", "possess", "lore", "trade", "ambush",
+LOG_TYPES = ("encounter", "eat", "rest", "life", "possess", "night", "lore", "trade", "ambush",
              "craft", "reflect", "purchase", "rebirth", "build", "stow")
 TASK_TYPES = ("perform", "pause", "rest", *SELF_ACTIONS, *PROLOGUE_MS)
-SCHEMA_VERSION = 18                # 18: no blessing/boons/skills, contact + possession, campfire bought, opening at the anchor; 17: recipes found this life, level unlocks; 16: shimmer cells; 15: ecological pressure (14: campfire; 13: camp buildings, chest; 12: sites)
+SCHEMA_VERSION = 19                # 19: night watch tick; 18: no blessing/boons/skills, contact + possession, campfire bought, opening at the anchor; 17: recipes found this life, level unlocks; 16: shimmer cells; 15: ecological pressure (14: campfire; 13: camp buildings, chest; 12: sites)
 
 
 def attribute_table():

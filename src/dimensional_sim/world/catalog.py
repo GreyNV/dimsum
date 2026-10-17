@@ -238,6 +238,8 @@ ITEMS = {item.id: item for item in (
     ItemDef("iron_nails", "Iron nails", "material", glyph="!", ash_value=3, color="#a8b0b8"),
     # River finds.
     ItemDef("river_scales", "River scales", "treasure", glyph="*", ash_value=5, color="#9fd0c8", rarity="uncommon"),
+    # Night finds.
+    ItemDef("wolf_fang", "Wolf fang", "treasure", glyph=">", ash_value=5, color="#e6e0cf"),
 )}
 
 
@@ -430,6 +432,7 @@ class EnemyDef:
     step_ms: int = 300             # one chasing step this often (lower = faster)
     leash: int | None = None       # territorial: never chases further than this from where it appeared
     drains: str = "health"         # what a touch takes: "health" (a bite) or "hunger" (it feeds on you)
+    fears_fire: bool = False       # never chases into the light of the anchor camp's or a campfire's flames
 
     def __post_init__(self):
         identifier(self.id, "enemy ID")
@@ -440,6 +443,8 @@ class EnemyDef:
         integer(self.step_ms, "enemy step", 100, 2000)
         if self.leash is not None:
             integer(self.leash, "enemy leash", 1, 30)
+        if type(self.fears_fire) is not bool:
+            raise ValueError(f"fears_fire must be boolean: {self.id}")
         if self.drains not in ("health", "hunger"):
             raise ValueError(f"enemy drains health or hunger: {self.id}")
         if not 1 <= len(self.name) <= 40 or not 1 <= len(self.cause_text) <= 60:
@@ -458,6 +463,9 @@ ENEMIES = {e.id: e for e in (
     # Gentle but draining: it does not bite, it feeds - each touch takes hunger, not health.
     EnemyDef("pale_wisp", "Pale wisp", hit=6, aggro_radius=6, cause="wisp",
              cause_text="a pale wisp", sprite="wisp", step_ms=350, leash=6, drains="hunger"),
+    # Night only: quick and keen-nosed, it hunts whoever walks the dark, but keeps out of firelight.
+    EnemyDef("wolf", "Wolf", hit=9, aggro_radius=10, cause="wolf", cause_text="a wolf in the night",
+             sprite="wolf", step_ms=250, fears_fire=True),
 )}
 # Enemies placed by map assets (not by spot rolls) count against this fight spot's window.
 ASSET_ENEMY_ACTION = "bramble_boar"
@@ -854,6 +862,11 @@ ACTIONS = (
               "A river lurker, out of its burrow and angry.", "Drove off a river lurker from its burrow.",
               hp=2, enemy="river_lurker", loot=(L("river_fish", 1, 1, 50),), drops="lurker_spoils",
               roles=("lead", "combat", "contextual"), art="river_lurker", interaction="Fighting the lurker"),
+    # --- the night: wolves come to whoever walks beyond the firelight (autopilot/night.py) ----
+    ActionDef("night_wolf", "Wolf", "fight", "lead", "strength", 60, 1, 1,
+              "A wolf out of the dark. It hunts at night and slinks away at dawn.", "Drove off a wolf in the dark.",
+              hp=3, enemy="wolf", loot=(L("wolf_fang", 1, 1, 45),), tags=("night",),
+              roles=("lead", "combat", "contextual"), interaction="Fighting the wolf"),
     ActionDef("float_line", "Torn float line", "observe", "lead", "perception", 35, 2600, 1,
               "Floats and line from the net, drifting downstream.", "Traced the float line downstream.",
               lead_spread=1, near="w", roles=("lead", "contextual"),
@@ -1244,6 +1257,23 @@ class RegionDef:
     def multiplier(self, action_id):
         return self.weights.get(action_id, 100)
 
+
+# Tree kinds: how a blocking tree ("T") looks - presentation only, the same collision for all,
+# and kept out of RegionDef on purpose (region definitions are pinned into world seeds).
+# session.py picks one kind per tree cell from the chunk seed and these weights; client art:
+# nature_art.js TREE_ART (tests check every kind has art).
+TREE_KINDS = {"oak": "Oak", "pine": "Pine", "birch": "Birch", "dead": "Dead tree", "old": "Old mossy tree"}
+REGION_TREES = {
+    "old_road": (("oak", 5), ("birch", 3), ("dead", 1)),
+    "deep_woods": (("pine", 5), ("old", 3), ("oak", 2)),
+    "bramble_thicket": (("oak", 3), ("dead", 3), ("birch", 1)),
+    "still_glade": (("birch", 5), ("old", 2), ("oak", 2)),
+}
+DEFAULT_TREES = (("oak", 1),)
+for _region, _mix in REGION_TREES.items():
+    if not _mix or any(kind not in TREE_KINDS or integer(weight, "tree weight", 1, 100) is None
+                       for kind, weight in _mix):
+        raise ValueError(f"invalid tree mix: {_region}")
 
 REGION_CELL = 3        # chunks per region side
 ORIGIN_REGION = "old_road"   # the ambush road runs through the anchor's region

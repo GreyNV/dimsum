@@ -4,7 +4,7 @@
  */
 import {TILE_W, TILE_H, CELL_W, CELL_H, visualHash} from './view.js';
 import {paintParts} from './sprites.js';
-import {SHALLOW_BG, WATER_BG, blooms, drawBlooms, drawFlagstones, drawPath, drawPlanks, drawRubble, drawScorch, drawBlades, drawReflection, drawShores, isWater, drawLitRock, drawLitTree, drawRipples, grassBlades, ripples} from './nature_art.js';
+import {SHALLOW_BG, WATER_BG, blooms, drawBlooms, drawFlagstones, drawPath, drawPlanks, drawRubble, drawScorch, drawBlades, drawReflection, drawShores, isWater, drawLitRock, drawRipples, grassBlades, ripples, TREE_ART} from './nature_art.js';
 export const PALETTE = Object.freeze({
   void: '#11180f', floor: '#172011', path: '#242418',
   grass: ['#334824', '#405930', '#59713b', '#748648'],
@@ -133,8 +133,9 @@ function tileStamp(glyph, variant, createCanvas) {
     if (terrain === '*') drawBlooms(ctx, blooms(variant, STAMP_SEED));
   }, createCanvas);
 }
-function treeStamp(variant, createCanvas) {
-  return stamp(`tree:${variant}`, 52, 70, ctx => drawLitTree(ctx, variant), createCanvas);
+function treeStamp(variant, createCanvas, kind = 'o') {
+  const draw = TREE_ART[kind] || TREE_ART.o;
+  return stamp(`tree:${TREE_ART[kind] ? kind : 'o'}:${variant}`, 52, 70, ctx => draw(ctx, variant), createCanvas);
 }
 /** {canvas, dx, dy}: the stamp and its offset from the tile's top-left corner. */
 function structureStamp(glyph, createCanvas) {
@@ -156,9 +157,11 @@ function rockStamp(variant, createCanvas) {
 }
 /** Tree whose logical tile top-left is (px, py). The trunk sits over the blocking
  * cell; canopy overhang is visual. Reused to repaint canopies in front of actors. */
-export function drawTree(ctx, px, py, seed, createCanvas) {
-  ctx.drawImage(treeStamp(seed % TREE_VARIANTS, createCanvas), px - 14, py - 42);
+export function drawTree(ctx, px, py, seed, createCanvas, kind = 'o') {
+  ctx.drawImage(treeStamp(seed % TREE_VARIANTS, createCanvas, kind), px - 14, py - 42);
 }
+/** The tree kind letter at a chunk cell (frames send chunk.trees; older frames: oak). */
+export const treeKind = (chunk, x, y) => chunk.trees?.[y]?.[x] || 'o';
 /** Two surfaces preserve global environment < objects < actors order at seams. */
 export function paintChunk(chunk, createCanvas = defaultCanvas) {
   const width = chunk.width * TILE_W, height = chunk.height * TILE_H;
@@ -173,7 +176,7 @@ export function paintChunk(chunk, createCanvas = defaultCanvas) {
     const seed = visualHash(gx, gy, chunk.seed);
     g.drawImage(tileStamp(glyph, seed % TILE_VARIANTS, createCanvas), px, py);
     wet ||= isWater(glyph);
-    if (glyph === 'T') drawTree(o, px + OBJECT_PAD, py + OBJECT_PAD, seed, createCanvas);
+    if (glyph === 'T') drawTree(o, px + OBJECT_PAD, py + OBJECT_PAD, seed, createCanvas, treeKind(chunk, x, y));
     else if (glyph === '^') o.drawImage(rockStamp(seed % ROCK_VARIANTS, createCanvas), px + OBJECT_PAD - 4, py + OBJECT_PAD - 4);
     else if (STRUCTURE_ART[glyph]) {
       const {canvas, dx, dy} = structureStamp(glyph, createCanvas);
@@ -197,7 +200,7 @@ function reflect(g, chunk, createCanvas) {
     const px = x * TILE_W, py = y * TILE_H;
     const seed = visualHash(chunk.x * chunk.width + x, chunk.y * chunk.height + y, chunk.seed);
     drawReflection(g, rects, py + TILE_H - 2, ctx => {
-      if (glyph === 'T') drawTree(ctx, px, py, seed, createCanvas);
+      if (glyph === 'T') drawTree(ctx, px, py, seed, createCanvas, treeKind(chunk, x, y));
       else if (glyph === '^') ctx.drawImage(rockStamp(seed % ROCK_VARIANTS, createCanvas), px - 4, py - 4);
       else { const {canvas, dx, dy} = structureStamp(glyph, createCanvas); ctx.drawImage(canvas, px + dx, py + dy); }
     });

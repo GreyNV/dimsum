@@ -63,10 +63,11 @@ export function canopyShape(variant) {
     [38 + j(7, 2), 31 + j(8, 2), 11 + h(9) % 3], [24 + j(10, 4), 12 + j(11, 2), 11 + h(12) % 3],
     ...(h(13) % 2 ? [[34 + j(14, 2), 17 + j(15, 2), 9]] : [])];
 }
-/** Glyph cells of a canopy: [{x, y, glyph, color, light}] on the 4x6 px grid (pure). */
-export function canopyCells(variant) {
-  const circles = canopyShape(variant), cells = [];
-  for (let y = 0; y < 50; y += 6) for (let x = 0; x < TREE_W; x += 4) {
+/** Glyph cells of a canopy: [{x, y, glyph, color, light}] on the 4x6 px grid (pure).
+ * `circles` and `palette` default to the round broadleaf (oak) crown. */
+export function canopyCells(variant, circles = canopyShape(variant), palette = LEAF, bottom = 50) {
+  const cells = [];
+  for (let y = 0; y < bottom; y += 6) for (let x = 0; x < TREE_W; x += 4) {
     const n = visualHash(x, y, variant * 7 + 1);
     // ragged rim: each cell tests a slightly larger or smaller crown
     const grow = (unit(visualHash(x, y, variant + 3)) - .45) * 7;
@@ -75,35 +76,133 @@ export function canopyCells(variant) {
     // leaf clumps: low-frequency patches lighter or darker, plus a darker underside
     const clump = unit(visualHash(Math.floor(x / 10), Math.floor(y / 11), variant + 99)) - .5;
     light = Math.max(0, Math.min(.999, light * 1.3 - .12 + clump * .3 + (unit(n) - .5) * .16 - Math.max(0, y - 30) * .012));
-    cells.push({x, y, glyph: ramp(LEAF_GLYPHS, light), color: ramp(LEAF, light), light});
+    cells.push({x, y, glyph: ramp(LEAF_GLYPHS, light), color: ramp(palette, light), light});
   }
   return cells;
 }
 const DARK_LEAF = '#0b1408', DARK_BARK = '#140e08';
-export function drawLitTree(ctx, variant) {
-  // ground shadow (stepped ellipse of translucent rows)
+function treeShadow(ctx, half0 = 16) {   // stepped ellipse of translucent rows at the roots
   for (let r = 0; r < 6; r++) {
-    const half = Math.round(16 * Math.sqrt(1 - ((r - 2.5) / 3) ** 2));
+    const half = Math.round(half0 * Math.sqrt(1 - ((r - 2.5) / 3) ** 2));
     ctx.fillStyle = '#04080466'; ctx.fillRect(29 - half, 59 + r, half * 2, 1);
   }
-  // trunk: a dark backing, a lit west edge, a dark east edge and flared roots
-  ctx.fillStyle = DARK_BARK; ctx.fillRect(20, 40, 12, 22); ctx.fillRect(17, 58, 18, 5);
-  for (let y = 40; y < 62; y += 6) for (let x = 20; x < 32; x += 4) {
-    const side = (x - 20) / 8, n = visualHash(x, y, variant + 5);
-    ctx.fillStyle = ramp(BARK, Math.max(0, .95 - side * .75 + (unit(n) - .5) * .2));
-    ctx.fillText(y >= 56 ? (x < 24 ? '/' : x > 24 ? '\\' : '|') : n % 3 ? '|' : ':', x, y);
+}
+/** Trunk between x0 and x1 from `top` to the roots: dark backing, lit west edge, flared base. */
+function trunk(ctx, variant, x0 = 20, x1 = 32, top = 40, bark = BARK, marks = null, backing = DARK_BARK) {
+  ctx.fillStyle = '#050403'; ctx.fillRect(x0 - 1, top - 1, x1 - x0 + 2, 63 - top);
+  ctx.fillStyle = backing; ctx.fillRect(x0, top, x1 - x0, 62 - top); ctx.fillRect(x0 - 3, 58, x1 - x0 + 6, 5);
+  for (let y = top; y < 62; y += 6) for (let x = x0; x < x1; x += 4) {
+    const side = (x - x0) / Math.max(4, x1 - x0 - 4), n = visualHash(x, y, variant + 5);
+    ctx.fillStyle = marks && n % 4 === 0 ? marks : ramp(bark, Math.max(0, .95 - side * .75 + (unit(n) - .5) * .2));
+    ctx.fillText(y >= 56 ? (x < x0 + 4 ? '/' : x >= x1 - 4 ? '\\' : '|') : marks && n % 4 === 0 ? '=' : n % 3 ? '|' : ':', x, y);
   }
-  // canopy: a dark silhouette (one cell of outline) under lit glyphs
-  const cells = canopyCells(variant);
+}
+/** A crown of glyph cells: a dark silhouette (one cell of outline) under lit glyphs. */
+function crown(ctx, cells, dark = DARK_LEAF) {
   ctx.fillStyle = '#050a04';
   for (const c of cells) ctx.fillRect(c.x - 1, c.y - 1, 6, 8);
-  ctx.fillStyle = DARK_LEAF;
+  ctx.fillStyle = dark;
   for (const c of cells) ctx.fillRect(c.x, c.y, 4, 6);
   for (const c of cells) {
     if (c.light < .12) continue;
     ctx.fillStyle = c.color; ctx.fillText(c.glyph, c.x, c.y - 1);
   }
 }
+/** Oak: the round broadleaf crown (the original tree). */
+export function drawLitTree(ctx, variant) {
+  treeShadow(ctx);
+  trunk(ctx, variant);
+  crown(ctx, canopyCells(variant));
+}
+
+// Tree kinds (catalog.TREE_KINDS; the frame sends one letter per tree cell: chunk.trees).
+const PINE = ['#0a1712', '#10231a', '#173323', '#1f442e', '#2a573a', '#376b47', '#4a8257', '#669a6b', '#8db58a'];
+const BIRCH_LEAF = ['#1c2a10', '#2a3d16', '#3b561d', '#4f7024', '#668b2c', '#82a636', '#a2bf4a', '#c5d667', '#e4e89a'];
+const BIRCH_BARK = ['#6f6a5c', '#a39e8d', '#c9c5b4', '#e2dfd2', '#f4f2e8'];
+const MOSS = ['#101d0d', '#172b12', '#203b17', '#2c4e1c', '#3b6422', '#4f7b2a', '#6a9535', '#8bae48', '#b0c768'];
+const DEAD_BARK = ['#2a2620', '#463f35', '#625a4c', '#837a68', '#a49a84'];
+const STRAND = '#6a9535';
+
+/** Pine: stacked tiers narrowing to a point, dark and cool, on a slim trunk (pure cells). */
+export function pineCells(variant) {
+  const h = i => visualHash(variant, i, 0x917e);
+  const tiers = 4 + h(1) % 2, sway = (h(2) % 5) - 2, cells = [];
+  for (let y = 2; y < 52; y += 6) {
+    const t = (y - 2) / 50, tier = (t * tiers) % 1;          // 0 at a tier's tip .. 1 at its brim
+    const half = 3 + t * 15 + tier * 6;
+    for (let x = 0; x < TREE_W; x += 4) {
+      const dx = x + 2 - (26 + sway * t);
+      if (Math.abs(dx) > half) continue;
+      const n = visualHash(x, y, variant + 41);
+      const light = Math.max(0, Math.min(.999, .62 - dx / half * .38 - tier * .22 + (unit(n) - .5) * .18));
+      cells.push({x, y, glyph: ramp(['.', ',', '^', '^', 'A', 'A', '%', '#', '@'], light), color: ramp(PINE, light), light});
+    }
+  }
+  return cells;
+}
+function drawPine(ctx, variant) {
+  treeShadow(ctx, 12);
+  trunk(ctx, variant, 22, 30, 48);
+  crown(ctx, pineCells(variant), '#08130d');
+}
+/** Birch: a pale, black-banded trunk and a small light crown held high. */
+function drawBirch(ctx, variant) {
+  treeShadow(ctx, 11);
+  trunk(ctx, variant, 22, 30, 30, BIRCH_BARK, '#1b1a17', '#b9b4a2');
+  const h = i => visualHash(variant, i, 0xb12c);
+  const circles = [[26 + (h(1) % 5) - 2, 18, 12 + h(2) % 3], [18, 25, 8], [34, 24, 8 + h(3) % 2], [26, 8 + h(4) % 3, 8]];
+  crown(ctx, canopyCells(variant + 300, circles, BIRCH_LEAF, 38), '#111b08');
+}
+/** Dead tree: bare grey limbs forking up and out from a weathered trunk; a crow's nest or a
+ * last dry leaf now and then. Limbs are thin pixel strokes with a dark edge, lit from the west. */
+function drawDead(ctx, variant) {
+  treeShadow(ctx, 12);
+  trunk(ctx, variant, 22, 30, 30 + visualHash(variant, 0, 0xdead) % 6, DEAD_BARK, null, '#3a342b');
+  const h = i => visualHash(variant, i, 0xdead);
+  const parts = [], buds = [];   // all dark edges first, then the lit wood, so limbs read as solid
+  const limb = (x, y, angle, length, width, depth, salt) => {
+    const steps = Math.max(2, Math.round(length / 2));
+    for (let s = 0; s < steps; s++)
+      parts.push([Math.round(x + Math.cos(angle) * s * 2), Math.round(y - Math.sin(angle) * s * 2), width,
+        ramp(DEAD_BARK, Math.cos(angle) < 0 ? .85 : .5)]);
+    const ex = x + Math.cos(angle) * steps * 2, ey = y - Math.sin(angle) * steps * 2;
+    if (depth > 0) for (let k = 0; k < 2; k++) {   // fork in two, thinner and shorter
+      const turn = (k ? 1 : -1) * (.35 + (h(salt + k) % 30) / 100);
+      limb(ex, ey, angle + turn, length * (.55 + (h(salt + k + 5) % 20) / 100), Math.max(1, width - 1), depth - 1, salt * 3 + k + 11);
+    }
+    else if (h(salt) % 7 === 0) buds.push([Math.round(ex), Math.round(ey) + 1]);
+  };
+  const top = 30 + h(0) % 6, limbs = 2 + h(1) % 2;
+  for (let i = 0; i < limbs; i++) {
+    const angle = Math.PI / 2 + (i - (limbs - 1) / 2) * (.55 + (h(2 + i) % 25) / 100);
+    limb(26, top + 2 + i * 3, angle, 14 + h(5 + i) % 8, 3, 2, 17 + i * 31);
+  }
+  ctx.fillStyle = '#0a0806';
+  for (const [x, y, w] of parts) ctx.fillRect(x - 1, y - 1, w + 2, w + 2);
+  for (const [x, y, w, color] of parts) { ctx.fillStyle = color; ctx.fillRect(x, y, w, w); }
+  ctx.fillStyle = '#9b7944';
+  for (const [x, y] of buds) ctx.fillRect(x, y, 2, 2);
+  if (h(9) % 4 === 0) {   // a crow's nest in a fork
+    ctx.fillStyle = '#0a0806'; ctx.fillRect(25, top - 9, 9, 5);
+    ctx.fillStyle = '#5a4128'; ctx.fillText('~', 26, top - 10); ctx.fillText('~', 29, top - 10);
+  }
+}
+/** Old mossy tree: a huge low crown in moss greens, a thick trunk, strands hanging down. */
+function drawOld(ctx, variant) {
+  treeShadow(ctx, 20);
+  trunk(ctx, variant, 17, 35, 38, BARK, '#3b6422');
+  const h = i => visualHash(variant, i, 0x01d);
+  const circles = [[26, 22, 20 + h(1) % 3], [10, 30, 11], [42, 30, 11], [18, 12, 12], [34, 12 + h(2) % 3, 12]];
+  const cells = canopyCells(variant + 700, circles, MOSS, 44);
+  crown(ctx, cells, '#0a1408');
+  for (let i = 0; i < 6; i++) {   // hanging moss below the crown's rim
+    const x = 6 + (h(10 + i) % 40), top = 34 + h(20 + i) % 6, len = 2 + h(30 + i) % 3;
+    for (let k = 0; k < len; k++) { ctx.fillStyle = k === len - 1 ? '#8bae48' : STRAND; ctx.fillText(k % 2 ? ':' : '|', x, top + k * 5); }
+  }
+}
+/** Tree art by catalog tree kind letter (session.TREE_LETTERS); unknown letters draw an oak. */
+export const TREE_ART = Object.freeze({o: drawLitTree, p: drawPine, b: drawBirch, d: drawDead, m: drawOld});
+export const TREE_KIND_LETTERS = Object.freeze({oak: 'o', pine: 'p', birch: 'b', dead: 'd', old: 'm'});
 
 // --- rocks -------------------------------------------------------------------
 const STONE = ['#252a25', '#363d36', '#4b544b', '#646f63', '#828c7f', '#a3ab9b', '#c8ccbb'];

@@ -487,3 +487,14 @@ test('possession glows strongest as it takes hold and fades in its last seconds'
   assert.ok(possessionGlow({active:true,remaining_ms:1000})<hold,'fades before it ends');
   assert.ok(possessionGlow({active:true,remaining_ms:1})>0);
 });
+
+test('the night darkens with the clock and the HUD names day and night', async () => {
+  const {nightAlpha} = await import('../src/dimensional_sim/world/browser/scene_fx.js');
+  assert.equal(nightAlpha(null), 0);
+  assert.equal(nightAlpha({darkness: 0}), 0);
+  assert.ok(nightAlpha({darkness: 1000}) > .7 && nightAlpha({darkness: 1000}) < .8);
+  assert.ok(nightAlpha({darkness: 500}) < nightAlpha({darkness: 1000}));
+  const {treeKind} = await import('../src/dimensional_sim/world/browser/art.js');
+  assert.equal(treeKind({trees: ['.p.']}, 1, 0), 'p');
+  assert.equal(treeKind({}, 1, 0), 'o', 'older frames draw oaks');
+});

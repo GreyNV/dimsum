@@ -42,3 +42,15 @@ STOW_TRIP_AT = 30               # with a chest, carrying this many material unit
 CARRY_FREE = 10                 # carried units that cost no speed
 CARRY_PERCENT_PER_ITEM = 1      # +1% movement time per further unit, divided by the Endurance/Strength speed
 CARRY_MAX_PERCENT = 60          # the load never slows walking by more than this
+
+# Day and night (autopilot/night.py). The world clock is the expedition's simulation time, so
+# it runs through lives and the anchor alike. A new game starts DAY_START_MS into the day.
+DAY_MS = 720_000              # one full day: 8 minutes of daylight, then 4 of night
+NIGHT_MS = 240_000            # the last third of each day is night
+TWILIGHT_MS = 60_000          # dusk and dawn: the light fades over this long (presentation only)
+DAY_START_MS = 60_000         # where in the day a brand-new expedition begins (a minute after dawn)
+NIGHT_SPAWN_EVERY_MS = 30_000 # at night, a wolf may come out of the dark this often...
+NIGHT_SPAWN_PERCENT = 40      # ...with this chance, while the avatar is out exploring (about 3 a night)
+NIGHT_FOES_BY_RING = ((0, 1), (2, 2), (5, 3))   # (from ring, wolves at once) - deeper is more dangerous
+NIGHT_SPAWN_NEAR, NIGHT_SPAWN_FAR = 7, 13       # steps from the avatar a wolf appears (out of sight)
+FIRE_LIGHT_RADIUS = 4         # no wolf appears or chases within this many steps of a campfire

@@ -59,6 +59,7 @@ export function soundEvents(prev, next, surfaceAt = () => 'grass') {
     const seq = Math.max(0, ...(pe.log || []).map(e => e.seq));
     for (const e of (ne.log || []).filter(e => e.seq > seq)) {
       if (e.type === 'ambush') out.push({name: 'ambush'});
+      else if (e.type === 'night') out.push({name: e.encounter ? 'howl' : 'nightfall'});
       else if (e.type === 'eat') out.push({name: 'eat'});
       else if (e.type === 'craft') out.push({name: 'crafted'});
       else if (e.type === 'build') out.push({name: 'built'});
@@ -195,6 +196,9 @@ export class SoundEngine {
       built: () => { for (let i = 0; i < 3; i++) { this.tone({type: 'triangle', freq: 140, to: 90, dur: .1, gain: .18, delay: i * .16}); this.burst({type: 'lowpass', freq: 1200, dur: .05, gain: .08, delay: i * .16}); } },
       possess: () => { this.tone({freq: 196, to: 392, dur: .9, gain: .07, attack: .05}); this.tone({freq: 294, to: 587, dur: 1.0, gain: .05, attack: .1});
         this.notes([784, 988, 1175], {type: 'sine', step: .08, dur: .6, gain: .03, delay: .35}); this.burst({type: 'highpass', freq: 2400, dur: .5, gain: .05, attack: .2}); },
+      howl: () => { this.tone({type: 'sine', freq: 330, to: 560, dur: .7, gain: .05, attack: .25}); this.tone({type: 'sine', freq: 560, to: 420, dur: 1.4, gain: .045, attack: .1, delay: .7});
+        this.tone({type: 'triangle', freq: 335, to: 566, dur: .7, gain: .015, attack: .25, delay: .02}); },
+      nightfall: () => { this.notes([392, 330, 262], {type: 'sine', step: .35, dur: 1.4, gain: .05}); },
       release: () => { this.tone({freq: 587, to: 294, dur: .8, gain: .05, attack: .02}); this.tone({freq: 392, to: 196, dur: .9, gain: .04, attack: .05}); },
       kindle: () => { this.burst({type: 'highpass', freq: 1800, dur: .4, gain: .08, attack: .1}); for (let i = 0; i < 5; i++) this.burst({freq: 2500 + r() * 2000, q: 3, dur: .02, gain: .08, delay: .1 + r() * .5}); },
       death: () => { this.tone({freq: 330, to: 82, dur: 1.6, gain: .12, attack: .05}); this.tone({type: 'triangle', freq: 247, to: 62, dur: 1.8, gain: .06, attack: .1}); this.burst({type: 'lowpass', freq: 500, to: 120, dur: 1.4, gain: .08}); },

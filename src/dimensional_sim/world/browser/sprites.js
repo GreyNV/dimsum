@@ -28,7 +28,9 @@ export const ROLE = Object.freeze({
   g: {fill: '#d8d2bc', ink: '#5e584a'}, o: {fill: '#3a362e', ink: '#b9b29a'},
   i: {fill: '#14100c', ink: '#8fe3ff'}, j: {fill: '#7a4a2a', ink: '#d09060'},
   // Enemy (pale wisp): a bright core, a blue halo, fading tendrils.
-  q: {fill: '#eaf6ff', ink: '#7fa8d8'}, u: {fill: '#7e9ad0', ink: '#e2eeff'}, v: {fill: '#3e4f86', ink: '#a9bcf2'}
+  q: {fill: '#eaf6ff', ink: '#7fa8d8'}, u: {fill: '#7e9ad0', ink: '#e2eeff'}, v: {fill: '#3e4f86', ink: '#a9bcf2'},
+  // Enemy (wolf, night only): smoke-grey coat, a darker saddle, moon-yellow eyes, white teeth.
+  x: {fill: '#5f646b', ink: '#33373c'}, z: {fill: '#3a3d43', ink: '#1c1e22'}, E: {fill: '#20160a', ink: '#ffe066'}
 });
 const FLASH = '#fff4dc';
 

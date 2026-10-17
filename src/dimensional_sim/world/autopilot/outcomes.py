@@ -154,7 +154,11 @@ class OutcomesMixin:
         self.leads = [lead for lead in self.leads if lead["expires_ms"] > self.total_ms]
         for lead in expired:
             self._record_leads([lead], "expired")
-            self._entry("lore", f"Lost track of the {BY_ID[lead['action']].name.lower()}.")
+            name = BY_ID[lead["action"]].name.lower()
+            if "night" in BY_ID[lead["action"]].tags:
+                self._entry("lore", f"Dawn breaks. The {name} slinks back into the trees.")
+            else:
+                self._entry("lore", f"Lost track of the {name}.")
         gone = {lead["id"] for lead in expired}
         for ident in gone:   # an enemy that was only a lead wanders off
             target = self.game.targets.get(ident)

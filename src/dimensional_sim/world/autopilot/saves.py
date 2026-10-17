@@ -12,7 +12,7 @@ from ..equipment import validate_equipped
 from ..journal import new_journal, validate_journal
 from ..models import ChunkKey, chunk_ident, fields, identifier, integer
 from ..runtime import Exploration
-from ..tuning import CHEST_SLOTS, PITY_CHUNKS
+from ..tuning import CHEST_SLOTS, DAY_START_MS, NIGHT_SPAWN_EVERY_MS, PITY_CHUNKS
 from .constants import (ANCHOR_COUNTDOWN_MS, CONTACT_COOLDOWN_MS, FOOD_COOLDOWN_MS, POSSESS_COOLDOWN_MS, POSSESS_MS, INVENTORY_SLOTS, LEGACY_MONSTER_MAX_MS, LOG_LIMIT,
                         LOG_TYPES, MONSTER_STEP_MS, SCHEMA_VERSION, SELF_ACTIONS, STACK_LIMIT, STAT_KEYS,
                         TASK_TYPES, VITAL_MAX)
@@ -32,7 +32,9 @@ V17_SAVE_FIELDS = ("schema_version", "encounters", "exploration", "life", "total
 # cooldown, and added contacting the anchor, possession and the opening at the anchor.
 V18_DROPPED = ("blessing", "boon", "boon_next", "prayers_this_life", "skills", "return_ready_ms")
 V18_FIELDS = ("contact_ready_ms", "possess_end_ms", "possess_ready_ms", "opening")
-SAVE_FIELDS = tuple(f for f in V17_SAVE_FIELDS if f not in V18_DROPPED) + V18_FIELDS
+V18_SAVE_FIELDS = tuple(f for f in V17_SAVE_FIELDS if f not in V18_DROPPED) + V18_FIELDS
+V19_FIELDS = ("night_tick",)       # schema 19: the night watch's last world-clock tick
+SAVE_FIELDS = V18_SAVE_FIELDS + V19_FIELDS
 V7_FIELDS = ("journal",)                       # added by schema 7
 V8_FIELDS = ("equipped", "knowledge", "recipes", "journal_disabled", "journal_favor",
              "leads", "lead_history")         # added by schema 8
@@ -216,9 +218,16 @@ def _from_v17(data):
             "contact_ready_ms": 0, "possess_end_ms": None, "possess_ready_ms": 0, "opening": False}
 
 
+def _from_v18(data):
+    """The night watch starts at the save's current clock tick (no retroactive wolves)."""
+    fields(data, V18_SAVE_FIELDS)
+    total = integer(data["total_ms"], "total time", 0)
+    return {**data, "schema_version": 19, "night_tick": (total + DAY_START_MS) // NIGHT_SPAWN_EVERY_MS}
+
+
 MIGRATIONS = {6: _from_v6, 7: _from_v7, 8: _from_v8, 9: _from_v9, 10: _from_v10, 11: _from_v11, 12: _from_v12,
               13: _from_v13, 14: _from_v14, 15: _from_v15, 16: _from_v16,
-              17: _from_v17}
+              17: _from_v17, 18: _from_v18}
 
 
 def upgrade(data):
@@ -355,6 +364,8 @@ def _load_life(result, data):
     if type(data["opening"]) is not bool or (data["opening"] and (data["anchor_ms"] is None or result.life != 1)):
         raise ValueError("invalid opening")
     result.opening = data["opening"]
+    result.night_tick = integer(data["night_tick"], "night tick", 0,
+                                (result.total_ms + DAY_START_MS) // NIGHT_SPAWN_EVERY_MS)
     if type(data["unlocked"]) is not list or any(u not in UNLOCKS for u in data["unlocked"]) \
             or len(set(data["unlocked"])) != len(data["unlocked"]):
         raise ValueError("invalid unlocks")
@@ -526,7 +537,7 @@ class SavesMixin:
                 "spot_plans": {k: [list(row) for row in v] for k, v in sorted(self.spot_plans.items())},
                 "anchor_ms": self.anchor_ms, "anchor_wait": self.anchor_wait,
                 "contact_ready_ms": self.contact_ready_ms, "possess_end_ms": self.possess_end_ms,
-                "possess_ready_ms": self.possess_ready_ms, "opening": self.opening,
+                "possess_ready_ms": self.possess_ready_ms, "opening": self.opening, "night_tick": self.night_tick,
                 "journal_guarantee": self.journal_guarantee,
                 "journal_guarantee_region": self.journal_guarantee_region,
                 "guarantee_used": self.guarantee_used,

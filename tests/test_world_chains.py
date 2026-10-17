@@ -50,6 +50,7 @@ class ChainShapeTests(unittest.TestCase):
 
     def test_every_lead_has_a_source_and_plain_names(self):
         sources = {o.id for a in ACTIONS for o in a.outcomes if o.kind == "lead"}
+        sources |= {a.id for a in ACTIONS if "night" in a.tags}   # the night watch creates these
         for a in ACTIONS:
             if a.placement == "lead":
                 self.assertIn(a.id, sources, f"{a.id} is never reached")

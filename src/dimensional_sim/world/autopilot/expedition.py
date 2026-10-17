@@ -19,6 +19,7 @@ from .constants import (ANCHOR_COUNTDOWN_MS, MAX_EVENTS_PER_ADVANCE, MONSTER_STE
                         REST_MS, RETREAT_BELOW, SELF_ACTIONS, STAT_KEYS, VITAL_MAX, attribute_table, ceil_div)
 from .lives import LivesMixin
 from .navigation import NavigationMixin
+from .night import NightMixin
 from .outcomes import OutcomesMixin
 from .planning import PlanningMixin
 from .presentation import PresentationMixin
@@ -28,7 +29,7 @@ from .vitals import VitalsMixin
 
 
 class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, OutcomesMixin, VitalsMixin,
-                 LivesMixin, SavesMixin, PresentationMixin, CampMixin, EcologyMixin):
+                 LivesMixin, SavesMixin, PresentationMixin, CampMixin, EcologyMixin, NightMixin):
     def __init__(self, game, *, fresh=True, opening=False):
         """fresh=True starts a new expedition (prologue first); loaders pass False.
         opening=True (new games in the browser) starts at the anchor: the player meets
@@ -54,6 +55,7 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.possess_end_ms = None # possession (manual control) ends at this simulation time
         self.possess_ready_ms = 0  # possession recharges until this simulation time
         self.opening = False       # a new expedition waiting at the anchor before its first life
+        self.night_tick = 0        # last world-clock tick the night watch looked at (autopilot/night.py)
         self.knowledge = set()     # discoveries persist across lives
         self.recipes = set()       # recipes kept with ash: known in every later life
         self.life_recipes = set()  # recipes found this life (lost at rebirth unless kept)
@@ -217,6 +219,7 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         if here > self.depth:
             self.depth = here
             self.best_depth = max(self.best_depth, here)
+        self._night_watch()
         self._screen()
         for chunk in self._resident():
             if chunk.key not in self.game.initialized_chunks:
@@ -250,7 +253,7 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
 
     def _step_cap(self, remaining):
         """Longest step from now that crosses no vitals, monster or lead event."""
-        cap = min(remaining, self._vitals_limit(), MONSTER_STEP_MS - self.monster_ms)
+        cap = min(remaining, self._vitals_limit(), MONSTER_STEP_MS - self.monster_ms, self.night_step_cap())
         if self.possessing:
             cap = min(cap, self.possess_end_ms - self.total_ms)
         if self.leads:

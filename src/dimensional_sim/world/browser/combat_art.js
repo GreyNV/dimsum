@@ -22,7 +22,10 @@ export const SKELETON = Object.freeze({paint: ["   ggggg   ", "   gigig   ", "  
 /** Pale wisp: a small cold light with trailing wisps; it floats, so it bobs and glows. */
 export const WISP = Object.freeze({paint: ["   uuu   ", "  uqqqu  ", " uqqqqqu ", "  uqqqu  ", "   vuv   ", "  v v v  "],
   glyph: ["   .-.   ", "  (o o)  ", " ( ~~~ ) ", "  \\___/  ", "   )|(   ", "  ' ' '  "]});
-export const ENEMY_SPRITES = Object.freeze({boar: ENEMY, lurker: LURKER, skeleton: SKELETON, wisp: WISP});
+/** Wolf (night only): tall pointed ears, a long muzzle, lean legs - lighter and quicker than the boar. */
+export const WOLF = Object.freeze({paint: [' x       x ', ' xx zzz xx ', '  xxxxxxx  ', ' xxExxxExx ', '  xxzwzxx  ', ' zxxxxxxxz ', '  z  z  z  '],
+  glyph: [' ^       ^ ', ' (\\ ;;; /) ', '  ;;;;;;;  ', ' ;;o;;;o;; ', '  ;;vVv;;  ', ' /;;;;;;;\\ ', "  '  '  '  "]});
+export const ENEMY_SPRITES = Object.freeze({boar: ENEMY, lurker: LURKER, skeleton: SKELETON, wisp: WISP, wolf: WOLF});
 
 /** Enemy at tile center (x, y). `hit` = ms since last HP loss; `dying` = 0..1 progress. */
 export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying = null, maxHp = 3, reducedMotion = false, ghost = false, reflection = false} = {}) {
