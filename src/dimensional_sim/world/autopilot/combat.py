@@ -1,5 +1,5 @@
 """Combat against catalog enemies: punch damage, danger by biome and ring, the
-exploration frontier and enemy pursuit. No enemy, gear or boon is named here:
+exploration frontier and enemy pursuit. No enemy or gear is named here:
 EnemyDef/BiomeDef (catalog) and effects.py supply every number."""
 from .. import effects
 from ..catalog import ASSET_ENEMY_ACTION, ATTACKS, BIOMES, BY_ID, DEFAULT_ATTACK, ENEMIES, ITEMS
@@ -24,9 +24,9 @@ class CombatMixin:
 
     def punch_damage(self):
         """1 + softcapped (regular + dimensional) Strength levels / STRENGTH_LEVELS_PER_PUNCH,
-        plus gear and boons."""
+        plus gear."""
         level = combined_level(self.regular["strength"], self.dimensional["strength"])
-        return 1 + int(level) // STRENGTH_LEVELS_PER_PUNCH + effects.total(self.equipped, self.boon, "punch_damage")
+        return 1 + int(level) // STRENGTH_LEVELS_PER_PUNCH + effects.total(self.equipped, "punch_damage")
 
     def target_action(self, target_id):
         """The admitted fight action behind a target, even after its origin chunk is evicted."""
@@ -41,7 +41,7 @@ class CombatMixin:
         biome = self.biome(key)
         ring = min(self.ring(key), biome.ring_cap)
         hit = enemy.hit * POINT * biome.danger_num ** ring // biome.danger_den ** ring * 1000 // self.speed("endurance")
-        return effects.scale(hit, self.equipped, self.boon, "enemy_hit_percent")
+        return effects.scale(hit, self.equipped, "enemy_hit_percent")
 
     def enemy_hp(self, action, key):
         """Hit points of the fight spot `action` placed in chunk `key`."""
@@ -89,7 +89,7 @@ class CombatMixin:
     def frontier(self):
         """Deepest ring the auto-pilot is willing to explore: one fight with the worst
         threat there must cost at most COMFORT_DAMAGE_PERCENT of full health. Stronger lives
-        (XP, gear, boons) push the frontier outward; hunger pushes one ring further."""
+        (XP, gear) push the frontier outward; hunger pushes one ring further."""
         threats, cap = self.threats(), self.biome(self.game.player.chunk).ring_cap
         ring = 1
         while ring < cap and threats and max(self.fight_damage(ring + 1, a) for a in threats) * 100 \

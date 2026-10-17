@@ -48,7 +48,7 @@ class SpawningMixin:
     def _reset_spawns(self):
         """Roll this life's spawn windows; nothing has been screened yet."""
         seed = derive_seed(self.game.world.world_seed, "spawn-window", self.life)
-        bonus = effects.total({}, self.boon, "food_window_bonus")   # gear is not worn yet
+        bonus = effects.total({}, "food_window_bonus")   # gear is not worn yet
         self.budget = {entry.id: limit for entry in BY_ID.values()
                        if (limit := roll_window(entry, seed, self.mastery.get(entry.id, 0),
                                                 bonus if entry.feeds else 0)) is not None}
@@ -94,7 +94,7 @@ class SpawningMixin:
     def _progress_fields(self):
         """Persistent permission state shared by every action context."""
         return {"unlocked": frozenset(self.unlocked), "knowledge": frozenset(self.knowledge),
-                "recipes": frozenset(self.recipes), "action_counts": self.journal["actions"],
+                "recipes": frozenset(self.recipes | self.life_recipes), "action_counts": self.journal["actions"],
                 "item_counts": self.journal["items"]}
 
     def site_condition(self, key):
@@ -133,8 +133,7 @@ class SpawningMixin:
                        gear=frozenset(i for i in self.inventory if ITEMS[i].kind == "gear"),
                        hunger=self.hunger // POINT, food_carried=self._has_food(),
                        trigger=trigger, visible=visible,
-                       flags=frozenset(({"done:pray"} if self.prayers_this_life else set())
-                                       | ({"hurt_far"} if self._hurt_far() else set())),
+                       flags=frozenset({"hurt_far"} if self._hurt_far() else ()),
                        **self._progress_fields())
 
     def _spots(self, chunk):

@@ -7,8 +7,11 @@ from ..catalog import ATTRIBUTES, BY_ID
 from ..models import DELTAS, DIRECTIONS
 
 DIRECTION_DELTAS = tuple(DELTAS[d] for d in DIRECTIONS)
-SKILLS = ("take_control",)
-RETURN_COOLDOWN_MS = 300_000
+CONTACT_COOLDOWN_MS = 120_000     # contacting the anchor mid-life (the world waits while it is open)
+# Possession: the god takes the avatar's hands for a while (manual control).
+POSSESS_MS = 30_000
+POSSESS_COOLDOWN_MS = 60_000      # counted from the moment possession ends
+POSSESS_SPEED_PERCENT = 120       # moving and every action are this much faster while possessed
 LOG_LIMIT = 16
 ANCHOR_COUNTDOWN_MS = 30_000
 PAUSE_AFTER_ACTIVITY_MS = 450
@@ -61,14 +64,14 @@ MEMORIES = (
 ELDER_LINES = (
     "Why... I don't believe it. I witnessed the birth of an avatar - a dimensional avatar.",
     "The bandits left you for dead. The gods saved you, but now you have to worship them.",
-    "Go explore the world, and don't forget to pray. Maybe the gods will bestow blessings on you.",
+    "Something old looks out through your eyes. When it takes your hands, let it - you will be quicker for it.",
     "Mind your hunger, too. This forest feeds only the lucky.",
     "May the path be smooth. Only you will know what destiny awaits.",
 )
-LOG_TYPES = ("encounter", "eat", "rest", "life", "blessing", "lore", "trade", "ambush",
+LOG_TYPES = ("encounter", "eat", "rest", "life", "possess", "lore", "trade", "ambush",
              "craft", "reflect", "purchase", "rebirth", "build", "stow")
 TASK_TYPES = ("perform", "pause", "rest", *SELF_ACTIONS, *PROLOGUE_MS)
-SCHEMA_VERSION = 16                # 16: shimmer cells; 15: ecological pressure (14: campfire; 13: camp buildings, chest; 12: sites)
+SCHEMA_VERSION = 18                # 18: no blessing/boons/skills, contact + possession, campfire bought, opening at the anchor; 17: recipes found this life, level unlocks; 16: shimmer cells; 15: ecological pressure (14: campfire; 13: camp buildings, chest; 12: sites)
 
 
 def attribute_table():

@@ -3,7 +3,7 @@ from dataclasses import replace
 
 from .. import effects
 from ..actions import bucket, outcome_chance, reasons_against
-from ..catalog import BY_ID, ITEMS, mastery_level
+from ..catalog import BY_ID, ITEMS, RECIPE_KEEP_COST, RECIPE_NAMES, mastery_level
 from ..encounters import features, lead_spot, roll_loot
 from ..equipment import equip_item
 from ..journal import record_action, record_items
@@ -19,12 +19,12 @@ from .constants import (AFTER_LOCATION_REST_WEIGHT, EAT_AT, FOOD_COOLDOWN_MS, FO
 class OutcomesMixin:
     crafting_enabled = True   # simulation policy switch (world/simulate.py "hoard"); not saved
 
-    def _entry(self, kind, text, *, encounter=None, attribute=None, xp=0, dim_xp=0, items=(), blessing=0):
+    def _entry(self, kind, text, *, encounter=None, attribute=None, xp=0, dim_xp=0, items=()):
         self.sequence += 1
         self.log.append({"seq": self.sequence, "clock_ms": self.total_ms, "life": self.life,
                          "type": kind, "encounter": encounter, "text": text,
                          "attribute": attribute, "xp": xp, "dim_xp": dim_xp,
-                         "items": [[item, count] for item, count in items], "blessing": blessing})
+                         "items": [[item, count] for item, count in items]})
         del self.log[:-LOG_LIMIT]
 
     def _add_item(self, item, count):
@@ -50,6 +50,8 @@ class OutcomesMixin:
             self.regular[attribute] += xp
             self.dimensional[attribute] += dim
             self.life_gain[attribute] += dim
+            if dim:
+                self._grant_level_unlocks()
         return dim
 
     def _record_leads(self, leads, status):
@@ -91,9 +93,10 @@ class OutcomesMixin:
                     self.knowledge.add(outcome.id)
                     self._entry("lore", f"Learned {outcome.id.replace('_', ' ')}.", encounter=action.id)
             elif outcome.kind == "recipe":
-                if outcome.id not in self.recipes:
-                    self.recipes.add(outcome.id)
-                    self._entry("lore", f"Discovered the {outcome.id.replace('_', ' ')} recipe.", encounter=action.id)
+                if outcome.id not in self.recipes and outcome.id not in self.life_recipes:
+                    self.life_recipes.add(outcome.id)
+                    self._entry("lore", f"Worked out how to make a {RECIPE_NAMES[outcome.id].lower()}. Keep it for "
+                                f"later lives at the anchor ({RECIPE_KEEP_COST[outcome.id]} ash).", encounter=action.id)
             elif outcome.kind == "lead":
                 self._create_lead(action, outcome, index, source_id)
             elif outcome.kind == "reveal":
@@ -169,13 +172,12 @@ class OutcomesMixin:
         spot = self._spot_by_id(ident)
         condition = self.site_condition(spot.chunk) if spot is not None and entry.placement == "site" else None
         rolled = roll_loot(entry if condition is None or condition.drops else replace(entry, drops=None), seed)
-        chop = effects.total(self.equipped, self.boon, "wood_yield") if "wood" in entry.tags else 0
+        chop = effects.total(self.equipped, "wood_yield") if "wood" in entry.tags else 0
         if chop:   # an axe: more wood from every wood harvest
             rolled = [*rolled, ("stick", chop)]   # once per harvest, however many rows rolled
         items = [(item, kept) for item, count in rolled if (kept := self._add_item(item, count))]
         if entry.heal:
             self.health = min(VITAL_MAX, self.health + entry.heal * POINT)
-        self.blessing += entry.blessing
         record_action(self.journal, entry.id)
         if spot is not None:
             self._deplete(entry, spot.chunk)
@@ -197,7 +199,7 @@ class OutcomesMixin:
         if entry.category == "pray":
             self.stats["prayers"] += 1
         self._entry("encounter", entry.log, encounter=entry.id, attribute=entry.attribute,
-                    xp=entry.xp, dim_xp=dim, items=items, blessing=entry.blessing)
+                    xp=entry.xp, dim_xp=dim, items=items)
 
     def _eat(self):
         """Auto-eat: the food that restores the most without wasting, else the smallest."""
@@ -260,7 +262,7 @@ class OutcomesMixin:
         self._start_task("pause", PAUSE_AFTER_ACTIVITY_MS)
 
     def _complete_self(self, action):
-        """Finish a self action: pay costs, then XP, loot, gear, blessing, log."""
+        """Finish a self action: pay costs, then XP, loot, gear, log."""
         stock = self.camp_stock()
         if any(stock.get(item, 0) < count for item, count in action.cost):
             return   # the ingredients were eaten or lost meanwhile: nothing happens
@@ -293,7 +295,5 @@ class OutcomesMixin:
         elif action.category == "camp":
             self._entry("build", action.log, attribute=action.attribute, xp=action.xp, dim_xp=dim, items=items)
         elif action.category == "pray":
-            self.prayers_this_life += 1
             self.stats["prayers"] += 1
-            self.blessing += action.blessing
-            self._entry("blessing", action.log, blessing=action.blessing)
+            self._entry("reflect", action.log)

@@ -142,11 +142,17 @@ enemy silhouettes in browser/actors.js, with 4-way views, sword poses, slash arc
 hit flash, damage numbers, HP bar, death dissolve, depth sort, canopy occlusion,
 x-ray and 130% default zoom. 153 unittest + 13 node tests pass; headless Chromium
 1280x800 and 390x844 fight-to-defeat run with no console errors.
+2026-10-17 Way home and clearer controls: when the anchor or a lit campfire is off screen, an
+edge arrow (`scene_fx.edgePoint` / `drawEdgeMarker`) points to it with "Camp · N steps"; the minimap
+draws both as diamonds clamped to its edge. Skill buttons carry a state note (locked price,
+"Needs 3 sticks (have 1)", "Ready in m:ss"), a cooldown bar (`--charge`) and a hint tooltip; pressing
+an unusable one explains why in a toast. In manual control, stepping onto a non-fight spot starts it;
+the key that carried you there keeps it going, a new press walks on and abandons it.
 2026-10-06 World controls: Auto and Active use one live `Expedition` and one
 layered character-art canvas. An input with `control: "active"` enables persistent manual
 movement, interaction and attack; `control: "auto"` resumes autopilot from the
 current cell and ongoing encounter. The browser holds one polling loop, and its
-three skill slots are presentation placeholders for future blessings. Frame has
+three skill slots (return, campfire, empty) come from `expedition.skill_slots`. Frame has
 spots/target_kinds/expedition fields; see
 world-autopilot.md for the additive transport contract.
 2026-10-04 movement fix: taps only turned the player (a step needed 120ms of

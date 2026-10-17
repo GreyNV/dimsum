@@ -33,7 +33,7 @@ class WebGame:
         if save_text:
             expedition = Expedition.from_dict(json.loads(save_text))
         else:
-            expedition = Expedition(Exploration(new_world(int(seed)), "forest"))
+            expedition = Expedition(Exploration(new_world(int(seed)), "forest"), opening=True)
         self.expedition = expedition
         self.session = BrowserSession(expedition.game, expedition, start_paused=start_paused)
 

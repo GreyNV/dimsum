@@ -30,15 +30,17 @@ planning, navigation, spawning, combat (catalog enemies/biomes), outcomes, vital
 world/progression.py: regular/dimensional levels, softcap and speed (owns its curve; no idle-sim import).
 core.py/content.py/balance.py: the Phase One idle sim, standalone; the world does not depend on it.
 world/catalog.py: ALL content as validated data: biomes (danger curve), enemies, effects, items, actions,
-  recipes/knowledge/lead outcomes, unlocks (actions or abilities), boons, regions, category styles and art keys.
+  recipes/knowledge/lead outcomes, unlocks (actions by level, or ash-bought skills), regions, category styles and art keys.
   How to add content without engine edits: docs/design/CONTENT_SYSTEMS.md.
-world/effects.py: gear/boon Effects combined per stat (no item or boon is named in engine code).
+world/effects.py: gear Effects combined per stat (no item is named in engine code).
 world/drops.py: cascading rarity rolls (rare -> uncommon -> common) for encounter spots and DropTable bonus drops.
 world/sites.py: landmark sites (generator v5): which chunk holds one, its clearing and structures; site actions roll inside it.
 world/autopilot/camp.py: the anchor camp: buildings (bound with ash to persist), the storage chest, camp work trips, carry load.
 world/equipment.py: current-life weapon/body slots. Leads, knowledge and Journal roll controls live in autopilot state.
 world/actions.py: action bucket (known -> eligible -> weighted) and explain(); regions.py: chunk regions.
-world/economy.py: dimensional ash/blessing rules and anchor purchases; tuning.py: balance numbers.
+world/economy.py: dimensional ash rules and anchor purchases; tuning.py: balance numbers.
+The anchor (docs/design/ANCHOR_AND_POSSESSION.md): new games open there, deaths return there, skill 1 contacts it
+  mid-life (world waits). Manual control = possession (skill 3, 30 s, 60 s recharge, +20% speed). No blessings.
 world/simulate.py: `cli simulate` (seeded metrics), `cli inspect` (why a spot did/didn't appear, region provenance), `cli regions` (layout).
 Action pipeline + lifecycle states: docs/design/ACTION_SYSTEM.md; per-action audit: ACTION_ARCHITECTURE_AUDIT.md.
 Unlock/knowledge != always available: never add a permanent action button; extend buckets, outcomes or leads.
@@ -57,7 +59,7 @@ test negative transitions and snapshot replay. Add animations via validated fram
 durations/active-window/hitbox metadata; test bulk/split timing, never infer damage
 from pixels. Register only through validation; freeze catalog for existing worlds.
 Content rules live in catalog/actions, never in generators or the auto-pilot by id.
-Never name an enemy, item, boon, unlock or biome in engine/client code: add a catalog field or
+Never name an enemy, item, unlock or biome in engine/client code: add a catalog field or
 Effect stat instead. Every catalog art key needs client art (tests/test_world_systems.py).
 Bump encounters.ENCOUNTER_VERSION + add a save upgrade when existing worlds' spot rolls change.
 Run focused tests before/after a subsystem, then full unittest and `node --test tests/*.test.mjs`. Preserve existing

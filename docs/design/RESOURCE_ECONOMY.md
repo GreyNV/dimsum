@@ -7,22 +7,21 @@ Every resource has a source, at least one in-run use and a death-time conversion
 | Item | Source | In-run sink | Ash each before diminishing | Notes |
 |---|---|---|---|---|
 | Wild berries | bramble berries | eat (+12) | 1 | |
-| Bird egg | gnarled tree (unlock) | eat (+20) | 2 | |
+| Bird egg | gnarled tree (strength 2) | eat (+20) | 2 | |
 | Boar meat | boar | eat (+35, +11 hp) | 3 | |
 | Venison | deer hunt after temporary lead | eat (+28) | 3 | |
-| Pale mushroom | mushroom ring (unlock) | eat (+15) | 2 | |
-| Snared hare | snare craft (unlock) | eat (+30) | 3 | turns materials into food |
+| Pale mushroom | mushroom ring (perception 4) | eat (+15) | 2 | |
+| Snared hare | snare craft (recipe) | eat (+30) | 3 | turns materials into food |
 | Stick | branches, tree, camp | staff (3), snare (2) | 1 | |
 | Bramble thorn | berries 35%, camp | snare (1) | 2 | |
-| Boar hide | boar 60%, camp 20% | wrap (2, unlock) | 4 | |
+| Boar hide | boar 60%, camp 20% | wrap (2, recipe) | 4 | |
 | Walking staff | learned recipe + craft | weapon slot, +1 punch while equipped | 2 | worth less than its 3 sticks |
 | Hide wrap | craft | body slot, boar hits x0.7 while equipped | 6 | worth less than its 2 hides (8) |
 
 ## Currencies
 | Currency | Source | Sink | Timing | Purpose |
 |---|---|---|---|---|
-| Dimensional ash | all carried items convert at return; first 5 lifetime copies of each item full value, later copies half value; +1 per ring reached | unlocks, starting with manual return (10) | automatic at return (works offline) | widen possibility space |
-| Blessing | prayer (rare random, or wayside shrines once unlocked) | shrine_path unlock (3) or a next-life boon (2) | between lives | favour from the gods |
+| Dimensional ash | all carried items convert when a life ends; first 5 lifetime copies of each item full value, later copies half value; +1 per ring reached | campfire skill (25), keeping recipes found this life (15-40), binding camp buildings (120 / 200) | at the anchor: between lives, or mid-life by contacting it (skill 1; the world waits) | pass knowledge and the camp to the next life |
 
 ## Decisions this creates
 - **Use or keep?** Eating and crafting keep the life going (more XP, depth, items); keeping maximises
@@ -33,5 +32,5 @@ Every resource has a source, at least one in-run use and a death-time conversion
   crafting (BALANCING.md).
 
 ## Failure modes guarded by tests
-Refused purchases change nothing; a stack converts once at return; a boon is one per life; lifetime converted
+Refused purchases change nothing; a stack converts once at return; lifetime converted
 counts, currencies, unlocks and earned mastery survive saves.

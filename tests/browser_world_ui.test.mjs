@@ -33,3 +33,26 @@ test('mobile World has one canvas and both control presentations', () => {
   assert.match(css, /body\.active-control \.expedition\{display:none/);
   assert.match(css, /body\.active-control:not\(\.page-open\):not\(\.anchor-active\) \.touch-controls\.manual-only\{display:grid!important\}/);
 });
+
+import {edgePoint} from '../src/dimensional_sim/world/browser/scene_fx.js';
+import {clockText} from '../src/dimensional_sim/world/browser/world_ui.js';
+
+test('an off-screen camp gets a marker on the inset edge, an on-screen one none', () => {
+  const inset = {top: 100, right: 100, bottom: 100, left: 100};
+  assert.equal(edgePoint(500, 400, 1000, 800, inset), null);
+  const east = edgePoint(3000, 400, 1000, 800, inset);
+  assert.deepEqual([Math.round(east.x), Math.round(east.y), east.angle], [900, 400, 0]);
+  const corner = edgePoint(-5000, -5000, 1000, 800, inset);
+  assert.ok(corner.x >= 100 && corner.y >= 100 && (Math.round(corner.x) === 100 || Math.round(corner.y) === 100));
+});
+
+test('skill slots carry a note, a hint and a cooldown charge', () => {
+  const [ret, fire] = skillSlots({skill_slots: [
+    {name: 'Return to anchor', state: 'cooldown', remaining_ms: 90_000, cooldown_ms: 300_000, hint: 'End this life.'},
+    {name: 'Make campfire', state: 'disabled', note: 'Needs 3 sticks (have 1)', hint: 'Set down a fire.'}]});
+  assert.equal(ret.note, 'Ready in 1:30');
+  assert.equal(ret.charge, .7);
+  assert.equal(fire.note, 'Needs 3 sticks (have 1)');
+  assert.equal(fire.usable, false);
+  assert.equal(clockText(61_000), '1:01');
+});

@@ -8,8 +8,9 @@ import time
 
 from .animation import rotate
 from .autopilot import INVENTORY_SLOTS, Expedition
+from .autopilot.constants import CONTACT_COOLDOWN_MS, POSSESS_COOLDOWN_MS, POSSESS_MS, POSSESS_SPEED_PERCENT
 from . import details
-from .catalog import BOONS, BY_ID, ENEMIES, ITEMS, REGIONS, UNLOCKS, rarity_glint
+from .catalog import BY_ID, ENEMIES, ITEMS, REGIONS, UNLOCKS, rarity_glint
 from .models import ChunkKey, chunk_ident, integer
 from .progression import attribute_report
 from .runtime import InputCommand
@@ -17,7 +18,6 @@ from .seeds import derive_seed
 
 TICK_MS = 20
 INPUT_LEASE = 0.3
-MANUAL_HOLD = 2.5  # seconds of manual control before auto-pilot resumes
 LOG_ENTRIES = 6
 ITEM_COLORS = {item.id: item.color for item in ITEMS.values()}   # reward popups and HUD text
 ITEM_GLINTS = {item.id: glint for item in ITEMS.values() if (glint := rarity_glint(item.rarity))}  # reveal burst
@@ -55,7 +55,7 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual",
             resident.append(chunk_ident(key))
             if chunk_ident(key) not in known:
                 chunks.append(_chunk_view(game.world, chunk, expedition))
-    in_anchor = expedition is not None and expedition.anchor_ms is not None
+    in_anchor = expedition is not None and expedition.anchor_ms is not None   # between lives (contact keeps the world)
     strikes = expedition.strikes if expedition is not None else {}
     targets = [] if in_anchor else [{"id": t.id, "x": t.chunk.x * w + t.x, "y": t.chunk.y * h + t.y, "hp": t.hp,
                                      "strikes": strikes.get(t.id, 0)}
@@ -112,6 +112,7 @@ def _chunk_view(world, chunk, expedition):
 def _expedition_view(e, control, *, debug, detail):
     """HUD state of the auto-pilot: vitals, activity, log, anchor shop, meta progress."""
     in_anchor = e.anchor_ms is not None
+    shop_open = in_anchor or e.contact
     unarmed_target = e.unarmed_target() if control == "manual" and not in_anchor else None
     return {"mode": e.mode(), "activity": e.activity(),
             "goal": None if e.goal is None else {"x": e.goal["x"], "y": e.goal["y"], "kind": e.goal["kind"]},
@@ -121,29 +122,23 @@ def _expedition_view(e, control, *, debug, detail):
             "equipped": dict(e.equipped),
             "inventory_slots": INVENTORY_SLOTS, "life": e.life, "total_ms": e.total_ms,
             "depth": e.depth, "best_depth": e.best_depth,
-            "anchor_space": None if not in_anchor else {
-                "remaining_ms": e.anchor_ms, "waiting": e.anchor_wait,
-                "first_return": e.life == 1},
+            "anchor_space": None if not shop_open else {
+                "kind": "contact" if e.contact else "opening" if e.opening else "death",
+                "remaining_ms": e.anchor_ms or 0, "waiting": e.anchor_wait or e.contact,
+                "first_return": e.life == 1 and not e.opening and not e.contact},
             "punch_damage": e.punch_damage(), "report": e.report,
             "anchor": {"x": e.anchor[0], "y": e.anchor[1]},
-            "skills": sorted(e.skills), "control": control,
+            "control": control, "possession": e.possession(),
             "attack_radius": e.attack().reach,
             "weapon": _weapon_view(e),
             "auto_target": unarmed_target[1] if unarmed_target else None,
-            "skill_slots": [{"name": "Return to anchor", "state":
-                             "locked" if not e.has_ability("return_to_anchor") else
-                             "disabled" if in_anchor or e.in_prologue else
-                             "cooldown" if e.total_ms < e.return_ready_ms else "ready",
-                             "remaining_ms": max(0, e.return_ready_ms - e.total_ms)},
-                            {"name": "Make campfire", "state":
-                             "disabled" if in_anchor or e.in_prologue or not e.can_make_fire() else "ready"},
-                            {"name": "Empty", "state": "locked"}],
+            "skill_slots": _skill_slots(e, shop_open),
             "campfire": None if in_anchor or e.campfire is None or e.campfire["dimension"] != e.dimension
             else {"x": e.campfire["fire_x"], "y": e.campfire["fire_y"]},
             "prologue": e.prologue(),
             "region": _region_view(e),
             "meta": _meta_view(e),
-            "shop": e.anchor_offers() if in_anchor else None,
+            "shop": e.anchor_offers() if shop_open else None,
             "stats": dict(e.stats),
             "debug": e.debug_info() if debug else None,
             "detail": details.detail(e) if detail else None,
@@ -155,9 +150,61 @@ def _expedition_view(e, control, *, debug, detail):
             "item_glints": ITEM_GLINTS}
 
 
+def _plural(n, name):
+    return f"{n} {name}{'s' if n > 1 else ''}"
+
+
+def _skill_slots(e, in_anchor):
+    """The three skill buttons: what each does (`hint`), why it can't be used now (`note`),
+    and the cooldown or time left (`remaining_ms` of `cooldown_ms`) so the client can draw a timer.
+    Slot 1 contacts the anchor, slot 2 makes a campfire (bought with ash), slot 3 possesses."""
+    busy = in_anchor or e.in_prologue
+    if busy:
+        contact = {"state": "disabled", "note": "Not now"}
+    elif e.total_ms < e.contact_ready_ms:
+        contact = {"state": "cooldown", "note": "Recharging"}
+    else:
+        contact = {"state": "ready", "note": "Ready"}
+    contact.update(name="Contact anchor", remaining_ms=max(0, e.contact_ready_ms - e.total_ms),
+                   cooldown_ms=CONTACT_COOLDOWN_MS,
+                   hint="Reach the anchor without dying: the world waits while you spend ash, then the life "
+                        f"goes on. Recharges for {CONTACT_COOLDOWN_MS // 60_000} minutes after.")
+    kit = dict(BY_ID["make_campfire"].cost)
+    have = {item: e.inventory.get(item, 0) for item in kit}
+    short = [f"{_plural(n, ITEMS[i].name.lower())} (have {have[i]})" for i, n in kit.items() if have[i] < n]
+    fire_unlock = next((u for u in UNLOCKS.values() if u.ability == "make_campfire"), None)
+    if not e.has_ability("make_campfire"):
+        fire = {"state": "locked", "note": f"Unlock at the anchor ({fire_unlock.cost} ash)" if fire_unlock else "Locked"}
+    elif busy:
+        fire = {"state": "disabled", "note": "Not now"}
+    elif short:
+        fire = {"state": "disabled", "note": "Needs " + ", ".join(short)}
+    elif e.task is not None:
+        fire = {"state": "disabled", "note": "Busy"}
+    else:
+        fire = {"state": "ready", "note": "Ready"}
+    fire.update(name="Make campfire", remaining_ms=0, cooldown_ms=0,
+                hint="Set down a fire here (" + ", ".join(_plural(n, ITEMS[i].name.lower()) for i, n in kit.items())
+                     + "). Stand still beside it to heal as fast as at the anchor camp.")
+    p = e.possession()
+    if p["active"]:
+        possess = {"state": "active", "note": "Possessing", "remaining_ms": p["remaining_ms"], "cooldown_ms": POSSESS_MS}
+    elif busy:
+        possess = {"state": "disabled", "note": "Not now", "remaining_ms": 0, "cooldown_ms": POSSESS_COOLDOWN_MS}
+    elif p["ready_in_ms"]:
+        possess = {"state": "cooldown", "note": "Recharging", "remaining_ms": p["ready_in_ms"],
+                   "cooldown_ms": POSSESS_COOLDOWN_MS}
+    else:
+        possess = {"state": "ready", "note": "Ready", "remaining_ms": 0, "cooldown_ms": POSSESS_COOLDOWN_MS}
+    possess.update(name="Possess", hint=f"Take the avatar's hands for {POSSESS_MS // 1000} seconds: move with WASD, "
+                   f"act with Space and E; it moves and works {POSSESS_SPEED_PERCENT - 100}% faster with you. "
+                   f"Recharges for {POSSESS_COOLDOWN_MS // 1000} seconds after.")
+    return [contact, fire, possess]
+
+
 def _meta_view(e):
-    """Progress that survives death: currencies, unlocks, mastery, Journal controls, boons."""
-    return {"ash": e.ash, "blessing": e.blessing,
+    """Progress that survives death: ash, unlocks, mastery, Journal controls."""
+    return {"ash": e.ash,
             "unlocked": [{"id": u, "name": UNLOCKS[u].name} for u in sorted(e.unlocked)],
             "mastery": dict(e.mastery),
             "knowledge": sorted(e.knowledge), "recipes": sorted(e.recipes),
@@ -169,9 +216,7 @@ def _meta_view(e):
                                      and region.multiplier(ident) > 0]}
                         for ident, level in sorted(e.mastery.items()) if level >= 1],
             "journal_guarantee": e.journal_guarantee,
-            "journal_guarantee_region": e.journal_guarantee_region,
-            "boon": None if e.boon is None else BOONS[e.boon].name,
-            "boon_next": None if e.boon_next is None else BOONS[e.boon_next].name}
+            "journal_guarantee_region": e.journal_guarantee_region}
 
 
 def _weapon_view(expedition):
@@ -232,8 +277,8 @@ class BrowserSession:
     """Input validation is atomic. step(now) allows deterministic lease tests.
 
     With an expedition, the auto-pilot drives the character. Player move/attack
-    input is ignored until the "take_control" skill is unlocked; then input takes
-    over and the auto-pilot resumes MANUAL_HOLD seconds after the last command.
+    input steers only while the avatar is possessed (the Possess skill, an anchor
+    action); possession ends by itself after POSSESS_MS of simulation time.
     Without an expedition the session is the original manual adapter.
     """
     def __init__(self, game, expedition=None, *, start_paused=False):
@@ -248,8 +293,6 @@ class BrowserSession:
         self.command = InputCommand()
         self.paused = start_paused
         self.input_time = float("-inf")
-        self.manual_until = float("-inf")
-        self.active = False
         self.debug = False
         self.detail = False
 
@@ -258,66 +301,46 @@ class BrowserSession:
         """The current life's simulation (a new life replaces the Exploration)."""
         return self.expedition.game if self.expedition is not None else self._game
 
-    def _manual_allowed(self):
-        return self.expedition is None or self.expedition.manual_control
+    @property
+    def active(self):
+        """The player steers: no expedition (plain manual adapter) or a possessed avatar."""
+        return self.expedition is None or self.expedition.possessing
 
-    def _control(self, now):
-        if self.expedition is None:
-            return "manual"
-        if self.active:
-            return "manual"
-        if not self.expedition.manual_control:
-            return "auto"
-        return "manual" if now < self.manual_until else "auto"
+    def _control(self, now=None):
+        return "manual" if self.active else "auto"
 
     def _frame(self, known=(), now=None):
-        control = self._control(time.monotonic() if now is None else now)
-        return snapshot(self.game, known, paused=self.paused, expedition=self.expedition, control=control,
+        return snapshot(self.game, known, paused=self.paused, expedition=self.expedition, control=self._control(),
                         debug=self.debug and self.expedition is not None,
                         detail=self.detail and self.expedition is not None)
 
     def input(self, data, now):
         command, paused, known = validate_input(data)
         with self.lock:
-            if self.expedition is not None and "control" in data:
-                requested = data["control"] == "active"
-                if requested and (self.expedition.anchor_ms is not None or self.expedition.in_prologue):
-                    requested = False
-                if requested != self.active:
-                    self.command = InputCommand()
-                    if requested:
-                        self.expedition.interrupt()
-                    self.active = requested
-                    self.manual_until = float("-inf")
             self.debug = data.get("debug", False)
             self.detail = data.get("detail", False)
             action_error = None
             if "action" in data:
                 if self.expedition is None:
                     raise ValueError("anchor action requires an expedition")
+                was = self.active
                 try:
                     self.expedition.anchor_action(data["action"])
                 except ValueError as exc:   # a refused purchase must not break the connection
                     action_error = str(exc)
-            if not self.active and not self._manual_allowed():
-                command = InputCommand()  # locked skill: the auto-pilot steers
-            if self.expedition is not None and self.expedition.anchor_ms is not None:
-                command = InputCommand()
-                self.active = False
+                if self.active != was:
+                    self.command = InputCommand()   # possession began or ended: start from rest
+            if not self.active:
+                command = InputCommand()   # the auto-pilot steers; keys do nothing
             self.command = InputCommand() if paused else command
             self.paused, self.input_time = paused, now
-            if self.command.move or self.command.attack:
-                if self.expedition is not None and not self.active and now >= self.manual_until:
-                    self.expedition.interrupt()
-                if not self.active:
-                    self.manual_until = now + MANUAL_HOLD
-            if self.active and data.get("interact"):
+            if self.active and self.expedition is not None and data.get("interact"):
                 self.expedition.begin_interaction()
             if self.expedition is None:
                 # Applying an edge at zero duration preserves even brief attack presses.
                 self.game.advance(0, self.command)
-            elif self.active or now < self.manual_until:
-                self.expedition.advance_manual(0, self.command, auto_attack=self.active)
+            elif self.active:
+                self.expedition.advance_manual(0, self.command, auto_attack=True)
             frame = self._frame(known, now)
             if frame.get("expedition") is not None:
                 frame["expedition"]["action_error"] = action_error
@@ -338,19 +361,15 @@ class BrowserSession:
                 self._drive(ms, now, allow_prayer=allow_prayer)
 
     def _drive(self, ms, now, *, allow_prayer):
-        """Auto-pilot unless the player holds control; held input expires after INPUT_LEASE."""
+        """Auto-pilot unless the avatar is possessed; held input expires after INPUT_LEASE."""
         expedition = self.expedition
-        if expedition is not None and (not self.active and now >= self.manual_until
-                                       or expedition.anchor_ms is not None):
-            expedition.advance(ms, allow_prayer=allow_prayer)
+        command = self.command if now - self.input_time <= INPUT_LEASE else InputCommand()
+        if expedition is None:
+            self.game.advance(ms, command)
+        elif expedition.possessing:
+            expedition.advance_manual(ms, command, auto_attack=True)
         else:
-            command = self.command if now - self.input_time <= INPUT_LEASE else InputCommand()
-            if expedition is None:
-                self.game.advance(ms, command)
-                return
-            expedition.advance_manual(ms, command, auto_attack=self.active)
-        if expedition.anchor_ms is not None:
-            self.active = False   # control returns to the auto-pilot at the anchor
+            expedition.advance(ms, allow_prayer=allow_prayer)
 
     def state(self, now=None):
         with self.lock:

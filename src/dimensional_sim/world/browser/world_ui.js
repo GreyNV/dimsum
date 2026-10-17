@@ -18,13 +18,22 @@ export function regionCue(region) {
   return `Picked over this life: fewer ${list} around here.`;   // replaces the flavour line (panel height)
 }
 
+/** m:ss for a cooldown. */
+export const clockText = ms => {
+  const s = Math.ceil(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
 export function skillSlots(expedition) {
   const slots = expedition?.skill_slots || [];
   return Array.from({length: 3}, (_, index) => {
     const slot = slots[index] || {name: 'Empty', state: 'locked'};
     const state = ['ready', 'active', 'cooldown', 'disabled', 'locked'].includes(slot.state)
       ? slot.state : 'disabled';
-    return {name: slot.name || 'Empty', state, usable: state === 'ready'};
+    const remaining = Math.max(0, slot.remaining_ms || 0), total = Math.max(0, slot.cooldown_ms || 0);
+    const note = state === 'cooldown' ? `Ready in ${clockText(remaining)}` : slot.note || '';
+    return {name: slot.name || 'Empty', state, usable: state === 'ready', note, hint: slot.hint || '',
+      charge: state === 'cooldown' && total ? 1 - remaining / total : 1};
   });
 }
 

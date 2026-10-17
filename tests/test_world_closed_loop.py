@@ -10,7 +10,7 @@ from dimensional_sim.world import economy
 from dimensional_sim.world.actions import Context, bucket, describe_bucket, explain
 from dimensional_sim.world.autopilot import SCHEMA_VERSION, saves, Expedition
 from camp_fixture import to_camp
-from dimensional_sim.world.catalog import (ACTIONS, BOONS, BY_ID, ENEMIES, ITEMS, REGIONS, UNLOCKS, ActionDef,
+from dimensional_sim.world.catalog import (ACTIONS, BY_ID, ENEMIES, ITEMS, REGIONS, UNLOCKS, ActionDef,
                                            validate_catalog)
 from dimensional_sim.world.encounters import chunk_spots, forced_spot
 from dimensional_sim.world.equipment import equip_item
@@ -21,6 +21,7 @@ from dimensional_sim.world.seeds import canonical_json
 from dimensional_sim.world.session import BrowserSession, validate_input
 from dimensional_sim.world.tuning import PITY_CHUNKS
 from dimensional_sim.world.web import new_world
+from save_fixture import v17
 
 
 def boar_hit(e, key):
@@ -63,8 +64,7 @@ class CatalogTests(unittest.TestCase):
                           "gear": any(a.effect == item.id for a in ACTIONS),
                           "treasure": item.ash_value >= 5}[item.kind]
                 self.assertTrue(in_run, "every item has an in-run use (eat, craft, wear) or is a treasure worth carrying")
-        self.assertEqual({u.currency for u in UNLOCKS.values()} | {"blessing", "ash"},
-                         {"ash", "blessing"}, "ash and blessing both have sinks")
+        self.assertEqual({u.currency for u in UNLOCKS.values() if u.currency}, {"ash"}, "ash is the only currency")
 
     def test_invalid_definitions_are_rejected(self):
         good = BY_ID["bramble_berries"]
@@ -123,8 +123,8 @@ class ActionBucketTests(unittest.TestCase):
         self.assertFalse(worn["eligible"], "never swap worn gear for a craft that does not consume it")
         self.assertIn("body slot already holds hide wrap", worn["reasons"][0])
         after = Context(placement="self", trigger="after_location", visible=False)
-        self.assertNotIn("pray", [a.id for a, _ in bucket(after)])
-        self.assertIn("pray", [a.id for a, _ in bucket(replace(after, visible=True))])
+        self.assertEqual([a.id for a, _ in bucket(after)], [a.id for a, _ in bucket(replace(after, visible=True))],
+                         "no self action waits for live play any more (the random prayer is gone)")
 
     def test_locked_actions_never_spawn_and_spots_are_deterministic(self):
         world = new_world(7)
@@ -211,8 +211,8 @@ class CraftingTests(unittest.TestCase):
         e = past_prologue(fresh())
         to_camp(e)
         e.inventory = {"stick": 2, "bramble_thorn": 1}
-        self.assertIsNone(e._need_action(), "snares need the unlock")
-        e.unlocked.add("snares")
+        self.assertIsNone(e._need_action(), "snares need the recipe")
+        e.life_recipes.add("snare")
         e.hunger = 90 * P
         self.assertIsNone(e._need_action(), "not hungry: keep the materials")
         e.hunger = 30 * P
@@ -245,24 +245,28 @@ class EconomyTests(unittest.TestCase):
         e.inventory = {"stick": 3, "boar_hide": 1}
         at_anchor(e)
         self.assertEqual(e.ash, 7)
+        e.life_recipes.add("hide_wrap")   # found this life
         with self.assertRaises(ValueError) as err:
-            e.anchor_action({"type": "unlock", "id": "climbing"})
-        self.assertIn("needs 15 ash", str(err.exception))
-        e.ash, e.blessing = 100, 5
-        e.anchor_action({"type": "unlock", "id": "return_anchor"})
-        e.anchor_action({"type": "unlock", "id": "climbing"})
-        e.anchor_action({"type": "boon", "id": "bountiful_path"})
+            e.anchor_action({"type": "keep", "id": "hide_wrap"})
+        self.assertIn("needs 20 ash", str(err.exception))
         with self.assertRaises(ValueError):
-            e.anchor_action({"type": "boon", "id": "iron_skin"})  # one boon per life
-        self.assertEqual((e.ash, e.blessing, e.mastery), (75, 3, {}))
+            e.anchor_action({"type": "unlock", "id": "climbing"})   # opened by levels, never sold
+        e.ash = 100
+        e.anchor_action({"type": "unlock", "id": "campfire"})
+        e.anchor_action({"type": "keep", "id": "hide_wrap"})
+        with self.assertRaises(ValueError):
+            e.anchor_action({"type": "unlock", "id": "campfire"})   # bought once
+        self.assertEqual((e.ash, e.mastery), (55, {}))
+        e.unlocked.add("climbing")
         restored = Expedition.from_dict(json.loads(dump(e)))
         self.assertEqual(dump(restored), dump(e))
         e.anchor_action({"type": "begin_life"})
-        self.assertEqual((e.boon, e.boon_next, e.life), ("bountiful_path", None, 2))
-        self.assertEqual(e.ash, 75)
+        self.assertEqual((e.life, e.ash), (2, 55))
+        self.assertTrue(e.has_ability("make_campfire"))
+        self.assertEqual((e.recipes, e.life_recipes), ({"hide_wrap"}, set()), "kept for good; found ones reset")
         self.assertEqual(e.log[-1]["type"], "rebirth")
         low, high = BY_ID["bramble_berries"].window
-        self.assertTrue(low + 1 <= e.budget["bramble_berries"] <= high + 1)
+        self.assertTrue(low <= e.budget["bramble_berries"] <= high)
         ctx = e.spot_context(ChunkKey("forest", 0, 0))
         self.assertTrue(explain("gnarled_tree", ctx)["eligible"], "the unlock is in this life's bucket")
 
@@ -279,27 +283,38 @@ class EconomyTests(unittest.TestCase):
     def test_shop_rows_explain_requirements(self):
         e = fresh()
         rows = {(r["kind"], r["id"]): r for r in economy.offers(e)}
-        self.assertIn("requires Climbing", rows[("unlock", "mushroom_lore")]["reasons"])
-        self.assertEqual(rows[("unlock", "return_anchor")]["cost"], 10)
+        self.assertNotIn(("unlock", "mushroom_lore"), rows, "level unlocks are not sold")
+        self.assertEqual(rows[("unlock", "campfire")]["cost"], 25)
+        e.life_recipes.add("spear")
+        rows = {(r["kind"], r["id"]): r for r in economy.offers(e)}
+        self.assertEqual(rows[("keep", "spear")]["reasons"], ["needs 35 ash"])
         self.assertFalse(any(kind == "mastery" for kind, _ in rows))
-        self.assertEqual(len([r for r in rows if r[0] == "boon"]), len(BOONS))
+        self.assertEqual({kind for kind, _ in rows} - {"unlock", "keep", "bind"}, set())
 
-    def test_lifetime_conversion_and_manual_return_survive_reload(self):
+    def test_lifetime_conversion_and_mid_life_contact_survive_reload(self):
         e = past_prologue(fresh())
         e.inventory = {"stick": 5}
         at_anchor(e)
         self.assertEqual((e.ash, e.converted["stick"]), (5, 5))
-        e.ash = 10
-        e.anchor_action({"type": "unlock", "id": "return_anchor"})
         e.anchor_action({"type": "begin_life"})
         e.inventory = {"stick": 4}
-        e.anchor_action({"type": "return"})
-        self.assertEqual((e.ash, e.converted["stick"]), (2, 9))
+        e.ash = 30
+        e.anchor_action({"type": "contact"})   # no death: the shop opens and the world waits
+        clock, here = e.total_ms, e._player()
+        e.advance(60_000)
+        self.assertEqual((e.total_ms, e._player(), e.inventory), (clock, here, {"stick": 4}))
+        e.anchor_action({"type": "unlock", "id": "campfire"})
+        with self.assertRaisesRegex(ValueError, "anchor space"):
+            e.anchor_action({"type": "begin_life"})   # a contact never ends the life
+        e.anchor_action({"type": "resume"})
+        self.assertEqual((e.ash, e.life, e.converted["stick"]), (5, 2, 5))
         restored = Expedition.from_dict(json.loads(dump(e)))
         self.assertEqual(dump(restored), dump(e))
-        restored.anchor_action({"type": "begin_life"})
-        with self.assertRaisesRegex(ValueError, "cooling down"):
-            restored.anchor_action({"type": "return"})
+        with self.assertRaisesRegex(ValueError, "recharging"):
+            restored.anchor_action({"type": "contact"})
+        restored.advance(ap.CONTACT_COOLDOWN_MS)
+        restored.anchor_action({"type": "contact"})
+        self.assertTrue(restored.contact)
 
     def test_mastery_guarantee_uses_one_chosen_region_and_survives_reload(self):
         e = past_prologue(fresh())
@@ -327,9 +342,9 @@ class EconomyTests(unittest.TestCase):
         self.assertEqual(dump(Expedition.from_dict(json.loads(dump(e)))), dump(e))
 
     def test_schema_nine_combines_prestige_balances(self):
-        data = fresh().to_dict()
+        data = v17(fresh().to_dict())
         self.assertTrue(data["spot_plans"])
-        for key in (*saves.V13_FIELDS, *saves.V14_FIELDS, *saves.V15_FIELDS, *saves.V16_FIELDS):
+        for key in (*saves.V13_FIELDS, *saves.V14_FIELDS, *saves.V15_FIELDS, *saves.V16_FIELDS, *saves.V17_FIELDS):
             del data[key]
         data["schema_version"] = 9
         data["encounters"] = "encounters-v8"
@@ -346,8 +361,8 @@ class EconomyTests(unittest.TestCase):
     def test_schema_ten_and_eleven_saves_reroll_spots_and_drop_removed_content(self):
         e = fresh()
         e.recipes.add("padded_jerkin")
-        gone = (*saves.V13_FIELDS, *saves.V14_FIELDS, *saves.V15_FIELDS, *saves.V16_FIELDS)
-        data = {k: v for k, v in e.to_dict().items() if k not in gone}
+        gone = (*saves.V13_FIELDS, *saves.V14_FIELDS, *saves.V15_FIELDS, *saves.V16_FIELDS, *saves.V17_FIELDS)
+        data = {k: v for k, v in v17(e.to_dict()).items() if k not in gone}
         self.assertTrue(data["spot_plans"])
         old = json.loads(json.dumps({**data, "recipes": ["walking_staff", "padded_jerkin"],
                                      "inventory": [["walking_staff", 1], ["stick", 2]],
@@ -399,7 +414,7 @@ class ObservabilityTests(unittest.TestCase):
             validate_input({**body, "action": {"type": "steal"}})
         at_anchor(e)
         refused = session.input({**body, "action": {"type": "unlock", "id": "road_lore"}}, now=3)
-        self.assertIn("requires Meditation", refused["expedition"]["action_error"])
+        self.assertIn("unknown anchor purchase", refused["expedition"]["action_error"])
         self.assertIsNotNone(refused["expedition"]["shop"])
         self.assertTrue(refused["expedition"]["anchor_space"]["first_return"])
         validate_input({**body, "action": {"type": "unlock", "id": "climbing"}})

@@ -22,6 +22,7 @@ DIAGONALS = {"northeast": ("north", "east"), "southeast": ("south", "east"),
 MOVE_DIRECTIONS = DIRECTIONS + tuple(DIAGONALS)
 DIAGONAL_PERCENT = 141
 MAX_LOAD_PERCENT = 400   # carry load may stretch the movement interval up to 4x (owners cap it lower)
+MIN_LOAD_PERCENT = 50    # a speed boost (possession) may shorten it to half
 REVEAL_RADIUS = 5
 from .seeds import derive_seed
 
@@ -164,7 +165,7 @@ class Exploration:
         integer(attack_damage, "attack damage", 1, 1000000)
         if not hasattr(self, "load_percent"):
             self.load_percent = 100
-        integer(self.load_percent, "carry load percent", 100, MAX_LOAD_PERCENT)
+        integer(self.load_percent, "carry load percent", MIN_LOAD_PERCENT, MAX_LOAD_PERCENT)
         validate_animations(animations)
         self._movement_interval_ms = movement_interval_ms
         self._animation_rate_percent = animation_rate_percent

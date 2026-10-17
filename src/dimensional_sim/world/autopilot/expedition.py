@@ -14,9 +14,9 @@ from ..tuning import PITY_CHUNKS
 from .camp import CampMixin
 from .combat import CombatMixin
 from .ecology import EcologyMixin
-from .constants import (MAX_EVENTS_PER_ADVANCE, MONSTER_STEP_MS, PAUSE_BETWEEN_PUNCHES_MS,
-                        PROLOGUE_MS, PROLOGUE_NEXT, REST_MS, RETREAT_BELOW, SELF_ACTIONS, SKILLS, STAT_KEYS,
-                        VITAL_MAX, attribute_table, ceil_div)
+from .constants import (ANCHOR_COUNTDOWN_MS, MAX_EVENTS_PER_ADVANCE, MONSTER_STEP_MS, PAUSE_BETWEEN_PUNCHES_MS,
+                        POSSESS_COOLDOWN_MS, POSSESS_MS, POSSESS_SPEED_PERCENT, PROLOGUE_MS, PROLOGUE_NEXT,
+                        REST_MS, RETREAT_BELOW, SELF_ACTIONS, STAT_KEYS, VITAL_MAX, attribute_table, ceil_div)
 from .lives import LivesMixin
 from .navigation import NavigationMixin
 from .outcomes import OutcomesMixin
@@ -29,13 +29,12 @@ from .vitals import VitalsMixin
 
 class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, OutcomesMixin, VitalsMixin,
                  LivesMixin, SavesMixin, PresentationMixin, CampMixin, EcologyMixin):
-    def __init__(self, game, *, skills=(), fresh=True):
-        """fresh=True starts a new expedition (prologue first); loaders pass False."""
+    def __init__(self, game, *, fresh=True, opening=False):
+        """fresh=True starts a new expedition (prologue first); loaders pass False.
+        opening=True (new games in the browser) starts at the anchor: the player meets
+        it and its shop before the first life, then the prologue plays."""
         self.game = game
         self.dimension = game.player.chunk.dimension
-        self.skills = set()
-        for skill in skills:
-            self.unlock(skill)
         # Persistent across lives.
         self.dimensional = attribute_table()
         self.life = 1
@@ -44,20 +43,22 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.sequence = 0
         self.decisions = 0
         self.best_depth = 0
-        self.blessing = 0
         self.ash = 0
         self.converted = {}       # item id -> lifetime count converted into ash
-        self.unlocked = set()      # UnlockDef ids bought with ash/blessing
+        self.unlocked = set()      # UnlockDef ids: opened by dimensional level or bought with ash
         self.mastery = {}          # action id -> level earned from lifetime completions
         self.journal_guarantee = None  # one selected mastered encounter, placed once per life
         self.journal_guarantee_region = None
-        self.return_ready_ms = 0  # persistent cooldown deadline in simulation time
+        self.contact_ready_ms = 0  # contact-the-anchor cooldown deadline (simulation time)
+        self.contact = False       # the anchor is contacted mid-life: the world waits (not saved)
+        self.possess_end_ms = None # possession (manual control) ends at this simulation time
+        self.possess_ready_ms = 0  # possession recharges until this simulation time
+        self.opening = False       # a new expedition waiting at the anchor before its first life
         self.knowledge = set()     # discoveries persist across lives
-        self.recipes = set()       # learned recipes persist across lives
+        self.recipes = set()       # recipes kept with ash: known in every later life
+        self.life_recipes = set()  # recipes found this life (lost at rebirth unless kept)
         self.journal_disabled = set()
         self.journal_favor = {}
-        self.boon_next = None      # BoonDef id for the next life
-        self.boon = None           # BoonDef id active this life
         self.journal = new_journal()   # lifetime counts (journal.py); persists across lives
         self.bound_buildings = set()   # BuildingDef ids made permanent with ash
         self.chest = {}                # storage chest contents (item -> count); kept only if bound
@@ -69,11 +70,17 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         # No pop-up opening: the prologue tells the story in the world itself.
         self.report = {"seq": 0, "life": 0, "clock_ms": 0, "title": "", "lines": []}
         self._clear_caches()
+        self.step_cell = None      # manual control: last cell checked for a spot underfoot (not saved)
+        self.auto_hold = None      # manual control: the held key that stepped onto a running spot (not saved)
         self.strikes = {}          # presentation only, not saved: boar attacks landed per target id
         self._new_life_state()
         self.anchor = self._anchor()
         self.elder = self._elder_cell()
-        if fresh:
+        if fresh and opening:
+            self.opening = True
+            self.anchor_ms = ANCHOR_COUNTDOWN_MS
+            self.anchor_wait = True
+        elif fresh:
             self._start_task("awaken", PROLOGUE_MS["awaken"])
             self._screen()
 
@@ -88,7 +95,6 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.hunger = VITAL_MAX
         self.health = VITAL_MAX
         self.food_cooldown_ms = 0
-        self.prayers_this_life = 0
         self.monster_ms = 0
         self.cause = None
         self.depth = 0
@@ -101,20 +107,56 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.buildings = set(self.bound_buildings)   # what stands at the camp this life
         self.pressure = {}     # "dimension:cx:cy:ecology" -> harvests this life (autopilot/ecology.py)
         self.shimmer = set()   # "dimension:cx:cy" region cells where rare spots roll more often this life
+        self.life_recipes = set()   # recipes found this life: kept with ash at the anchor, or lost
         self.campfire = None   # {"dimension", "x", "y", "fire_x", "fire_y"}: this life's campfire (global cells)
         if not any(BUILDINGS[b].function == "storage" for b in self.bound_buildings):
             self.chest = {}   # an unbound chest does not outlast its life
         self._reset_spawns()
 
     # ----- public state -------------------------------------------------
-    def unlock(self, skill):
-        if skill not in SKILLS:
-            raise ValueError("unknown skill")
-        self.skills.add(skill)
+    @property
+    def possessing(self):
+        """The player's god is steering the avatar (manual control)."""
+        return self.possess_end_ms is not None
 
     @property
     def manual_control(self):
-        return "take_control" in self.skills
+        return self.possessing
+
+    def possess_block(self):
+        """Why possession cannot start now, or None."""
+        if self.anchor_ms is not None or self.contact:
+            return "Not at the anchor"
+        if self.in_prologue:
+            return "Not yet"
+        if self.possessing:
+            return "Already possessed"
+        if self.total_ms < self.possess_ready_ms:
+            return "Recharging"
+        return None
+
+    def possess(self):
+        """Take the avatar's hands for POSSESS_MS of simulation time."""
+        reason = self.possess_block()
+        if reason is not None:
+            raise ValueError(f"cannot possess: {reason.lower()}")
+        self.interrupt()
+        self.possess_end_ms = self.total_ms + POSSESS_MS
+        self._entry("possess", "You reach into the avatar and take its hands. It moves quicker with you.")
+
+    def release(self):
+        """End possession early; the auto-pilot takes over and possession recharges."""
+        if not self.possessing:
+            raise ValueError("the avatar is not possessed")
+        self._end_possession()
+
+    def _end_possession(self):
+        self.possess_end_ms = None
+        self.possess_ready_ms = self.total_ms + POSSESS_COOLDOWN_MS
+        self.auto_hold = None
+        self.goal = None
+        if self.task and self.task["type"] in ("pause", "rest"):
+            self.task = None
 
     def interrupt(self):
         """Hand over steering without erasing an already-started encounter."""
@@ -122,8 +164,9 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
             self.task = None
         self.goal = None
 
-    def begin_interaction(self):
-        """Use the nearest admitted opportunity beside the player in either control mode."""
+    def begin_interaction(self, reach=1):
+        """Use the nearest admitted opportunity beside the player (`reach` steps; 0 = the cell
+        the player stands on) in either control mode."""
         if self.anchor_ms is not None or self.in_prologue or self.task:
             return False
         px, py = self._player()
@@ -134,7 +177,7 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
                     continue
                 sx, sy = self._global(spot.chunk, spot.x, spot.y)
                 distance = abs(px - sx) + abs(py - sy)
-                if distance <= 1:
+                if distance <= reach:
                     choices.append((distance, spot.id, spot))
         if not choices:
             return False
@@ -149,7 +192,8 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         return bool(self.task) and self.task["type"] in PROLOGUE_MS
 
     def speed(self, attribute):
-        return speed_permille(self.regular[attribute], self.dimensional[attribute])
+        speed = speed_permille(self.regular[attribute], self.dimensional[attribute])
+        return speed * POSSESS_SPEED_PERCENT // 100 if self.possessing else speed
 
     # ----- tasks ---------------------------------------------------------
     def _start_task(self, kind, duration_ms, spot=None):
@@ -207,6 +251,8 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
     def _step_cap(self, remaining):
         """Longest step from now that crosses no vitals, monster or lead event."""
         cap = min(remaining, self._vitals_limit(), MONSTER_STEP_MS - self.monster_ms)
+        if self.possessing:
+            cap = min(cap, self.possess_end_ms - self.total_ms)
         if self.leads:
             cap = min(cap, min(lead["expires_ms"] - self.total_ms for lead in self.leads))
         return cap
@@ -214,31 +260,51 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
     # ----- manual control ------------------------------------------------
     def _abandon_for(self, command):
         """Walking away abandons a running task (unrewarded; the spot stays usable).
-        Without this, a move during a task froze the player for the whole task."""
-        if command.move and self.task:
+        Without this, a move during a task froze the player for the whole task. The key that
+        carried the player onto a spot (auto_hold) does not count until it is released or
+        another direction is pressed: stepping onto something starts it, moving again leaves."""
+        if self.auto_hold is not None and command.move != self.auto_hold:
+            self.auto_hold = None
+        if command.move and self.task and self.auto_hold is None:
             self.task = None
             self.goal = None
+
+    def _step_onto(self, command):
+        """Manual control: arriving on a spot's cell starts it (once per arrival)."""
+        cell = self._player()
+        if cell == self.step_cell:
+            return
+        self.step_cell = cell
+        if self.task is None and self.begin_interaction(reach=0):
+            self.auto_hold = command.move
 
     def advance_manual(self, milliseconds, command=InputCommand(), *, auto_attack=False):
         """Player chooses movement; expedition still owns time, spots, vitals and enemies."""
         integer(milliseconds, "elapsed milliseconds", 0)
-        if self.anchor_ms is not None or self.in_prologue:
+        if self.contact:
+            return   # the world waits while the anchor is contacted
+        if self.anchor_ms is not None or self.in_prologue or not self.possessing:
             return self.advance(milliseconds)
         self.game.load_percent = self.load_percent()
         if milliseconds == 0:
             self._settle()
             self._abandon_for(command)
             self._arm()
-            self.game.advance(0, self._manual_combat_command(command, auto_attack))
+            # no steps while working (a held key that carried the player onto a spot keeps it)
+            self.game.advance(0, InputCommand() if self.task else self._manual_combat_command(command, auto_attack))
+            if not self.task:
+                self._step_onto(command)
             return
         remaining = milliseconds
         while remaining:
+            if self.possessing and self.total_ms >= self.possess_end_ms:
+                self._end_possession()
+            if self.anchor_ms is not None or not self.possessing:
+                self.advance(remaining)   # death or the end of possession: the auto-pilot carries on
+                return
             self._expire_leads()
             if self._settle():
                 continue
-            if self.anchor_ms is not None:
-                self.advance(remaining)
-                return
             self._abandon_for(command)
             if (self.task is None and not command.move and not command.attack
                     and self.at_rest_place() and self._wants_rest()):
@@ -248,12 +314,16 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
             if task:
                 cap = min(cap, task["duration_ms"] - task["elapsed_ms"])
             self._run(cap, InputCommand() if task else self._manual_combat_command(command, auto_attack))
+            if not task:
+                self._step_onto(command)
             remaining -= cap
             if task:
                 task["elapsed_ms"] += cap
                 if task["elapsed_ms"] == task["duration_ms"]:
                     self.task = None
                     self._finish_manual_task(task)
+        if self.possessing and self.total_ms >= self.possess_end_ms:
+            self._end_possession()
         self._settle()
 
     def _finish_manual_task(self, task):
@@ -280,9 +350,13 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         """Let the auto-pilot live for `milliseconds` (partition-independent).
         allow_prayer=False is offline catch-up: visible-only actions never start."""
         integer(milliseconds, "elapsed milliseconds", 0)
-        self.game.load_percent = self.load_percent()
         if type(allow_prayer) is not bool:
             raise ValueError("allow_prayer must be boolean")
+        if self.contact:
+            return   # the world waits while the anchor is contacted
+        if self.possessing:
+            self._end_possession()   # the auto-pilot drives: nobody holds the avatar (e.g. offline)
+        self.game.load_percent = self.load_percent()
         saved_press = self.game.step_on_press
         self.game.step_on_press = False  # auto-pilot steps on interval boundaries only
         try:
@@ -381,7 +455,7 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
             if stage:
                 self._start_task(stage, PROLOGUE_MS[stage])
             else:
-                self._entry("lore", "The old man walks off down the road. Explore - and don't forget to pray.")
+                self._entry("lore", "The old man walks off down the road. The forest is yours to explore.")
         elif kind == "rest":
             if self._wants_rest() and self.at_rest_place():
                 self._start_task("rest", REST_MS)   # keep resting

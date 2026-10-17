@@ -2,7 +2,7 @@
 
 Since 2026-10-12 every piece of world content is a catalog entry in
 `src/dimensional_sim/world/catalog.py`. The engine (auto-pilot, combat, stats pages,
-client) reads the catalog and never names an enemy, item, boon, unlock or biome.
+client) reads the catalog and never names an enemy, item, unlock or biome.
 If an idea needs a new *kind* of rule, add a field or an effect stat once; after that,
 content using it is data only.
 
@@ -13,8 +13,10 @@ content using it is data only.
 | Biomes | `BIOMES` (`BiomeDef`) | `autopilot/combat.py` | danger growth per ring (`danger_num/danger_den`), enemy HP per ring, ring cap |
 | Enemies | `ENEMIES` (`EnemyDef`) + a fight `ActionDef` with `enemy=` | `autopilot/combat.py`, `session.py` | bite damage, aggro radius, death cause and its report text, sprite |
 | Site conditions | `SITE_CONDITIONS` (`SiteConditionDef`) | `sites.condition_for`, `encounters.chunk_spots`, the auto-pilot | how a landmark is this life: encounter count, an added den or bramble patch, slower work, no bonus drops |
-| Effects | `Effect(stat, amount)` on `ItemDef.effects` (gear) and `BoonDef.effects` | `effects.py` | `punch_damage` (add), `enemy_hit_percent` (multiply), `food_window_bonus` (add), `wood_yield` (add) |
+| Effects | `Effect(stat, amount)` on `ItemDef.effects` (gear) | `effects.py` | `punch_damage` (add), `enemy_hit_percent` (multiply), `food_window_bonus` (add), `wood_yield` (add) |
 | Abilities | `UnlockDef.ability` (one of `ABILITIES`) | `Expedition.has_ability` | engine capabilities that are not actions, e.g. `return_to_anchor` |
+| Unlocks | `UNLOCKS` (`UnlockDef`: `level=(attribute, n)` or `currency`+`cost`) | `lives._grant_level_unlocks`, `economy.offers` | level unlocks open by permanent dimensional level and are never sold; priced ones are abilities and favours |
+| Recipes | `ActionDef.recipe`, `RECIPE_KEEP_COST`, `RECIPE_NAMES`, recipe outcomes on actions | `outcomes.py`, `economy.offers` (keep) | a found recipe lasts the life (`life_recipes`); ash keeps it for good (`recipes`) |
 | Styles | `CATEGORY_STYLES` (`CategoryStyle`), `ActionDef.color`, `ItemDef.color` | frames -> client | activity verb, body pose, work-mark color, completion seal, item text color |
 | Rarity | `RARITY` (`RarityDef`), `RARITY_ORDER`, `ActionDef.rarity`, `ItemDef.rarity` | `drops.py`, `actions.spot_tiers`, `encounters.py` | cascading tier rolls for encounter spots and bonus drops; spot sparkle and reward reveal color |
 | Drop tables | `DROP_TABLES` (`DropTable`, `Pick`), `ActionDef.drops` | `drops.roll_table` via `encounters.roll_loot` | one bonus roll per completion on top of fixed `loot`; tables can nest |
@@ -22,7 +24,7 @@ content using it is data only.
 | Buildings | `BUILDINGS` (`BuildingDef`), build `ActionDef(category="build", builds=...)`, `ActionDef.workplace` | `autopilot/camp.py`, `actions.context_reasons`, `economy.offers` (bind) | structures at the anchor camp: built from carried resources, standing for the life, permanent once bound with ash |
 | Art keys | `ActionDef.art` (default: the action id), `EnemyDef.sprite` | client `place_art.js SPOTS`, `combat_art.js ENEMY_SPRITES` | which sprite is drawn |
 
-Effects apply gear in slot order (`EQUIPMENT_SLOTS`), then the life's boon. Percent
+Effects apply gear in slot order (`EQUIPMENT_SLOTS`). Percent
 stats floor after each source, so the order is part of the balance.
 
 ## Encounters: things, interactions, outcomes
@@ -98,8 +100,8 @@ once against the per-mille `SiteDef.weights` of its region, so sites are rare (a
   | Abandoned camp | Old Road 350, Deep Woods 150, Bramble 150, Glade 100 | 2 | scavenging | packs, firepit, bedroll (padded jerkin recipe) |
   | Fallen watchtower | Old Road 300, Deep Woods 150 | 3 | road_lore | rubble, stair, armory (studded wrap recipe), warning marks |
   | Logging camp | Deep Woods 200, Old Road 100 | 2 | scavenging | stacked logs (sticks 2-4), tool shed (rope, nails, traveller cache), felled oak (eggs) |
-  | Hunter's cabin | Bramble 250, Deep Woods 150 | 3 | snares | drying racks (boar hides, rope), snare line (hare, thorns), trophy wall (`hunter_trophies`) |
-  | Ruined shrine (rare) | Glade 250, Deep Woods 100 | 4 | shrine_path / meditation | broken altar (+1 blessing), offering bowls (`shrine_offerings`), carved pillars (Int) |
+  | Hunter's cabin | Bramble 250, Deep Woods 150 | 3 | snares (perception 3) | drying racks (boar hides, rope), snare line (hare, thorns), trophy wall (`hunter_trophies`) |
+  | Ruined shrine (rare) | Glade 250, Deep Woods 100 | 4 | shrine_path / meditation | broken altar (Willpower), offering bowls (`shrine_offerings`), carved pillars (Int) |
   | Burial mound (rare) | Bramble 150, Deep Woods 100, Old Road 50 | 5 | road_lore | grave goods (`barrow_hoard`), ring of stones (heal 10), bone pile (tusk 30%) |
 
 - **Drops.** Site actions use the normal `loot` and `drops`. Camps give cloth scraps and
@@ -214,7 +216,7 @@ pale wisp (ruined shrines, drains hunger).
 
 ## Rare phenomena
 
-A few small impossible things in the first biome, never currency (no loot, drops or blessing).
+A few small impossible things in the first biome, never currency (no loot or drops).
 
 | phenomenon | where | what it does |
 |---|---|---|
@@ -339,7 +341,7 @@ tier's pool and raises the tier's odds by its weight. Bump `ENCOUNTER_VERSION` (
 2. `ACTIONS`: its encounters with `placement="site", site=<id>` and sprites in `place_art.js SPOTS`.
 3. Bump `encounters.ENCOUNTER_VERSION` (spot rolls change).
 
-**A new boon**: `BoonDef(id, name, description, cost, (Effect(...),))`.
+**A new ash skill**: `UnlockDef(id, name, description, "ash", cost, ability=...)` plus an engine check of the ability (catalog.ABILITIES).
 
 **A new spot action**: an `ActionDef` with a category (style comes from `CATEGORY_STYLES`),
 then a sprite under its id (or `art=`) in `place_art.js SPOTS`. Missing art shows a "?"

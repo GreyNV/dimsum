@@ -7,8 +7,9 @@ const stat = name => ({name, level: 2, xp: 250, into: 40, next: 130, dim_level: 
   speed: 1210, speed_regular_only: 1200, speed_dimensional_only: 1010, life_gain: 50});
 const detail = {
   character: {life: 3, depth: 2, best_depth: 5, frontier: 3, health: 80.5, hunger: 41, punch_damage: 2, gear: ['Walking staff'],
-    boon: null, boon_next: 'Iron skin', threats: [{id: 'bramble_boar', name: 'Bramble boar', hp: 6, hit_at_frontier: 20.1, fight_cost_at_frontier: 40.2}], hunger_per_minute: 30,
-    regen_per_minute: 12, rest_regen_per_minute: 60, inventory_slots: [3, 12], currencies: {ash: 2, blessing: 1}, unlocked: ['Climbing'],
+    threats: [{id: 'bramble_boar', name: 'Bramble boar', hp: 6, hit_at_frontier: 20.1, fight_cost_at_frontier: 40.2}], hunger_per_minute: 30,
+    regen_per_minute: 12, rest_regen_per_minute: 60, inventory_slots: [3, 12], currencies: {ash: 2}, unlocked: ['Climbing'],
+    openings: [{name: 'Snare lines', description: 'Hunter cabins.', attribute: 'perception', level: 3, have: 2, open: false}],
     camp: {buildings: [{id: 'crafting_station', name: 'Crafting station', bound: true}], chest: [{item: 'stick', name: 'Stick', count: 7}], at_camp: false},
     load: {percent: 118, carried: 28, free: 10, per_item: 1, max: 60, relief_permille: 1000}},
   stats: ['strength', 'endurance', 'agility', 'intelligence', 'perception', 'willpower'].map(stat),
@@ -24,7 +25,7 @@ const detail = {
       {item: 'Boar tusk', min: 1, max: 1, chance: 14.7, roll: 'Uncommon', color: '#efe2c4'}]}]},
   journal: {actions: [['Bramble berries', 'forage', 12], ['Fallen branches', 'gather', 3]], items: [['Wild berries', 30]],
     deaths: {starvation: 2}, best_life_min: 7.5, lives: 3, best_depth: 5,
-    knowledge: ['deer_sign'], recipes: [], disabled: [], favor: {}, leads: [],
+    knowledge: ['deer_sign'], recipes: [], life_recipes: ['Snare'], disabled: [], favor: {}, leads: [],
     encounters: [
       {id: 'bramble_berries', name: 'Bramble berries', interaction: 'Picking berries', rarity: 'common', placement: 'spot', level: 3, done: 120, next: null,
         regions: [{id: 'old_road', name: 'The Old Road'}, {id: 'still_glade', name: 'Still Glade'}], current_share_permille: 127,
@@ -151,4 +152,11 @@ test('collapse state: defaults per screen, stored values win, junk ignored', () 
   assert.deepEqual(loadCollapsed(null, false), defaultCollapsed(false));
   const s = toggleCollapsed(defaultCollapsed(false), 'map');
   assert.equal(s.map, true); assert.equal(toggleCollapsed(s, 'nope'), s);
+});
+
+test('stats: what opens as you grow; journal: found recipes', () => {
+  const open = pageModel('stats', state).sections.find(x => x.title === 'What opens as you grow');
+  assert.ok(open && JSON.stringify(open).includes('Snare lines'));
+  const j = JSON.stringify(pageModel('journal', state, null, 'encounters'));
+  assert.ok(j.includes('Found this life') && j.includes('Snare'), 'found recipes are listed');
 });

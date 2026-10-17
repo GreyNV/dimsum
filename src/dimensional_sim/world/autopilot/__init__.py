@@ -30,19 +30,22 @@ rolls how many of it may exist at once around the avatar (resident chunks). When
 chunk first becomes resident its spots and asset-spawned boars are screened: any
 beyond the cap never appear this life. Completing or leaving one frees a slot for
 new ground. Food is scarce on purpose. Rare boars pursue and interrupt work;
-quiet thoughts often follow locations. Visible play can rarely start a timed prayer
-after completing a location, granting one persistent blessing only when it ends.
+quiet thoughts often follow locations.
 
 Closed loop (docs/design/GAME_LOOP.md): spots come from the action bucket of
 known actions (actions.py) in the chunk's region (regions.py). Food and enemy pity
 forces a spot of a starved category after a few empty chunks. Crafting (self
 actions) turns materials into gear or food. At death, items can be offered for
-dimensional ash automatically. Ash buys unlocks (new actions), repeated actions
-earn Journal mastery, and blessing buys the shrine unlock or a next-life boon
-(economy.py).
+dimensional ash automatically. Actions open by dimensional level; ash keeps recipes,
+binds camp buildings and buys skills such as the campfire (economy.py). Repeated
+actions earn Journal mastery.
 
-Manual control is the locked skill "take_control"; adapters must ignore player
-movement/attack input until it is unlocked.
+The anchor: a new expedition opens there (opening=True), every death returns there,
+and the player can contact it mid-life (contact: the world waits, the shop opens, the
+life resumes). Manual control is possession: for POSSESS_MS the player's god steers
+the avatar (moving and actions POSSESS_SPEED_PERCENT faster), then the auto-pilot takes
+back over and possession recharges for POSSESS_COOLDOWN_MS. Adapters must ignore
+movement/attack input while the avatar is not possessed.
 
 Package layout (Expedition is assembled from one mixin per concern):
     expedition.py    life state, settle, advance() / advance_manual() loops
@@ -53,14 +56,15 @@ Package layout (Expedition is assembled from one mixin per concern):
     outcomes.py      rewards, loot, leads, eating, self actions
     vitals.py        hunger/health integer rates
     lives.py         death, anchor interlude and purchases, rebirth
-    saves.py         to_dict/from_dict and schema migrations (6 -> 9)
+    saves.py         to_dict/from_dict and schema migrations (6 -> 18)
     presentation.py  read-only HUD/page/debug views
     constants.py     tunables, prologue text, schema version
 """
 from .constants import (
-    ANCHOR_COUNTDOWN_MS, CAMP_SAFE_RADIUS, EAT_AT, ELDER_LINES,
+    ANCHOR_COUNTDOWN_MS, CAMP_SAFE_RADIUS, CONTACT_COOLDOWN_MS, EAT_AT, ELDER_LINES, POSSESS_COOLDOWN_MS, POSSESS_MS,
+    POSSESS_SPEED_PERCENT,
     FOOD_COOLDOWN_MS, HUNGER_DRAIN, INVENTORY_SLOTS, LOG_TYPES, MEMORIES, MONSTER_STEP_MS, POINT, PROLOGUE_MS,
-    PROLOGUE_NAMES, REGEN, REST_REGEN, RETREAT_BELOW, SCHEMA_VERSION, SKILLS, STACK_LIMIT, STARVATION,
+    PROLOGUE_NAMES, REGEN, REST_REGEN, RETREAT_BELOW, SCHEMA_VERSION, STACK_LIMIT, STARVATION,
     VITAL_MAX)
 from .expedition import Expedition
 from .saves import OLDEST_SUPPORTED_SCHEMA, upgrade
@@ -68,6 +72,10 @@ from .saves import OLDEST_SUPPORTED_SCHEMA, upgrade
 __all__ = [
     "ANCHOR_COUNTDOWN_MS",
     "CAMP_SAFE_RADIUS",
+    "CONTACT_COOLDOWN_MS",
+    "POSSESS_COOLDOWN_MS",
+    "POSSESS_MS",
+    "POSSESS_SPEED_PERCENT",
     "EAT_AT",
     "ELDER_LINES",
     "FOOD_COOLDOWN_MS",
@@ -83,7 +91,6 @@ __all__ = [
     "REST_REGEN",
     "RETREAT_BELOW",
     "SCHEMA_VERSION",
-    "SKILLS",
     "STACK_LIMIT",
     "STARVATION",
     "VITAL_MAX",

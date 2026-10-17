@@ -8,7 +8,7 @@ from dataclasses import replace
 from dimensional_sim.core import new_demo_game
 from dimensional_sim.world import autopilot as ap
 from dimensional_sim.world.autopilot import Expedition
-from dimensional_sim.world.browser_server import MANUAL_HOLD, BrowserSession
+from dimensional_sim.world.browser_server import BrowserSession
 from dimensional_sim.world.catalog import BY_ID, ITEMS, ItemDef, Loot
 from dimensional_sim.world.encounters import DARK_FOREST, chunk_spots, roll_loot, validate_pools
 from dimensional_sim.world.catalog import ENEMIES, REGIONS, UNLOCKS
@@ -237,9 +237,9 @@ class LifeTests(unittest.TestCase):
         self.assertEqual((frame["spots"], frame["targets"]), ([], []))
         self.assertEqual(e.ash, 2)
         body = {"move": None, "attack": False, "paused": False, "known": [],
-                "action": {"type": "unlock", "id": "return_anchor"}}
+                "action": {"type": "unlock", "id": "campfire"}}
         frame = session.input(body, now=1)
-        self.assertIn("needs 10 ash", frame["expedition"]["action_error"])
+        self.assertIn("needs 25 ash", frame["expedition"]["action_error"])
         self.assertTrue(frame["expedition"]["anchor_space"]["waiting"])
         session.input(body, now=2)
         self.assertEqual(e.ash, 2)
@@ -299,14 +299,14 @@ class LifeTests(unittest.TestCase):
                 Expedition.from_dict(old)
         for mutate in (lambda d: d.update(schema_version=99), lambda d: d.update(encounters="v0"),
                        lambda d: d.update(ash=-1), lambda d: d.update(unlocked=["flying"]),
-                       lambda d: d.update(mastery={"think": 1}), lambda d: d.update(boon="wealth"),
+                       lambda d: d.update(mastery={"think": 1}), lambda d: d.update(opening=True),
                        lambda d: d.update(forced={"forest:0:0": ["think"]}), lambda d: d["stats"].pop("pity"),
-                       lambda d: d.update(blessing=-1), lambda d: d.update(return_ready_ms=-1),
+                       lambda d: d.update(possess_end_ms=0), lambda d: d.update(contact_ready_ms=-1),
                        lambda d: d.update(anchor_ms=-1), lambda d: d.update(anchor_wait=True),
                        lambda d: d["budget"].pop("bramble_boar"),
                        lambda d: d.update(admitted=[["enc:x", "dragon"]]),
                        lambda d: d.update(screened_chunks=[1]),
-                       lambda d: d["regular"].update(charisma=1), lambda d: d.update(skills=["fly"]),
+                       lambda d: d["regular"].update(charisma=1), lambda d: d.update(possess_ready_ms=-1),
                        lambda d: d.update(hunger=ap.VITAL_MAX + 1), lambda d: d.update(inventory=[["gold", 1]]),
                        lambda d: d.update(inventory=[["stick", 21]]), lambda d: d.update(cause="dragon"),
                        lambda d: d.update(best_depth=-1),
@@ -356,7 +356,7 @@ class PrologueTests(unittest.TestCase):
             e.advance(500)
         self.assertEqual(e.prologue()["lines"], list(ap.ELDER_LINES))
         self.assertIn("avatar", ap.ELDER_LINES[0])
-        self.assertIn("pray", ap.ELDER_LINES[2])
+        self.assertIn("hands", ap.ELDER_LINES[2], "the old man hints at possession")
         from dimensional_sim.world.models import DELTAS as D
         dx, dy = e.elder[0] - e.anchor[0], e.elder[1] - e.anchor[1]
         self.assertEqual(D[e.game.player.facing], ((dx > 0) - (dx < 0), (dy > 0) - (dy < 0)),
@@ -405,8 +405,6 @@ class SpawnWindowTests(unittest.TestCase):
         for bad in ({"window": (3, 1)}, {"window": [1, 2]}, {"window": (-1, 2)}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 replace(BY_ID["bramble_berries"], **bad)
-        with self.assertRaises(ValueError):
-            replace(BY_ID["mossy_stone"], blessing=1)  # only prayers bless
         boar = BY_ID["bramble_boar"]
         rolls = {roll_window(boar, seed) for seed in range(200)}
         self.assertEqual(rolls, set(range(boar.window[0], boar.window[1] + 1)))
@@ -465,54 +463,35 @@ class SpawnWindowTests(unittest.TestCase):
 
 
 class PrayerTests(unittest.TestCase):
-    def test_prayer_is_rare_timed_active_action_and_shrines_need_an_unlock(self):
-        from types import SimpleNamespace
+    def test_shrines_open_by_willpower_and_grant_no_currency(self):
         from dimensional_sim.world.actions import Context, explain
+        from dimensional_sim.world.catalog import UNLOCKS
         self.assertFalse(explain("wayside_shrine", Context(region="old_road"))["eligible"])
         self.assertTrue(explain("wayside_shrine", Context(region="old_road",
                                                           unlocked=frozenset({"shrine_path"})))["eligible"])
-        e = skip_prologue(expedition())
-        prayed = None
-        for i in range(3000):
-            spot = SimpleNamespace(id=f"enc:forest:9:9:{i}")
-            e._after_location(spot, True)
-            if e.task["type"] == "pray":
-                prayed = spot
-                break
-        self.assertIsNotNone(prayed, "a prayer can start after a location during live play")
-        e._after_location(prayed, False)
-        self.assertNotEqual(e.task["type"], "pray", "offline actions cannot grant prayer")
-        e._after_location(prayed, True)
-        self.assertEqual(e.task["type"], "pray")
-        self.assertEqual(e.blessing, 0, "prayer pays only after its full duration")
-        e.advance(BY_ID["pray"].duration_ms - 1)
-        self.assertEqual(e.blessing, 0)
-        e.advance(1)
-        self.assertEqual(e.blessing, 1)
-        self.assertEqual(e.log[-1]["type"], "blessing")
-        e._after_location(prayed, True)
-        self.assertNotEqual(e.task["type"], "pray", "one prayer at most per life")
+        self.assertEqual(UNLOCKS["shrine_path"].level, ("willpower", 3))
+        self.assertNotIn("pray", BY_ID, "the random prayer is gone with blessings")
 
     def test_quiet_actions_are_common_and_grant_nothing(self):
         from types import SimpleNamespace
         e = skip_prologue(expedition())
-        before = (dict(e.regular), dict(e.dimensional), e.blessing, dict(e.inventory))
+        before = (dict(e.regular), dict(e.dimensional), e.ash, dict(e.inventory))
         quiet = 0
         for i in range(100):
             e._after_location(SimpleNamespace(id=f"enc:forest:8:8:{i}"), False)
             quiet += e.task["type"] in ("think", "contemplate")
         self.assertGreaterEqual(quiet, 55)
-        self.assertEqual((e.regular, e.dimensional, e.blessing, e.inventory), before)
+        self.assertEqual((e.regular, e.dimensional, e.ash, e.inventory), before)
 
-    def test_blessing_persists_across_lives_and_saves(self):
+    def test_ash_persists_across_lives_and_saves(self):
         e = expedition()
-        e.blessing = 1
+        e.ash = 7
         e.hunger, e.health = 0, 30 * P
         first_death(e)
-        self.assertGreaterEqual(e.blessing, 1)
-        self.assertTrue(any(line.startswith(f"Blessing {e.blessing} ") for line in e.report["lines"]))
+        self.assertGreaterEqual(e.ash, 7)
+        self.assertTrue(any(line == f"Dimensional ash now: {e.ash}" for line in e.report["lines"]))
         self.assertTrue(any(line.startswith("Forest bounty") for line in e.report["lines"]))
-        self.assertEqual(Expedition.from_dict(json.loads(dump(e))).blessing, e.blessing)
+        self.assertEqual(Expedition.from_dict(json.loads(dump(e))).ash, e.ash)
 
 
 class PursuitTests(unittest.TestCase):
@@ -592,7 +571,7 @@ class PursuitTests(unittest.TestCase):
 class AutopilotSessionTests(unittest.TestCase):
     MOVE = {"move": "east", "attack": False, "paused": False, "known": []}
 
-    def test_locked_take_control_ignores_player_input(self):
+    def test_unpossessed_avatar_ignores_player_input(self):
         e = expedition()
         session = BrowserSession(e.game, e)
         reference = expedition()
@@ -616,19 +595,21 @@ class AutopilotSessionTests(unittest.TestCase):
         self.assertEqual(frame["expedition"]["life"], 2)
         self.assertEqual(frame["player"]["x"], e.anchor[0])
 
-    def test_unlocked_control_takes_over_then_autopilot_resumes(self):
+    def test_possession_takes_over_then_autopilot_resumes(self):
         e = skip_prologue(expedition())
-        e.unlock("take_control")
         session = BrowserSession(e.game, e)
         start = e.game.player.x
-        self.assertEqual(session.input(self.MOVE, 0)["expedition"]["control"], "manual")
+        frame = session.input({**self.MOVE, "action": {"type": "possess"}}, 0)
+        self.assertEqual(frame["expedition"]["control"], "manual")
         for i in range(10):
             session.input(self.MOVE, i * .02)
             session.step(i * .02)
         self.assertGreater(e.game.player.x, start)
-        clock = e.total_ms
-        session.step(MANUAL_HOLD + 1)
+        session.advance_ms(ap.POSSESS_MS, 1)
         self.assertEqual(session.state()["expedition"]["control"], "auto")
+        self.assertFalse(e.possessing)
+        clock = e.total_ms
+        session.step(2)
         self.assertEqual(e.total_ms, clock + 20)
 
 

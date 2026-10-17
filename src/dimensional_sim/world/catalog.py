@@ -1,8 +1,8 @@
 """Content catalog for the forest expedition: biomes, enemies, effects, items, actions,
-unlocks, boons, regions and their presentation styles.
+unlocks, regions and their presentation styles.
 
 WHAT: every piece of world content the auto-pilot can meet, as validated data.
-WHY: adding an item, action, recipe, unlock, boon, enemy, biome or region must be a data
+WHY: adding an item, action, recipe, unlock, enemy, biome or region must be a data
 edit, not a change to generation, the auto-pilot or the client. The client draws by the
 art keys declared here (tests check every key has art).
 OWNS: definitions only. Rules that read them live in actions.py (eligibility and
@@ -56,8 +56,8 @@ BIOMES = {b.id: b for b in (
 
 
 # ----- effects -----------------------------------------------------------------
-# Gear and boons change numbers only through effects. "add" stats sum; "percent" stats
-# multiply in turn (integer floor after each source, gear in slot order, then the boon).
+# Gear changes numbers only through effects. "add" stats sum; "percent" stats
+# multiply in turn (integer floor after each source, gear in slot order).
 EFFECT_STATS = {
     "punch_damage": "add",          # extra damage per punch
     "enemy_hit_percent": "percent", # damage enemies deal to the avatar
@@ -542,7 +542,6 @@ class ActionDef:
     hp: int = 0                       # fights only
     loot: tuple = ()
     heal: int = 0
-    blessing: int = 0                 # prayers only
     cost: tuple = ()                  # ((item, count), ...) consumed (crafts)
     effect: str | None = None         # gear item granted / special outcome key
     trigger: str | None = None        # self actions: when the auto-pilot considers it
@@ -599,7 +598,6 @@ class ActionDef:
             raise ValueError("need actions require a priority")
         integer(self.hp, "action HP", 0, 6)
         integer(self.heal, "action heal", 0, 100)
-        integer(self.blessing, "action blessing", 0, 10)
         if type(self.biomes) is not tuple or not self.biomes:
             raise ValueError(f"action needs biomes: {self.id}")
         if self.regions is not None and (type(self.regions) is not tuple or not self.regions):
@@ -611,8 +609,6 @@ class ActionDef:
             raise ValueError(f"invalid cost: {self.id}")
         if (self.category == "fight") != (self.hp > 0):
             raise ValueError(f"fights, and only fights, have hit points: {self.id}")
-        if (self.category == "pray") != (self.blessing > 0):
-            raise ValueError(f"prayers, and only prayers, grant blessings: {self.id}")
         if (self.category in ("craft", "build", "camp")) != bool(self.cost):
             raise ValueError(f"crafts, buildings and camps, and only they, consume items: {self.id}")
         if self.effect is not None and (self.effect not in ITEMS or ITEMS[self.effect].kind != "gear"):
@@ -721,7 +717,9 @@ ACTIONS = (
               "Read the tracks of what lives here.", "Read fresh tracks in the mud - something heavy passed here.",
               regions=("deep_woods", "still_glade"), roles=("base", "discovery"), ecology="game",
               outcomes=(OutcomeDef("knowledge", "deer_sign"),
-                        OutcomeDef("lead", "follow_deer_tracks", chance=30, ttl_ms=90_000)),
+                        OutcomeDef("lead", "follow_deer_tracks", chance=30, ttl_ms=90_000),
+                        OutcomeDef("recipe", "snare", chance=15,
+                                   text="A hare run through the brambles. A loop of thorny stem would catch it.")),
               interaction="Looking at the tracks"),
     ActionDef("follow_deer_tracks", "Deer tracks", "observe", "lead", "perception", 35, 3800, 1,
               "Follow a fresh trail before the deer moves on.", "Followed the tracks to a quiet deer crossing.",
@@ -912,8 +910,10 @@ ACTIONS = (
               "A territorial boar that charges anything nearby. Meat and hide.",
               "Drove off a wild boar.", window=(1, 2), hp=3, enemy="bramble_boar",
               loot=(L("boar_meat", 1, 1), L("boar_hide", 1, 1, 60)), drops="boar_spoils",
-              roles=("base", "combat"), interaction="Fighting the boar"),
-    # --- unlocked with dimensional ash ----------------------------------------
+              roles=("base", "combat"), interaction="Fighting the boar",
+              outcomes=(OutcomeDef("recipe", "hide_wrap", chance=30,
+                                   text="Skinning it, you see how the hide could be worn."),)),
+    # --- opened by dimensional levels (UNLOCKS) ------------------------------------
     ActionDef("gnarled_tree", "Old tree", "climb", "spot", "agility", 60, 3200, 10,
               "Climb for bird eggs and a look over the canopy.", "Climbed a gnarled tree and scouted the canopy.",
               unlock="climbing", near="T", window=(1, 1),
@@ -955,11 +955,11 @@ ACTIONS = (
               "Traced old carvings - the marks look almost like a summoning circle.",
               unlock="road_lore", rarity="uncommon", roles=("unlockable", "discovery"),
               outcomes=(OutcomeDef("lead", "trail_marker", chance=30, ttl_ms=120_000),), interaction="Reading the carvings"),
-    # --- unlocked with blessing ------------------------------------------------
+    # --- opened by Willpower (shrine path) ------------------------------------------
     ActionDef("wayside_shrine", "Roadside shrine", "pray", "spot", "willpower", 50, 3600, 6,
               "A moss-grown shrine on the old road. Prayer here is always heard.",
               "Knelt at a wayside shrine and prayed to the gods who spared you.",
-              unlock="shrine_path", regions=("old_road",), rarity="uncommon", window=(1, 1), blessing=1,
+              unlock="shrine_path", regions=("old_road",), rarity="uncommon", window=(1, 1),
               roles=("unlockable",), interaction="Praying at the shrine"),
     # --- site actions: rolled only inside a landmark (SITES) ------------------------
     ActionDef("camp_packs", "Old backpacks", "scavenge", "site", "strength", 40, 3100, 10,
@@ -1021,7 +1021,7 @@ ACTIONS = (
               "A line of snares around the lodge, one of them still sprung.",
               "Walked the old snare line around the lodge.", unlock="snares", site="hunters_lodge",
               loot=(L("snared_hare", 1, 1, 70), L("bramble_thorn", 1, 2)), roles=("site", "unlockable"),
-              interaction="Checking the traps"),
+              outcomes=(OutcomeDef("recipe", "snare"),), interaction="Checking the traps"),
     ActionDef("lodge_trophies", "Antler wall", "scavenge", "site", "intelligence", 55, 3600, 5,
               "Antlers and tusks nailed above the lodge door.",
               "Took down what was worth keeping from the trophy wall.", unlock="snares", site="hunters_lodge",
@@ -1030,7 +1030,7 @@ ACTIONS = (
     ActionDef("shrine_altar", "Broken altar", "pray", "site", "willpower", 60, 4200, 8,
               "The altar is split in two, but someone still listens here.",
               "Prayed at the broken altar of a ruined shrine.", unlock="shrine_path", site="ruined_shrine",
-              blessing=1, roles=("site", "unlockable"), interaction="Praying at the altar"),
+              roles=("site", "unlockable"), interaction="Praying at the altar"),
     ActionDef("shrine_offerings", "Coin bowls", "scavenge", "site", "perception", 50, 3200, 7,
               "Bowls of green coins and beads, left for gods nobody remembers.",
               "Sifted the offering bowls of a ruined shrine.", unlock="meditation", site="ruined_shrine",
@@ -1076,10 +1076,6 @@ ACTIONS = (
     ActionDef("contemplate", "Contemplate the forest", "reflect", "self", "willpower", 0, 5000, 30,
               "A longer, wordless pause.", "Contemplated the forest for a while.", trigger="after_location",
               roles=("reflection", "contextual")),
-    ActionDef("pray", "Pray to the gods", "pray", "self", "willpower", 0, 12000, 4,
-              "A rare, unplanned prayer. Grants one blessing when it finishes.",
-              "You finished a prayer. The gods grant one blessing.", trigger="after_location",
-              visible_only=True, blessing=1, tags=("once_per_life",), roles=("reflection", "contextual")),
     ActionDef("craft_jerkin", "Stitch a padded jerkin", "craft", "self", "endurance", 30, 6000, 1,
               "Cloth and rope become a jerkin: enemy hits hurt 20% less this life.",
               "Stitched cloth scraps into a padded jerkin.", cost=(("cloth_scrap", 3), ("rope", 1)),
@@ -1094,18 +1090,18 @@ ACTIONS = (
               roles=("craft", "contextual"), requirements=(Requirement("knowledge", "primitive_crafting"),)),
     ActionDef("craft_snare", "Set a bramble snare", "craft", "self", "perception", 30, 6000, 1,
               "Sticks and a thorn become a snare that usually catches a hare.",
-              "Set a bramble snare and checked it.", unlock="snares",
+              "Set a bramble snare and checked it.", recipe="snare",
               cost=(("stick", 2), ("bramble_thorn", 1)), loot=(L("snared_hare", 1, 1, 75),), trigger="need",
               need_priority=3, need_hunger_below=60, need_no_food=True,
               workplace="crafting_station",
-              roles=("craft", "unlockable", "contextual")),
+              roles=("craft", "contextual")),
     ActionDef("craft_wrap", "Wrap boar hide", "craft", "self", "endurance", 30, 5000, 1,
               "Two hides become a wrap: boar hits hurt 30% less this life.",
-              "Wrapped boar hide around your arms and chest.", unlock="hide_working",
+              "Wrapped boar hide around your arms and chest.", recipe="hide_wrap",
               cost=(("boar_hide", 2),), effect="hide_wrap", trigger="need",
               need_priority=1,
               workplace="crafting_station",
-              roles=("craft", "unlockable", "contextual")),
+              roles=("craft", "contextual")),
     # Weapons (crafting station). The spear and the axe are built on a staff: crafting one
     # replaces the staff, and a worn weapon is never replaced by a craft that keeps it.
     ActionDef("craft_staff", "Cut a walking staff", "craft", "self", "strength", 25, 5000, 1,
@@ -1127,8 +1123,8 @@ ACTIONS = (
     ActionDef("make_campfire", "Make a campfire", "camp", "self", "building", 15, 4000, 1,
               "A ring of stones and a few sticks. Resting by it heals like resting at the anchor camp.",
               "Made a campfire and sat down by it.", cost=(("stick", 3),), places="campfire",
-              trigger="need", need_flag="hurt_far", need_priority=1, roles=("contextual",),
-              interaction="Making a campfire"),
+              trigger="need", need_flag="hurt_far", need_priority=1, roles=("contextual", "unlockable"),
+              unlock="campfire", interaction="Making a campfire"),
     ActionDef("build_station", "Build a crafting station", "build", "self", "building", 120, 20000, 1,
               "A workbench by the anchor stone: crafting becomes possible at the camp.",
               "Built a crafting station beside the anchor stone.", cost=(("stick", 12), ("boar_hide", 2)),
@@ -1143,69 +1139,60 @@ ACTIONS = (
 BY_ID = {action.id: action for action in ACTIONS}
 
 
-# ----- unlocks, boons, mastery ---------------------------------------------------
-CURRENCIES = ("ash", "blessing")
-ABILITIES = ("return_to_anchor",)   # engine capabilities an unlock can grant
+# ----- unlocks, mastery ---------------------------------------------------
+CURRENCIES = ("ash",)
+ABILITIES = ("make_campfire",)   # engine capabilities an unlock can grant
 
 
 @dataclass(frozen=True)
 class UnlockDef:
-    """A permanent new possibility, bought at the anchor between lives."""
+    """A permanent new possibility. Actions open by themselves as the soul grows: `level` is
+    (attribute, dimensional level) and is granted when reached (dimensional levels carry across
+    lives). Abilities and favours are still bought at the anchor (`currency`, `cost`)."""
     id: str
     name: str
     description: str
-    currency: str
-    cost: int
+    currency: str | None = None
+    cost: int = 0
     requires: tuple = ()
     ability: str | None = None     # a capability the engine checks (ABILITIES), not an action
+    level: tuple | None = None     # (attribute, dimensional level) that opens it, instead of a price
 
     def __post_init__(self):
         identifier(self.id, "unlock ID")
         if self.ability is not None and self.ability not in ABILITIES:
             raise ValueError(f"unknown ability: {self.ability}")
-        if self.currency not in CURRENCIES or not 1 <= len(self.name) <= 40 or not 1 <= len(self.description) <= 160:
+        if not 1 <= len(self.name) <= 40 or not 1 <= len(self.description) <= 160:
             raise ValueError(f"invalid unlock: {self.id}")
-        integer(self.cost, "unlock cost", 1, 10000)
+        if self.level is not None:
+            if (type(self.level) is not tuple or len(self.level) != 2 or self.level[0] not in ATTRIBUTES
+                    or self.currency is not None or self.cost):
+                raise ValueError(f"a level unlock names (attribute, level) and has no price: {self.id}")
+            integer(self.level[1], "unlock level", 1, 100)
+        else:
+            if self.currency not in CURRENCIES:
+                raise ValueError(f"invalid unlock: {self.id}")
+            integer(self.cost, "unlock cost", 1, 10000)
 
 
 UNLOCKS = {u.id: u for u in (
-    UnlockDef("return_anchor", "Return to anchor", "End this life by choice; available every 5 minutes.", "ash", 10,
-              ability="return_to_anchor"),
-    UnlockDef("climbing", "Climbing", "Gnarled trees appear: bird eggs and sticks.", "ash", 15),
-    UnlockDef("scavenging", "Scavenging", "Abandoned camps and logging camps open up: sticks, rope, nails.", "ash", 20),
-    UnlockDef("snares", "Snares", "Craft a bramble snare (2 sticks, 1 thorn) when hungry. Hunter's cabins open up.",
-              "ash", 25),
-    UnlockDef("meditation", "Meditation", "Mossy stones and moonlit pools appear; ruined shrines open up.", "ash", 30),
-    UnlockDef("mushroom_lore", "Mushroom lore", "Mushroom rings become food.", "ash", 45, ("climbing",)),
-    UnlockDef("hide_working", "Hide working", "Craft a hide wrap (2 hides): boar hits hurt 30% less.", "ash", 50),
-    UnlockDef("road_lore", "Road lore", "Old carvings, watchtowers and burial mounds open up: Intelligence XP.", "ash", 70,
-              ("meditation",)),
-    UnlockDef("shrine_path", "Shrine path", "Wayside shrines appear on the old road: one prayer per shrine.",
-              "blessing", 3),
+    UnlockDef("campfire", "Campfire", "A skill: set down a fire anywhere (3 sticks) and rest beside it to heal as at camp.",
+              "ash", 25, ability="make_campfire"),
+    # Opened by dimensional levels (permanent), roughly in the order a soul grows into them.
+    UnlockDef("climbing", "Climbing", "Gnarled trees appear: bird eggs and sticks.", level=("strength", 2)),
+    UnlockDef("scavenging", "Scavenging", "Abandoned camps and logging camps open up: sticks, rope, nails.",
+              level=("perception", 2)),
+    UnlockDef("snares", "Snare lines", "Hunter's cabins open up: hides, snares and their traps.",
+              level=("perception", 3)),
+    UnlockDef("meditation", "Meditation", "Mossy stones and moonlit pools appear; ruined shrines open up.",
+              level=("endurance", 2)),
+    UnlockDef("mushroom_lore", "Mushroom lore", "Mushroom rings become food.", level=("perception", 4)),
+    UnlockDef("road_lore", "Road lore", "Old carvings, watchtowers and burial mounds open up: Intelligence XP.",
+              level=("endurance", 3)),
+    UnlockDef("shrine_path", "Shrine path", "Roadside shrines appear on the old road; ruined shrines' altars open.",
+              level=("willpower", 3)),
 )}
 
-
-@dataclass(frozen=True)
-class BoonDef:
-    """A one-life favour bought with blessing at the anchor for the next life."""
-    id: str
-    name: str
-    description: str
-    cost: int
-    effects: tuple = ()            # active for the whole next life
-
-    def __post_init__(self):
-        identifier(self.id, "boon ID")
-        integer(self.cost, "boon cost", 1, 100)
-        _effects(self.effects, f"boon {self.id}")
-
-
-BOONS = {b.id: b for b in (
-    BoonDef("bountiful_path", "Bountiful path", "Next life: +1 at-once cap for every food source.", 2,
-            (Effect("food_window_bonus", 1),)),
-    BoonDef("iron_skin", "Iron skin", "Next life: enemy hits hurt 25% less.", 2,
-            (Effect("enemy_hit_percent", 75),)),
-)}
 
 # Completing the same encounter earns mastery at tenfold lifetime milestones.
 MASTERY_MAX = 3
@@ -1276,6 +1263,13 @@ REGIONS = {r.id: r for r in (
               {"forest_spring": 220, "moonlit_pool": 300, "mossy_stone": 220, "bramble_boar": 40,
                "animal_tracks": 140, "follow_deer_tracks": 130, "hunt_deer": 125}, 18, 8, "glade"),
 )}
+
+# ----- recipes: found during a life, kept for later lives with ash -------------------------
+# A recipe outcome teaches a craft for the rest of that life; at the anchor the soul can keep it
+# (pass the knowledge on) for this much ash. Every recipe a craft names must be here.
+RECIPE_KEEP_COST = {"snare": 15, "hide_wrap": 20, "padded_jerkin": 25, "spear": 35, "axe": 35, "studded_wrap": 40}
+RECIPE_NAMES = {"snare": "Bramble snare", "hide_wrap": "Hide wrap", "padded_jerkin": "Padded jerkin",
+                "spear": "Spear", "axe": "Axe", "studded_wrap": "Studded wrap"}
 
 # ----- sites (landmarks) --------------------------------------------------------------
 SITE_CELL = 3          # at most one site per SITE_CELL x SITE_CELL chunks (one candidate chunk each)
@@ -1452,6 +1446,12 @@ def validate_catalog():
                        "level": ATTRIBUTES}
             if requirement.kind in choices and requirement.id not in choices[requirement.kind]:
                 raise ValueError(f"action {action.id} has invalid prerequisite {requirement.id}")
+    recipe_sources = {o.id for a in ACTIONS for o in a.outcomes if o.kind == "recipe"}
+    for action in ACTIONS:
+        if action.recipe is not None and (action.recipe not in RECIPE_KEEP_COST or action.recipe not in recipe_sources):
+            raise ValueError(f"recipe {action.recipe} needs a keep cost and something that teaches it")
+    if set(RECIPE_KEEP_COST) != set(RECIPE_NAMES):
+        raise ValueError("every kept recipe needs a name")
     for condition in SITE_CONDITIONS.values():
         for added in condition.adds:
             if added not in BY_ID or BY_ID[added].placement != "spot":

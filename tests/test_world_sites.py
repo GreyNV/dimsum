@@ -161,7 +161,7 @@ class EncounterTests(unittest.TestCase):
         from dimensional_sim.world.journal import record_action
         record_action(e.journal, "camp_bedroll")
         e._apply_outcomes(BY_ID["camp_bedroll"], "enc:test:bedroll")
-        self.assertIn("padded_jerkin", e.recipes)
+        self.assertIn("padded_jerkin", e.life_recipes)
 
 
 if __name__ == "__main__":

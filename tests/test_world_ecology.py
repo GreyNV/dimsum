@@ -10,6 +10,7 @@ from dimensional_sim.world.models import ChunkKey
 from dimensional_sim.world.seeds import canonical_json
 from dimensional_sim.world.tuning import PRESSURE_FLOOR
 from tests.test_world_autopilot import expedition
+from save_fixture import v17
 
 
 def started():
@@ -56,7 +57,7 @@ class PressureTests(unittest.TestCase):
         e._deplete(BY_ID["bramble_berries"], e.game.player.chunk)
         again = Expedition.from_dict(json.loads(canonical_json(e.to_dict())))
         self.assertEqual(again.pressure, e.pressure)
-        old = {k: v for k, v in e.to_dict().items() if k not in (*saves.V15_FIELDS, *saves.V16_FIELDS)}
+        old = {k: v for k, v in v17(e.to_dict()).items() if k not in (*saves.V15_FIELDS, *saves.V16_FIELDS, *saves.V17_FIELDS)}
         old["schema_version"] = 14
         self.assertEqual(Expedition.from_dict(old).pressure, {})
         bad = e.to_dict()

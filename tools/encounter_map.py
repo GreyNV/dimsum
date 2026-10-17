@@ -163,7 +163,7 @@ CAP, RINGM = "Tiers!$B$9", "Tiers!$B$12"
 ew = wb.create_sheet("Encounters")
 title(ew, "Encounters", "Spots are rolled into chunks; leads only appear through a chain (see Chains); site encounters only inside their landmark (see Sites).")
 cols = ["ID", "Name", "Placement", "Category", "Tier", "Base weight", "Unlock (cost)", "Needs knowledge",
-        "Allowed regions", "Next to", "At-once cap", "Enemy HP", "XP", "Duration (s)", "Heal", "Blessing",
+        "Allowed regions", "Next to", "At-once cap", "Enemy HP", "XP", "Duration (s)", "Heal", "(unused)",
         "Bonus table", "Leads to", "Interaction (what you do)", "Depletes nearby"]
 header(ew, 4, cols)
 ENC_ROW = {}
@@ -172,12 +172,12 @@ for i, a in enumerate(ENC + SITE_ACTIONS):
     ENC_ROW[a.id] = r
     u = UNLOCKS.get(a.unlock) if a.unlock else None
     vals = [a.id, a.name, a.placement, a.category, a.rarity, None,
-            f"{u.name} ({u.cost} {u.currency})" if u else "start",
+            (f"{u.name} ({u.level[0]} {u.level[1]})" if u.level else f"{u.name} ({u.cost} {u.currency})") if u else "start",
             a.knowledge or "", SITES[a.site].name if a.site else
             ", ".join(REGIONS[x].name for x in a.regions) if a.regions else "all",
             {"T": "tree", "^": "rock"}.get(a.near, ""),
             f"{a.window[0]}-{a.window[1]}" if a.window else "no cap", a.hp or "", a.xp,
-            a.duration_ms / 1000, a.heal or "", a.blessing or "", a.drops or "",
+            a.duration_ms / 1000, a.heal or "", "", a.drops or "",
             ", ".join(f"{o.id} ({o.chance}%)" for o in a.outcomes if o.kind == "lead"), a.interaction or "", a.ecology or ""]
     for j, v in enumerate(vals, 1):
         put(ew, r, j, v, fill=TIER_FILL[a.rarity])
@@ -578,11 +578,11 @@ for site in SITES.values():
         terms = [f"IF(AND({c}>={lo},{c}<={hi}),{cum(min(c, 4))},0)" for c in range(0, 9)]
         put(se, rr, 8, f"=MIN(1,({'+'.join(terms)})/({hi}-{lo}+1))", BOLD, PCT)
         u = UNLOCKS.get(a.unlock) if a.unlock else None
-        put(se, rr, 9, f"{u.name} ({u.cost} {u.currency})" if u else "start")
+        put(se, rr, 9, (f"{u.name} ({u.level[0]} {u.level[1]})" if u.level else f"{u.name} ({u.cost} {u.currency})") if u else "start")
         put(se, rr, 10, ", ".join(f"{ITEMS[x.item].name} {x.low}-{x.high}" + (f" ({x.chance}%)" if x.chance < 100 else "")
                                   for x in a.loot))
         put(se, rr, 11, a.drops or "")
-        extra = [f"+{a.blessing} blessing" if a.blessing else "", f"heal {a.heal}" if a.heal else "",
+        extra = [f"heal {a.heal}" if a.heal else "",
                  ", ".join(f"teaches {o.id}" for o in a.outcomes if o.kind == "recipe"),
                  f"{a.category} · {a.attribute} {a.xp} XP · {a.duration_ms / 1000:g}s"]
         put(se, rr, 12, " · ".join(x for x in extra if x))

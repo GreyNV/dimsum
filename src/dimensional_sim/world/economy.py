@@ -1,15 +1,17 @@
 """Currency rules: automatic dimensional ash conversion and anchor purchases.
 
-    all carried items --(return to anchor)--> dimensional ash --(unlock)--> new actions
+    all carried items --(life ends)--> dimensional ash --(keep)--> recipes found this life, for good
+    dimensional levels --(automatically)--> new actions (UnlockDef.level)
     a building at the anchor camp --(bind, a lot of ash)--> stands in every later life
-    prayer --> blessing --(shrine unlock | next-life boon)--> new spot / one-life favour
+    dimensional ash --(unlock)--> skills such as the campfire
 
+Purchases happen at the anchor: between lives, or mid-life by contacting it (the world waits).
 WHAT: pure value rules and purchase validation over an object with the meta fields
-(ash, blessing, unlocked, boon_next). WHY: one place answers "what
+(ash, unlocked, recipes, life_recipes, buildings). WHY: one place answers "what
 is this worth" and "why can't I buy this". The auto-pilot applies the results.
 TESTS: tests/test_world_closed_loop.py.
 """
-from .catalog import BOONS, BUILDINGS, ITEMS, UNLOCKS
+from .catalog import BUILDINGS, ITEMS, RECIPE_KEEP_COST, RECIPE_NAMES, UNLOCKS
 from .tuning import ASH_PER_RING, OFFER_FULL
 
 
@@ -33,6 +35,8 @@ def offers(meta):
     """Everything purchasable at the anchor, with cost and blocking reasons."""
     rows = []
     for unlock in UNLOCKS.values():
+        if unlock.level is not None:   # opened by dimensional levels, never sold
+            continue
         reasons = []
         if unlock.id in meta.unlocked:
             reasons.append("already unlocked")
@@ -44,15 +48,14 @@ def offers(meta):
         rows.append({"kind": "unlock", "id": unlock.id, "name": unlock.name, "description": unlock.description,
                      "currency": unlock.currency, "cost": unlock.cost, "owned": unlock.id in meta.unlocked,
                      "available": not reasons, "reasons": reasons})
-    for boon in BOONS.values():
-        reasons = []
-        if meta.boon_next is not None:
-            reasons.append("a boon is already chosen for the next life")
-        if meta.blessing < boon.cost:
-            reasons.append(f"needs {boon.cost} blessing")
-        rows.append({"kind": "boon", "id": boon.id, "name": boon.name, "description": boon.description,
-                     "currency": "blessing", "cost": boon.cost, "owned": meta.boon_next == boon.id,
-                     "available": not reasons, "reasons": reasons})
+    for recipe in sorted(getattr(meta, "life_recipes", ()), key=lambda r: (RECIPE_KEEP_COST[r], r)):
+        if recipe in meta.recipes:
+            continue
+        cost = RECIPE_KEEP_COST[recipe]
+        reasons = [] if meta.ash >= cost else [f"needs {cost} ash"]
+        rows.append({"kind": "keep", "id": recipe, "name": f"Keep: {RECIPE_NAMES[recipe]}",
+                     "description": "Found this life. Keep the knowledge so every later life can craft it.",
+                     "currency": "ash", "cost": cost, "owned": False, "available": not reasons, "reasons": reasons})
     for building in BUILDINGS.values():   # bind what this life built at the camp
         built = building.id in getattr(meta, "buildings", ())
         bound = building.id in getattr(meta, "bound_buildings", ())
@@ -80,8 +83,8 @@ def purchase(meta, kind, ident):
     setattr(meta, row["currency"], getattr(meta, row["currency"]) - row["cost"])
     if kind == "unlock":
         meta.unlocked.add(ident)
-    elif kind == "boon":
-        meta.boon_next = ident
     elif kind == "bind":
         meta.bound_buildings.add(ident)
+    elif kind == "keep":
+        meta.recipes.add(ident)
     return row

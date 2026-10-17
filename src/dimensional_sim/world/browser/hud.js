@@ -15,6 +15,8 @@ export function activityText(state, paused = false) {
   if (paused) return 'Paused - the forest can wait';
   const ex = state.expedition;
   if (!ex) return null;
+  if (ex.anchor_space?.kind === 'contact') return 'Speaking with the anchor - the world waits';
+  if (ex.anchor_space?.kind === 'opening') return 'The anchor waits for you';
   if (ex.anchor_space) return ex.anchor_space.waiting ? 'The anchor waits for your choice'
     : `A new life begins in ${Math.ceil(ex.anchor_space.remaining_ms / 1000)}s`;
   if (ex.prologue) {
@@ -34,7 +36,7 @@ export function activityText(state, paused = false) {
   }
   if (ex.mode === 'home') return 'Badly hurt - heading back to the anchor camp';
   if (ex.mode === 'fight') return `${ex.weapon?.item ? 'Weapon up' : 'Fists up'} - fighting a ${(ex.opponent || 'foe').toLowerCase()}`;
-  if (ex.control === 'manual') return 'You have taken control';
+  if (ex.control === 'manual') return `You possess the avatar - ${Math.ceil((ex.possession?.remaining_ms || 0) / 1000)}s`;
   if (ex.mode === 'travel' && ex.goal) {
     const spot = state.spots?.find(s => s.x === ex.goal.x && s.y === ex.goal.y);
     if (spot) return `Heading for ${spot.name.toLowerCase()}`;
@@ -48,8 +50,7 @@ export function activityText(state, paused = false) {
 export function rewardTexts(entry, colors = {}, glints = {}) {
   const texts = [];
   if (entry.type === 'encounter' && entry.xp) texts.push({text: `+${entry.xp} ${LABEL[entry.attribute]}`, color: '#bfe39a'});
-  if (entry.blessing) texts.push({text: `+${entry.blessing} blessing`, color: '#ffe9a8'});
-  if (entry.type === 'blessing') texts.push({text: 'Prayer completed', color: '#fff3c4'});
+  if (entry.type === 'possess') texts.push({text: 'Possessed', color: '#ffe3a0'});
   for (const [item, count] of entry.items || []) {
     if (count > 0) texts.push({text: `+${count} ${item.replaceAll('_', ' ')}`, color: colors[item] || ITEM_COLOR_DEFAULT,
       ...(glints[item] ? {glint: glints[item]} : {})});
@@ -100,17 +101,16 @@ export class ExpeditionHud {
     if (!ex) return;
     this.updateVitals(ex);
     this.updatePrologue(ex);
-    const signature = JSON.stringify([ex.attributes, ex.log.map(e => e.seq), ex.inventory, ex.skills, ex.control]);
+    const signature = JSON.stringify([ex.attributes, ex.log.map(e => e.seq), ex.inventory, ex.control]);
     if (signature === this.signature) return;
     this.signature = signature;
     this.renderAttributes(ex);
     this.renderInventory(ex);
     this.renderLog(ex);
-    this.doc.body.classList.toggle('manual-unlocked', ex.skills.includes('take_control'));
   }
   updateVitals(ex) {
     const v = ex.vitals, cd = v.food_cooldown_ms;
-    const signature = [v.health, v.hunger, Math.ceil(cd / 250), ex.life, ex.depth, ex.best_depth, v.blessing, v.ash].join();
+    const signature = [v.health, v.hunger, Math.ceil(cd / 250), ex.life, ex.depth, ex.best_depth, v.ash].join();
     if (signature === this.vitalsSignature) return;
     this.vitalsSignature = signature;
     for (const [name, value] of [['health', v.health], ['hunger', v.hunger]]) {
@@ -125,8 +125,6 @@ export class ExpeditionHud {
     this.updateFoodCooldown(ex);
     this.$('life').textContent = `Life ${ex.life}`;
     this.$('depth').textContent = `Ring ${ex.depth} - best ${ex.best_depth}`;
-    const blessing = this.$('blessing');
-    if (blessing) blessing.textContent = `✦ ${v.blessing ?? 0} blessing`;
     const wealth = this.$('wealth');
     if (wealth) wealth.textContent = `◇ ${v.ash ?? 0} dimensional ash`;
   }
@@ -214,8 +212,7 @@ export class ExpeditionHud {
       const head = this.doc.createElement('b');
       head.textContent = entry.type === 'encounter'
         ? `+${entry.xp} ${LABEL[entry.attribute]}` + (entry.dim_xp ? ` (◆+${entry.dim_xp})` : '')
-          + (entry.blessing ? ` ✦+${entry.blessing}` : '')
-        : {eat: 'Ate', rest: 'Rested', life: 'Anchor', blessing: 'Prayer', lore: 'The road', trade: 'Offered',
+        : {eat: 'Ate', rest: 'Rested', life: 'Anchor', possess: 'Possessed', lore: 'The road', trade: 'Offered',
           ambush: 'Ambush', craft: entry.xp ? `Crafted +${entry.xp} ${LABEL[entry.attribute] || ''}` : 'Crafted',
           reflect: 'Thought', purchase: 'Anchor', rebirth: 'Rebirth',
           build: entry.xp ? `Built +${entry.xp} ${LABEL[entry.attribute] || ''}` : 'Built', stow: 'Chest'}[entry.type] || entry.type;
@@ -242,8 +239,8 @@ export class ExpeditionHud {
 
 /** Anchor shop rows grouped for display: [{title, rows}] (rows come from the server). */
 export function shopSections(shop) {
-  const groups = [['unlock', 'New possibilities (ash / blessing)'], ['boon', 'Next-life boon (blessing)'],
-    ['bind', 'Bind camp buildings (ash)']];
+  const groups = [['keep', 'Keep what you learned this life'], ['unlock', 'Skills'],
+    ['bind', 'Bind camp buildings']];
   return groups.map(([kind, title]) => ({kind, title, rows: (shop || []).filter(r => r.kind === kind && !r.owned)}))
     .filter(section => section.rows.length);
 }
@@ -255,7 +252,7 @@ export function debugText(info) {
     ? `${r.base_weight} ${(r.modifiers || []).map(m => `x${m.percent / 100} ${m.source}`).join(' ')} = ` : ''}${r.weight} (${(r.share_permille / 10).toFixed(1)}%)`;
   return [
     `seed ${info.world_seed}  life ${info.life}  chunk ${info.chunk}  region ${info.region}`,
-    `currencies ash ${info.currencies.ash} blessing ${info.currencies.blessing}  boon ${info.boon || '-'}`,
+    `ash ${info.currencies.ash}`,
     `unlocked: ${info.unlocked.join(', ') || 'none'}  knowledge: ${(info.knowledge || []).join(', ') || 'none'}  recipes: ${(info.recipes || []).join(', ') || 'none'}`,
     `region params: ${info.region_parameters ? `canopy ${info.region_parameters.canopy} brush ${info.region_parameters.brush} ${info.region_parameters.landmark}` : '-'}  generator v${info.generator_version ?? '?'}`,
     `states: ${(info.states || []).map(r => `${r.id}=${r.state}${r.admitted ? '*' : ''}`).join(' ')}`,

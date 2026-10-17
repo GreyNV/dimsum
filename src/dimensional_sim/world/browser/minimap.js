@@ -50,6 +50,16 @@ export function drawMinimap(map, state, chunks, dpr) {
     mark(spot.x,spot.y,'#e2c066',1.1);
   for(const t of state.targets) if(t.hp>0 && visibleAt(fog, t.x, t.y, state.chunk_width, state.chunk_height))
     mark(t.x,t.y,'#e0604f',1.1);
+  // The anchor camp (and this life's campfire), kept on the map's edge when outside it.
+  const place=(gx,gy,color)=>{
+    const mx=Math.max(3,Math.min(MAP_W-3,left+(gx-minX*state.chunk_width+.5)*scale));
+    const my=Math.max(3,Math.min(MAP_H-3,top+(gy-minY*state.chunk_height+.5)*scale));
+    map.fillStyle='#070a06'; map.beginPath(); map.moveTo(mx,my-4); map.lineTo(mx+4,my); map.lineTo(mx,my+4); map.lineTo(mx-4,my); map.closePath(); map.fill();
+    map.fillStyle=color; map.beginPath(); map.moveTo(mx,my-3); map.lineTo(mx+3,my); map.lineTo(mx,my+3); map.lineTo(mx-3,my); map.closePath(); map.fill();
+  };
+  const ex=state.expedition;
+  if(ex?.campfire) place(ex.campfire.x,ex.campfire.y,'#ff9a4a');
+  if(ex?.anchor) place(ex.anchor.x,ex.anchor.y,'#f1d38a');
   map.fillStyle='#fff1bc'; map.fillRect(px-1.8,py-1.8,3.6,3.6);
   map.strokeStyle='#ffe6a0'; map.lineWidth=.7; map.strokeRect(px-3.5,py-3.5,7,7);
 }

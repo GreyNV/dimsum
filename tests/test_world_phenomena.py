@@ -12,6 +12,7 @@ from dimensional_sim.world.models import ChunkKey
 from dimensional_sim.world.seeds import canonical_json
 from dimensional_sim.world.tuning import SHIMMER_RARITY_PERCENT
 from tests.test_world_autopilot import expedition
+from save_fixture import v17
 
 
 def happen(e, action_id):
@@ -39,7 +40,7 @@ class ChainTests(unittest.TestCase):
         self.assertEqual([o.kind for o in tree.outcomes], ["shimmer"])
         for phenomenon in ("hanging_leaf", "backward_ripple", "split_shadow_tree", "double_shadow"):
             action = BY_ID[phenomenon]
-            self.assertFalse(action.loot or action.drops or action.blessing, f"{phenomenon} pays no currency")
+            self.assertFalse(action.loot or action.drops, f"{phenomenon} pays no currency")
         for spot in ("hanging_leaf", "backward_ripple"):
             self.assertEqual(BY_ID[spot].rarity, "rare")
             self.assertEqual(BY_ID[spot].window, (0, 1))
@@ -77,7 +78,7 @@ class ShimmerTests(unittest.TestCase):
         happen(e, "split_shadow_tree")
         again = Expedition.from_dict(json.loads(canonical_json(e.to_dict())))
         self.assertEqual(again.shimmer, e.shimmer)
-        old = {k: v for k, v in e.to_dict().items() if k not in saves.V16_FIELDS}
+        old = {k: v for k, v in v17(e.to_dict()).items() if k not in (*saves.V16_FIELDS, *saves.V17_FIELDS)}
         old["schema_version"] = 15
         self.assertEqual(Expedition.from_dict(old).shimmer, set())
         for bad in (["elsewhere:0:0"], ["forest:0"], "forest:0:0"):

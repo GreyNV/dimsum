@@ -9,6 +9,7 @@ from dimensional_sim.world.runtime import Exploration
 from dimensional_sim.world.seeds import canonical_json
 from dimensional_sim.world.web import new_world
 from camp_fixture import CHEST, STATION, away, to_camp
+from save_fixture import v17
 
 
 def fresh(seed=482910):
@@ -51,7 +52,7 @@ class BuildingTests(unittest.TestCase):
 
     def test_crafts_need_the_station_at_the_camp(self):
         e = fresh()
-        e.unlocked.add("hide_working")
+        e.recipes.add("hide_wrap")
         e.inventory = {"boar_hide": 2}
         to_camp(e, station=False)
         self.assertIsNone(e._need_action())
@@ -95,7 +96,7 @@ class ChestTests(unittest.TestCase):
         self.assertEqual(sorted(i for i, _ in moved), ["boar_hide", "stick"])
         self.assertEqual(e.chest, {"boar_hide": 2, "stick": 5})
         self.assertEqual(e.inventory, {"wild_berries": 2}, "food stays in the pack")
-        e.unlocked.add("hide_working")
+        e.recipes.add("hide_wrap")
         self.assertEqual(e._need_action().id, "craft_wrap", "the chest counts at the camp")
         finish(e, "craft_wrap")
         self.assertEqual(e.chest, {"stick": 5})
@@ -128,7 +129,7 @@ class ChestTests(unittest.TestCase):
     def test_the_auto_pilot_heads_home_for_camp_work(self):
         e = away(fresh())
         e.buildings.add(STATION)
-        e.unlocked.add("hide_working")
+        e.recipes.add("hide_wrap")
         e.inventory = {"boar_hide": 1}
         self.assertNotEqual((e._choose_goal() or {}).get("kind"), "home", "nothing to make yet")
         e.goal = None
@@ -167,8 +168,8 @@ class CarryLoadTests(unittest.TestCase):
 class SaveTests(unittest.TestCase):
     def test_schema_twelve_saves_gain_the_camp_and_the_building_discipline(self):
         e = fresh()
-        gone = (*saves.V13_FIELDS, *saves.V14_FIELDS, *saves.V15_FIELDS, *saves.V16_FIELDS)
-        data = {k: v for k, v in json.loads(dump(e)).items() if k not in gone}
+        gone = (*saves.V13_FIELDS, *saves.V14_FIELDS, *saves.V15_FIELDS, *saves.V16_FIELDS, *saves.V17_FIELDS)
+        data = {k: v for k, v in v17(json.loads(dump(e))).items() if k not in gone}
         for name in ("regular", "dimensional", "life_gain"):
             data[name].pop("building")
         data["stats"].pop("built")

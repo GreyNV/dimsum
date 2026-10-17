@@ -6,7 +6,8 @@ from ..catalog import BUILDINGS, BY_ID, ITEMS, rarity_glint
 from ..equipment import is_equipped
 from ..models import chunk_ident
 from ..tuning import PITY_CHUNKS
-from .constants import (ELDER_LINES, FOOD_COOLDOWN_MS, MEMORIES, PROLOGUE_MS, PROLOGUE_NAMES, SELF_ACTIONS)
+from .constants import (ELDER_LINES, FOOD_COOLDOWN_MS, MEMORIES, POSSESS_COOLDOWN_MS, POSSESS_MS,
+                        POSSESS_SPEED_PERCENT, PROLOGUE_MS, PROLOGUE_NAMES, SELF_ACTIONS)
 
 
 def _style(action):
@@ -55,7 +56,7 @@ class PresentationMixin:
                                              lead_ctx if a.placement == "lead" else
                                              self.self_context("need" if a.trigger == "need" else "after_location"))
                                      for a in BY_ID.values())],
-                "unlocked": sorted(self.unlocked), "boon": self.boon, "mastery": dict(self.mastery),
+                "unlocked": sorted(self.unlocked), "mastery": dict(self.mastery),
                 "spot_bucket": describe_bucket(spot_ctx),
                 "spot_explanations": [explain(a.id, replace(spot_ctx, spawned=a.id in rolled,
                                                           admitted=(a.id in admitted) if screened else None))
@@ -73,7 +74,7 @@ class PresentationMixin:
                 "drought": dict(self.drought), "pity_after": dict(PITY_CHUNKS),
                 "screening": list(self.screen_log[-12:]), "stats": dict(self.stats),
                 "recent_rolls": list(self.roll_log[-8:]),
-                "currencies": {"ash": self.ash, "blessing": self.blessing}}
+                "currencies": {"ash": self.ash}}
 
     def activity(self):
         """Current activity for presentation: name/kind/progress 0..1000."""
@@ -105,8 +106,15 @@ class PresentationMixin:
         return {"encounter": entry.id, "name": entry.name, "kind": entry.kind,
                 "x": gx, "y": gy, "progress": progress, **_style(entry)}
 
+    def possession(self):
+        """Possession (manual control) for the HUD: time left, or the recharge."""
+        return {"active": self.possessing, "duration_ms": POSSESS_MS, "cooldown_ms": POSSESS_COOLDOWN_MS,
+                "remaining_ms": self.possess_end_ms - self.total_ms if self.possessing else 0,
+                "ready_in_ms": 0 if self.possessing else max(0, self.possess_ready_ms - self.total_ms),
+                "speed_percent": POSSESS_SPEED_PERCENT}
+
     def mode(self):
-        if self.anchor_ms is not None:
+        if self.anchor_ms is not None or self.contact:
             return "anchor"
         if self.in_prologue:
             return "prologue"
@@ -125,7 +133,7 @@ class PresentationMixin:
     def vitals(self):
         return {"hunger": self.hunger // 10_000, "health": self.health // 10_000, "max": 10_000,
                 "food_cooldown_ms": self.food_cooldown_ms, "food_cooldown_total_ms": FOOD_COOLDOWN_MS,
-                "blessing": self.blessing, "ash": self.ash}
+                "ash": self.ash}
 
     def inventory_rows(self):
         return [{"id": item, "name": ITEMS[item].name, "kind": ITEMS[item].kind,

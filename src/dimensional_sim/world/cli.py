@@ -110,8 +110,6 @@ def main(argv=None):
                 sub.add_argument("--no-map", action="store_true")
             elif name == "browser":
                 sub.add_argument("--port", type=int, default=8765)
-                sub.add_argument("--unlock-control", action="store_true",
-                                 help="development: unlock the take_control skill (manual WASD)")
             else:
                 sub.add_argument("--fps", type=int, default=20)
                 sub.add_argument("--plain", action="store_true")
@@ -156,9 +154,7 @@ def main(argv=None):
                 game = expedition.game
             else:
                 game = Exploration.from_dict(raw) if raw is not None else Exploration(_new_world(args), args.dimension)
-                expedition = Expedition(game)
-            if args.unlock_control:
-                expedition.unlock("take_control")
+                expedition = Expedition(game, opening=raw is None)
         else:
             game = Exploration.from_dict(raw) if raw is not None else Exploration(_new_world(args), args.dimension)
         if script is not None:

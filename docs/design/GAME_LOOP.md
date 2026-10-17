@@ -7,13 +7,13 @@ EXPLORE   auto-pilot walks to unvisited chunks inside its frontier (autopilot.fr
   -> DISCOVER  each new chunk belongs to a generated region (terrain + action pool); it rolls spots from that
                region's bucket (actions.py, regions.py); some spots leave temporary leads (deer tracks)
   -> INTERACT  perform spot actions; boars pursue and fight; prayer/thought after a location
-  -> ACQUIRE   loot items (food, materials), XP (regular + dimensional), heal, blessing
+  -> ACQUIRE   loot items (food, materials), XP (regular + dimensional), heal
   -> SPEND     eat food (auto, cooldown); craft once learned: staff (recipe from 10 branch gathers, 3 sticks),
                snare (unlock, 2 sticks + thorn), wrap (unlock, 2 hides); crafted gear is equipped in a slot
   -> SURVIVE   gear raises damage / lowers hits -> frontier moves outward -> deeper rings, better XP
   -> DIE       starvation inside the frontier, or a boar
   -> ANCHOR    all carried resources convert to dimensional ash; later copies of each item yield less
-  -> META      ash buys unlocks (first: manual return for 10 ash); blessing buys shrine access or a boon;
+  -> META      ash keeps recipes, binds camp buildings, buys skills (campfire); actions open by dimensional level;
                repeated encounters earn mastery at 10/100/1000 completions
   -> NEXT RUN  unlocked / known actions join the buckets (still rolled, never guaranteed); knowledge and recipes
                persist; Journal controls odds and one chosen-region guarantee; dimensional XP speeds work

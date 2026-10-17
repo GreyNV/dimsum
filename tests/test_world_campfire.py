@@ -9,13 +9,16 @@ from dimensional_sim.world.models import ChunkKey
 from dimensional_sim.world.runtime import InputCommand
 from dimensional_sim.world.seeds import canonical_json
 from tests.test_world_autopilot import expedition
+from save_fixture import v17
 
 POINT = 1_000_000
 
 
-def far_and_hurt(seed=482910, sticks=5):
-    """An avatar two chunks from the anchor, badly hurt, fed, carrying sticks."""
+def far_and_hurt(seed=482910, sticks=5, bought=True):
+    """An avatar two chunks from the anchor, badly hurt, fed, carrying sticks (campfire bought)."""
     e = expedition(seed)
+    if bought:
+        e.unlocked.add("campfire")
     while e.in_prologue:
         e.advance(500)
     key = ChunkKey(e.dimension, 2, 0)
@@ -41,6 +44,9 @@ class CampfireTests(unittest.TestCase):
         self.assertNotEqual(getattr(healthy._need_action(), "id", None), "make_campfire")
         poor = far_and_hurt(sticks=2)
         self.assertNotEqual(getattr(poor._need_action(), "id", None), "make_campfire", "a fire costs 3 sticks")
+        unbought = far_and_hurt(bought=False)
+        self.assertNotEqual(getattr(unbought._need_action(), "id", None), "make_campfire", "the skill is bought with ash")
+        self.assertFalse(unbought.can_make_fire())
 
     def test_the_fire_heals_like_the_anchor_and_the_autopilot_rests_there(self):
         e = far_and_hurt()
@@ -72,7 +78,7 @@ class CampfireTests(unittest.TestCase):
         e.advance(e.task["duration_ms"])
         again = Expedition.from_dict(json.loads(canonical_json(e.to_dict())))
         self.assertEqual(again.campfire, e.campfire)
-        old = {k: v for k, v in e.to_dict().items() if k not in (*saves.V14_FIELDS, *saves.V15_FIELDS, *saves.V16_FIELDS)}
+        old = {k: v for k, v in v17(e.to_dict()).items() if k not in (*saves.V14_FIELDS, *saves.V15_FIELDS, *saves.V16_FIELDS, *saves.V17_FIELDS)}
         old["schema_version"] = 13
         self.assertIsNone(Expedition.from_dict(old).campfire)
         bad = e.to_dict()
@@ -87,6 +93,7 @@ class CampfireTests(unittest.TestCase):
         e.health = 60 * POINT
         e.anchor_action({"type": "campfire"})
         self.assertEqual(e.task["type"], "make_campfire")
+        e.possess()   # the player holds the avatar still beside the fire
         e.advance_manual(e.task["duration_ms"])
         self.assertIsNotNone(e.campfire)
         e.advance_manual(1000)
@@ -101,7 +108,8 @@ class CampfireTests(unittest.TestCase):
         from dimensional_sim.world.session import snapshot
         e = far_and_hurt()
         view = snapshot(e.game, expedition=e)["expedition"]
-        self.assertEqual(view["skill_slots"][1], {"name": "Make campfire", "state": "ready"})
+        self.assertEqual({k: view["skill_slots"][1][k] for k in ("name", "state", "note")},
+                         {"name": "Make campfire", "state": "ready", "note": "Ready"})
         self.assertIsNone(view["campfire"])
         e._start_self(BY_ID["make_campfire"])
         e.advance(e.task["duration_ms"])

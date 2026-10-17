@@ -9,7 +9,7 @@ USE:
   python -m dimensional_sim.world.cli inspect --seed 482910 --x 1 --y 0 --unlock climbing
   python -m dimensional_sim.world.cli regions --seed 482910 --radius 2
 Policies (anchor behaviour; the auto-pilot plays the lives):
-  spend - buy the cheapest available unlock, then a boon; crafting on.
+  spend - buy the cheapest available unlock, keep or bind; crafting on.
   hoard - same anchor buying, but never crafts (keeps materials for conversion).
   idle  - never acts at the anchor (an absent player); resources still become ash.
 """
@@ -35,9 +35,7 @@ def anchor_policy(e, policy):
         return
     while True:
         rows = [r for r in e.anchor_offers() if r["available"]]
-        unlocks = sorted((r for r in rows if r["kind"] in ("unlock", "bind")), key=lambda r: (r["cost"], r["id"]))
-        boons = [r for r in rows if r["kind"] == "boon"]
-        choice = (unlocks or boons or [None])[0]
+        choice = min(rows, key=lambda r: (r["cost"], r["id"]), default=None)
         if choice is None:
             break
         e.anchor_action({"type": choice["kind"], "id": choice["id"]})
@@ -76,7 +74,7 @@ def run(seed, minutes=30, policy="spend", step_ms=1000):
                 break  # first return requires the anchor dialogue interaction
             start = e.total_ms if policy != "idle" else e.total_ms + e.anchor_ms
     return {"seed": seed, "policy": policy, "lives": lives,
-            "final": {"life": e.life, "ash": e.ash, "blessing": e.blessing,
+            "final": {"life": e.life, "ash": e.ash,
                       "unlocked": sorted(e.unlocked), "mastery": dict(e.mastery),
                       "dimensional_xp": sum(e.dimensional.values())}}
 
@@ -114,8 +112,7 @@ def summarize(results):
             "lives_without_food_spot": sum(1 for l in lives if l["food_spots"] == 0),
             "lives_without_enemy": sum(1 for l in lives if l["enemy_spots"] == 0),
             "unlocks_mean": round(mean(len(r["final"]["unlocked"]) for r in results), 2),
-            "ash_blessing_mean": [round(mean(r["final"][k] for r in results), 1)
-                                  for k in ("ash", "blessing")]}
+            "ash_mean": round(mean(r["final"]["ash"] for r in results), 1)}
 
 
 def _terrain_profile(chunk):

@@ -12,6 +12,7 @@ from dimensional_sim.world.runtime import Exploration
 from dimensional_sim.world.seeds import canonical_json
 from dimensional_sim.world.session import BrowserSession, validate_input
 from dimensional_sim.world.web import WebGame, new_world
+from save_fixture import v17
 
 
 def fresh(seed=482910):
@@ -78,14 +79,14 @@ class DetailTests(unittest.TestCase):
         # tests/browser_pages.test.mjs builds the same shape by hand; keep them in step.
         d = detail(played(30_000))
         self.assertEqual(set(d["character"]), {
-            "life", "depth", "best_depth", "frontier", "health", "hunger", "punch_damage", "gear", "boon",
-            "boon_next", "threats", "hunger_per_minute", "regen_per_minute",
-            "rest_regen_per_minute", "inventory_slots", "currencies", "unlocked", "camp", "load"})
+            "life", "depth", "best_depth", "frontier", "health", "hunger", "punch_damage", "gear",
+            "threats", "hunger_per_minute", "regen_per_minute",
+            "rest_regen_per_minute", "inventory_slots", "currencies", "unlocked", "camp", "load", "openings"})
         self.assertEqual(set(d["multipliers"]), {"actions", "hunger_drain", "enemy_hit", "punch_damage", "punch_parts"})
         self.assertEqual(set(d["rolls"]), {"life", "windows", "spots_per_chunk", "tiers", "pity", "stats", "loot"})
         self.assertEqual(set(d["journal"]), {"actions", "items", "deaths", "best_life_min", "lives", "best_depth",
                                              "achievements", "knowledge", "recipes", "disabled", "favor",
-                                             "encounters", "guarantee", "leads", "lead_history"})
+                                             "encounters", "guarantee", "leads", "lead_history", "life_recipes"})
         row = next(r for r in d["journal"]["encounters"] if r["id"] == "bramble_berries")
         self.assertTrue({"rarity", "placement", "level", "done", "next", "regions", "current_share_permille",
                          "locations", "mode", "can_favor", "can_guarantee"} <= set(row))
@@ -112,9 +113,9 @@ class DetailTests(unittest.TestCase):
 class UpgradeAndRebuildTests(unittest.TestCase):
     def test_v6_save_upgrades_with_empty_journal(self):
         e = played(30_000)
-        old = e.to_dict()
+        old = v17(e.to_dict())
         for key in (*saves.V7_FIELDS, *saves.V8_FIELDS, *saves.V9_FIELDS, *saves.V10_FIELDS, *saves.V13_FIELDS,
-                    *saves.V14_FIELDS, *saves.V15_FIELDS, *saves.V16_FIELDS):
+                    *saves.V14_FIELDS, *saves.V15_FIELDS, *saves.V16_FIELDS, *saves.V17_FIELDS):
             old.pop(key)
         old["dust"] = 0
         old["schema_version"] = 6
@@ -126,10 +127,10 @@ class UpgradeAndRebuildTests(unittest.TestCase):
     def test_v7_and_v8_saves_upgrade_keeping_progress_and_rerolling_spots(self):
         e = played(90_000)
         e.unlocked.add("climbing")
-        current = json.loads(canonical_json(e.to_dict()))
+        current = v17(json.loads(canonical_json(e.to_dict())))
         v8 = {k: v for k, v in current.items()
               if k not in ("spot_plans", *saves.V10_FIELDS, *saves.V13_FIELDS, *saves.V14_FIELDS,
-                           *saves.V15_FIELDS, *saves.V16_FIELDS)}
+                           *saves.V15_FIELDS, *saves.V16_FIELDS, *saves.V17_FIELDS)}
         v8["dust"] = 0
         v8.update(schema_version=8, encounters="encounters-v7")
         v7 = {k: v for k, v in v8.items() if k not in ("equipped", "knowledge", "recipes", "journal_disabled",
@@ -157,12 +158,12 @@ class UpgradeAndRebuildTests(unittest.TestCase):
 
     def test_rebuilt_world_keeps_meta_and_changes_seed(self):
         e = played(60_000)
-        e.ash, e.blessing = 10, 2
+        e.ash, e.possess_ready_ms = 10, e.total_ms + 5_000
         e.unlocked.add("climbing")
         new = Expedition.rebuilt(e, Exploration(new_world(1234), "forest"))
         self.assertEqual(new.game.world.world_seed, 1234)
         self.assertGreaterEqual(new.ash, 10)
-        self.assertEqual(new.blessing, 2)
+        self.assertEqual(new.possess_ready_ms, e.possess_ready_ms)
         self.assertEqual(new.dimensional, e.dimensional)
         self.assertEqual(new.journal, e.journal)
         self.assertIn("climbing", new.unlocked)

@@ -62,7 +62,6 @@ export function soundEvents(prev, next, surfaceAt = () => 'grass') {
       else if (e.type === 'eat') out.push({name: 'eat'});
       else if (e.type === 'craft') out.push({name: 'crafted'});
       else if (e.type === 'build') out.push({name: 'built'});
-      else if (e.type === 'blessing') out.push({name: 'blessing'});
       const gained = (e.items || []).filter(([, n]) => n > 0).map(([item]) => item);
       const rare = gained.find(item => ne.item_glints?.[item]);
       if (rare) out.push({name: 'rare'});
@@ -70,6 +69,8 @@ export function soundEvents(prev, next, surfaceAt = () => 'grass') {
     }
     if (levels(ne) > levels(pe)) out.push({name: 'level'});
     if (ne.campfire && !pe.campfire) out.push({name: 'kindle'});
+    if (ne.possession?.active && !pe.possession?.active) out.push({name: 'possess'});
+    if (pe.possession?.active && !ne.possession?.active && ne.life === pe.life) out.push({name: 'release'});
     if (ne.region?.shimmer && !pe.region?.shimmer) out.push({name: 'shimmer'});
   }
   return out;
@@ -192,7 +193,9 @@ export class SoundEngine {
       eat: () => { for (let i = 0; i < 3; i++) this.burst({freq: 1600 + r() * 800, q: 2, dur: .05, gain: .3, delay: i * .11}); },
       crafted: () => { this.tone({type: 'triangle', freq: 440, to: 660, dur: .18, gain: .1}); this.tone({type: 'square', freq: 1320, dur: .03, gain: .02, delay: .17}); },
       built: () => { for (let i = 0; i < 3; i++) { this.tone({type: 'triangle', freq: 140, to: 90, dur: .1, gain: .18, delay: i * .16}); this.burst({type: 'lowpass', freq: 1200, dur: .05, gain: .08, delay: i * .16}); } },
-      blessing: () => { this.tone({freq: 392, dur: 1.6, gain: .06, attack: .4}); this.tone({freq: 587, dur: 1.6, gain: .05, attack: .5}); this.tone({freq: 784, dur: 1.4, gain: .03, attack: .6, delay: .2}); },
+      possess: () => { this.tone({freq: 196, to: 392, dur: .9, gain: .07, attack: .05}); this.tone({freq: 294, to: 587, dur: 1.0, gain: .05, attack: .1});
+        this.notes([784, 988, 1175], {type: 'sine', step: .08, dur: .6, gain: .03, delay: .35}); this.burst({type: 'highpass', freq: 2400, dur: .5, gain: .05, attack: .2}); },
+      release: () => { this.tone({freq: 587, to: 294, dur: .8, gain: .05, attack: .02}); this.tone({freq: 392, to: 196, dur: .9, gain: .04, attack: .05}); },
       kindle: () => { this.burst({type: 'highpass', freq: 1800, dur: .4, gain: .08, attack: .1}); for (let i = 0; i < 5; i++) this.burst({freq: 2500 + r() * 2000, q: 3, dur: .02, gain: .08, delay: .1 + r() * .5}); },
       death: () => { this.tone({freq: 330, to: 82, dur: 1.6, gain: .12, attack: .05}); this.tone({type: 'triangle', freq: 247, to: 62, dur: 1.8, gain: .06, attack: .1}); this.burst({type: 'lowpass', freq: 500, to: 120, dur: 1.4, gain: .08}); },
       shimmer: () => { this.tone({freq: 466, to: 440, dur: 2.2, gain: .05, attack: .6}); this.tone({freq: 470, to: 446, dur: 2.2, gain: .05, attack: .7});

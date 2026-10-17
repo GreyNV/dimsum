@@ -5,6 +5,7 @@ Summarize with tools/measure_report.py <prefix>... (files named <dir>/<prefix>_<
 """
 import json, sys
 from dimensional_sim.world.autopilot import Expedition
+from dimensional_sim.world.progression import attribute_report
 from dimensional_sim.world.runtime import Exploration
 from dimensional_sim.world.simulate import anchor_policy
 from dimensional_sim.world.web import new_world
@@ -21,7 +22,9 @@ while e.total_ms < minutes * 60_000:
         acts = {k: v - acts0.get(k, 0) for k, v in e.journal["actions"].items() if v - acts0.get(k, 0)}
         lives.append({"life": e.life, "minutes": round((e.total_ms - start) / 60000, 2), "cause": e.cause,
                       "depth": e.depth, "items": items, "actions": acts, "station_min": station_at,
-                      "bound": sorted(e.bound_buildings), "chunks": e.stats["chunks"]})
+                      "bound": sorted(e.bound_buildings), "chunks": e.stats["chunks"],
+                      "dim": {k: r["dim_level"] for k, r in attribute_report(e.regular, e.dimensional).items()},
+                      "unlocked": sorted(e.unlocked), "recipes": sorted(e.recipes)})
         items0, acts0 = dict(e.journal["items"]), dict(e.journal["actions"]); station_at = None
         anchor_policy(e, "spend")
         start = e.total_ms

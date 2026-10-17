@@ -9,13 +9,13 @@ TESTS: tests/test_world_pages.py.
 from .actions import Context, describe_bucket, known, spot_tiers
 from .autopilot import INVENTORY_SLOTS, POINT, REGEN, REST_REGEN
 from . import effects
-from .catalog import (ACTIONS, BOONS, BY_ID, ENEMIES, ITEMS, JOURNAL_FAVOR_MASTERY, JOURNAL_GUARANTEE_MASTERY,
+from .catalog import (ACTIONS, BY_ID, ENEMIES, ITEMS, JOURNAL_FAVOR_MASTERY, JOURNAL_GUARANTEE_MASTERY,
                       MASTERY_THRESHOLDS, RARITY, REGIONS, SITES, UNLOCKS)
 from .drops import SCALE, table_chances, tier_chances
 from .encounters import spawn_window
 from .journal import achievements
 from .models import ChunkKey
-from .progression import attribute_report, scaled_ms, speed_permille
+from .progression import attribute_report, dimensional_level, scaled_ms, speed_permille
 from .tuning import CARRY_FREE, CARRY_MAX_PERCENT, CARRY_PERCENT_PER_ITEM, PITY_CHUNKS, SPOTS_PER_CHUNK
 
 
@@ -36,8 +36,6 @@ def character(e):
         "life": e.life, "depth": e.depth, "best_depth": e.best_depth, "frontier": frontier,
         "health": _pts(e.health), "hunger": _pts(e.hunger),
         "punch_damage": e.punch_damage(), "gear": gear,
-        "boon": BOONS[e.boon].name if e.boon else None,
-        "boon_next": BOONS[e.boon_next].name if e.boon_next else None,
         "threats": [{"id": a.id, "name": ENEMIES[a.enemy].name,
                      "hp": e.enemy_hp(a, ChunkKey(e.dimension, frontier, 0)),
                      "hit_at_frontier": _pts(e.enemy_hit(ChunkKey(e.dimension, frontier, 0), ENEMIES[a.enemy])),
@@ -45,8 +43,11 @@ def character(e):
         "hunger_per_minute": _pts(e._drain() * 60_000),
         "regen_per_minute": _pts(REGEN * 60_000), "rest_regen_per_minute": _pts(REST_REGEN * 60_000),
         "inventory_slots": [len(e.inventory), INVENTORY_SLOTS],
-        "currencies": {"ash": e.ash, "blessing": e.blessing},
+        "currencies": {"ash": e.ash},
         "unlocked": [UNLOCKS[u].name for u in sorted(e.unlocked)],
+        "openings": [{"name": u.name, "description": u.description, "attribute": u.level[0], "level": u.level[1],
+                      "have": dimensional_level(e.dimensional[u.level[0]]), "open": u.id in e.unlocked}
+                     for u in sorted((u for u in UNLOCKS.values() if u.level), key=lambda u: (u.level[1], u.id))],
         "camp": e.camp_view(),
         "load": {"percent": e.load_percent(), "carried": e.carried_units(), "free": CARRY_FREE,
                  "per_item": CARRY_PERCENT_PER_ITEM, "max": CARRY_MAX_PERCENT,
@@ -79,10 +80,10 @@ def multipliers(e):
                         "base_ms": base, "effective_ms": effective})
     endurance = e.speed("endurance")
     hit_parts = [["Endurance", round(1000 / endurance, 3)]]
-    hit_parts += [[name, percent / 100] for name, percent in effects.breakdown(e.equipped, e.boon,
+    hit_parts += [[name, percent / 100] for name, percent in effects.breakdown(e.equipped,
                                                                                "enemy_hit_percent")]
     punch = e.punch_damage()
-    bonuses = effects.breakdown(e.equipped, e.boon, "punch_damage")
+    bonuses = effects.breakdown(e.equipped, "punch_damage")
     return {"actions": actions,
             "hunger_drain": round(1000 / endurance, 3),
             "enemy_hit": hit_parts,
@@ -94,7 +95,7 @@ def multipliers(e):
 def rolls(e):
     """This life's rolled caps against the possible range, spot counts and pity."""
     known_ctx = _known_context(e)
-    bonus = effects.total({}, e.boon, "food_window_bonus")
+    bonus = effects.total({}, "food_window_bonus")
     windows = []
     for ident, spawned, limit in e.bounty():
         action = BY_ID[ident]
@@ -155,6 +156,7 @@ def journal(e):
             "lives": e.life, "best_depth": e.best_depth,
             "achievements": achievements(e),
             "knowledge": sorted(e.knowledge), "recipes": sorted(e.recipes),
+            "life_recipes": sorted(e.life_recipes - e.recipes),
             "disabled": sorted(e.journal_disabled), "favor": dict(e.journal_favor),
             "encounters": encounters,
             "guarantee": {"id": e.journal_guarantee, "region": e.journal_guarantee_region,

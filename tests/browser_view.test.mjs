@@ -291,13 +291,14 @@ test('prologue: dark awakening with memories, eyes open, then the old man speaks
   ELDER.paint.forEach((row,r)=>{assert.equal(row.length,ELDER.paint[0].length);assert.equal(ELDER.glyph[r].length,row.length);});
   for(const role of new Set(ELDER.paint.join('').replaceAll(' ',''))) assert.ok('hrswogb'.includes(role),role);
 });
-test('timed prayer is visible and its completed blessing has a clear source',()=>{
+test('prayer at shrines kneels; possession and the anchor read clearly',()=>{
   assert.equal(POSE.pray,'kneel');
   assert.equal(POSE.think,'sit'); assert.equal(POSE.contemplate,'sit');
-  const prayer={type:'blessing',items:[],text:'You finished a prayer',blessing:1};
-  assert.deepEqual(rewardTexts(prayer).map(r=>r.text),['+1 blessing','Prayer completed']);
-  assert.equal(activityText({expedition:{control:'auto',activity:{name:'Praying to the gods',kind:'pray',progress:300}}}),
-    'Praying to the gods - 30%');
+  assert.deepEqual(rewardTexts({type:'possess',items:[],text:'You reach into the avatar'}).map(r=>r.text),['Possessed']);
+  assert.equal(activityText({expedition:{control:'manual',possession:{active:true,remaining_ms:24100}}}),
+    'You possess the avatar - 25s');
+  assert.equal(activityText({expedition:{anchor_space:{kind:'contact',waiting:true}}}),'Speaking with the anchor - the world waits');
+  assert.equal(activityText({expedition:{anchor_space:{kind:'opening',waiting:true}}}),'The anchor waits for you');
 });
 
 test('crouching hands start at the torso, never the head, in every direction',async()=>{
@@ -414,13 +415,13 @@ test('ambush wagons are outlined cell sprites with no free-drawn geometry',()=>{
 
 test('anchor shop groups server rows and the debug overlay explains buckets',()=>{
   const shop=[{kind:'unlock',id:'climbing',owned:false,available:true},{kind:'unlock',id:'snares',owned:true,available:false},
-    {kind:'boon',id:'iron_skin',owned:false,available:false}];
+    {kind:'bind',id:'crafting_station',owned:false,available:false}];
   const sections=shopSections(shop);
-  assert.deepEqual(sections.map(s=>s.kind),['unlock','boon']);
+  assert.deepEqual(sections.map(s=>s.kind),['unlock','bind']);
   assert.deepEqual(sections[0].rows.map(r=>r.id),['climbing'],'owned unlocks are hidden');
   assert.deepEqual(shopSections(null),[]);
-  const text=debugText({world_seed:'7',life:2,chunk:'forest:0:0',region:'old_road',currencies:{ash:2,blessing:3},
-    boon:null,unlocked:[],spot_bucket:[{id:'bramble_berries',weight:13,share_permille:224}],self_bucket:[],need:null,
+  const text=debugText({world_seed:'7',life:2,chunk:'forest:0:0',region:'old_road',currencies:{ash:2},
+    unlocked:[],spot_bucket:[{id:'bramble_berries',weight:13,share_permille:224}],self_bucket:[],need:null,
     windows:[{id:'bramble_boar',active:1,limit:1,spawned:2}],drought:{food:1},pity_after:{food:5},stats:{chunks:9},
     why_not:[{id:'gnarled_tree',reasons:["locked: needs unlock 'Climbing' (15 ash)"]}],
     screening:[{chunk:'forest:1:0',action:'bramble_boar',result:'rejected: window full (1/1 at once)'}]});
@@ -433,6 +434,7 @@ test('anchor clicks map to purchases and begin; Journal controls are not anchor 
   const at=(selector,data)=>({closest:sel=>sel===selector?{dataset:data}:null});
   assert.deepEqual(anchorAction(at('button[data-buy]',{buy:'unlock:climbing'})),{type:'unlock',id:'climbing'});
   assert.deepEqual(anchorAction(at('#anchor-begin',{})),{type:'begin_life'});
+  assert.deepEqual(anchorAction(at('#anchor-begin',{kind:'contact'})),{type:'resume'},'a contact resumes the life');
   assert.equal(anchorAction(at('button[data-journal-guarantee]',{journalGuarantee:'bramble_berries'})),null);
 });
 
@@ -474,4 +476,14 @@ test('every camp building has well-formed art', async () => {
       part.paint.forEach((row, i) => assert.equal(row.length, part.glyph[i].length, `${name} row ${i}`));
     }
   }
+});
+
+test('possession glows strongest as it takes hold and fades in its last seconds',async()=>{
+  const {possessionGlow}=await import('../src/dimensional_sim/world/browser/scene_fx.js');
+  assert.equal(possessionGlow(null),0);
+  assert.equal(possessionGlow({active:false,remaining_ms:9000}),0);
+  const hold=possessionGlow({active:true,remaining_ms:20000});
+  assert.ok(possessionGlow({active:true,remaining_ms:30000},0)>hold,'the flare when it begins');
+  assert.ok(possessionGlow({active:true,remaining_ms:1000})<hold,'fades before it ends');
+  assert.ok(possessionGlow({active:true,remaining_ms:1})>0);
 });

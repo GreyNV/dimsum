@@ -105,7 +105,7 @@ class GeographyStrategyTests(unittest.TestCase):
         self.assertEqual(first["expedition"]["control"], "auto")
         first_spots = dict(expedition.spot_plans)
         old_position = (expedition.game.player.chunk, expedition.game.player.x, expedition.game.player.y)
-        active = session.input({**body, "control": "active"}, .01)
+        active = session.input({**body, "action": {"type": "possess"}}, .01)
         self.assertEqual(active["expedition"]["control"], "manual")
         self.assertIs(expedition.game.world, origin)
         self.assertEqual((expedition.game.player.chunk, expedition.game.player.x,
@@ -115,7 +115,7 @@ class GeographyStrategyTests(unittest.TestCase):
         exit_west = next(x for x in expedition.game.current_chunk().asset.exits if x.direction == "west"
                          and not west.collision[x.y][west.width - 1])
         expedition.game.player.x, expedition.game.player.y = exit_west.x, exit_west.y
-        session.input({**body, "control": "active", "move": "west"}, .02)
+        session.input({**body, "move": "west"}, .02)
         session.step(.04)
         self.assertEqual(expedition.game.player.chunk.x, -1)
         west_region = expedition.game.world.region_for(ChunkKey("forest", -1, 0)).id
@@ -123,7 +123,7 @@ class GeographyStrategyTests(unittest.TestCase):
         self.assertEqual(expedition.debug_info()["region"], west_region)
         self.assertIn("forest:-1:0", expedition.spot_plans)
         clock = expedition.total_ms
-        back = session.input({**body, "control": "auto"}, .05)
+        back = session.input({**body, "action": {"type": "release"}}, .05)
         self.assertEqual(back["expedition"]["control"], "auto")
         self.assertIs(expedition.game.world, origin)
         self.assertEqual(expedition.game.player.chunk.x, -1)
@@ -148,7 +148,7 @@ class GeographyStrategyTests(unittest.TestCase):
         self.assertEqual(restored._spots(restored.game.current_chunk()),
                          normal._spots(normal.game.current_chunk()))
 
-    def test_take_control_preserves_running_encounter_and_uses_one_clock(self):
+    def test_possession_preserves_running_encounter_and_uses_one_clock(self):
         expedition = Expedition(Exploration(new_world(1), "forest"), fresh=False)
         expedition._screen()
         spot = next(s for s in expedition._live(expedition.game.current_chunk())
@@ -157,13 +157,13 @@ class GeographyStrategyTests(unittest.TestCase):
                            "elapsed_ms": 400, "duration_ms": 1000}
         session = BrowserSession(expedition.game, expedition)
         body = {"move": None, "attack": False, "paused": False, "known": []}
-        session.input({**body, "control": "active"}, 0)
+        session.input({**body, "action": {"type": "possess"}}, 0)
         self.assertEqual(expedition.task["spot"], spot.id)
         before = expedition.total_ms
         session.step(.02)
         self.assertEqual(expedition.total_ms, before + 20)
         self.assertEqual(expedition.task["elapsed_ms"], 420)
-        session.input({**body, "control": "auto"}, .03)
+        session.input({**body, "action": {"type": "release"}}, .03)
         self.assertEqual(expedition.task["spot"], spot.id)
         session.step(.04)
         self.assertEqual(expedition.total_ms, before + 40)
@@ -176,8 +176,8 @@ class GeographyStrategyTests(unittest.TestCase):
         expedition.game.targets[target.id] = target
         expedition.admitted[target.id] = "bramble_boar"
         session = BrowserSession(expedition.game, expedition)
-        body = {"move": None, "attack": False, "paused": False, "known": [], "control": "active"}
-        frame = session.input(body, 0)
+        body = {"move": None, "attack": False, "paused": False, "known": []}
+        frame = session.input({**body, "action": {"type": "possess"}}, 0)
         self.assertEqual(frame["expedition"]["attack_radius"], 1)
         self.assertEqual(frame["expedition"]["auto_target"], target.id)
         self.assertEqual(player.facing, "east")
@@ -195,8 +195,8 @@ class GeographyStrategyTests(unittest.TestCase):
         expedition.game.targets[target.id] = target
         expedition.admitted[target.id] = "bramble_boar"
         session = BrowserSession(expedition.game, expedition)
-        body = {"move": "north", "attack": False, "paused": False, "known": [], "control": "active"}
-        frame = session.input(body, 0)
+        body = {"move": "north", "attack": False, "paused": False, "known": []}
+        frame = session.input({**body, "action": {"type": "possess"}}, 0)
         self.assertIsNone(frame["expedition"]["auto_target"])
         self.assertNotEqual(player.animation, "attack")
         for tick in range(1, 6):
@@ -207,19 +207,24 @@ class GeographyStrategyTests(unittest.TestCase):
         expedition = Expedition(Exploration(new_world(1), "forest"))
         expedition.advance(40_000)
         session = BrowserSession(expedition.game, expedition)
-        body = {"move": None, "attack": False, "paused": False, "known": [], "control": "active"}
-        session.input(body, 0)
+        body = {"move": None, "attack": False, "paused": False, "known": []}
+        session.input({**body, "action": {"type": "possess"}}, 0)
         self.assertIsNotNone(expedition.task)
+        started = expedition.task["spot"]
+        spot = expedition._spot_by_id(started)
+        away = "west" if expedition._global(spot.chunk, spot.x, spot.y)[0] > expedition._player()[0] else "east"
         player, now, cells = expedition.game.player, 0.0, set()
         for tick in range(50):  # one second: 20 ms ticks, input polls every 50 ms
             now += .02
             if tick % 5 in (0, 2):
-                session.input({**body, "move": "east"}, now)
+                session.input({**body, "move": away}, now)
             session.step(now)
             cells.add((player.chunk.x, player.x))
-        self.assertIsNone(expedition.task)
-        # One press step plus one per 120 ms interval; polls never add free steps.
-        self.assertLessEqual(len(cells) - 1, 1 + 1000 // expedition.game.movement_interval_ms)
+        # The first task is abandoned (walking may step onto another spot, which starts that one).
+        self.assertTrue(expedition.task is None or expedition.task["spot"] != started)
+        # One press step plus one per (possessed, quicker) interval; polls never add free steps.
+        self.assertLess(expedition.game.step_interval_ms, expedition.game.movement_interval_ms)
+        self.assertLessEqual(len(cells) - 1, 1 + 1000 // expedition.game.step_interval_ms)
         self.assertGreaterEqual(len(cells) - 1, 6)
 
     def test_legacy_region_save_retains_v1_geography(self):

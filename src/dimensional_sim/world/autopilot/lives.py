@@ -4,9 +4,10 @@ from ..catalog import JOURNAL_FAVOR_MASTERY, JOURNAL_GUARANTEE_MASTERY, REGIONS
 from ..catalog import ATTRIBUTES, BUILDINGS, BY_ID, ENEMIES, UNLOCKS
 from ..generation import GENERATOR_VERSION
 from ..journal import record_death, validate_journal
+from ..progression import dimensional_level
 from ..repository import WorldRepository
 from ..runtime import Exploration
-from .constants import ANCHOR_COUNTDOWN_MS, RETURN_COOLDOWN_MS
+from .constants import ANCHOR_COUNTDOWN_MS, CONTACT_COOLDOWN_MS, PROLOGUE_MS
 
 
 def death_cause_text(cause):
@@ -14,10 +15,20 @@ def death_cause_text(cause):
     enemy = next((e for e in ENEMIES.values() if e.cause == cause), None)
     if enemy is not None:
         return f"Cause: {enemy.cause_text}"
-    return {"starvation": "Cause: starvation", "return": "Returned by choice"}.get(cause, "Cause: exhaustion")
+    return {"starvation": "Cause: starvation"}.get(cause, "Cause: exhaustion")
 
 
 class LivesMixin:
+    def _grant_level_unlocks(self):
+        """Open every unlock whose dimensional-level gate is met (they never close again)."""
+        for unlock in UNLOCKS.values():
+            if unlock.level is None or unlock.id in self.unlocked:
+                continue
+            attribute, needed = unlock.level
+            if dimensional_level(self.dimensional[attribute]) >= needed:
+                self.unlocked.add(unlock.id)
+                self._entry("lore", f"Your {attribute} carries you further: {unlock.name}. {unlock.description}")
+
     def has_ability(self, ability):
         """Whether an owned unlock grants `ability` (catalog.ABILITIES)."""
         return any(UNLOCKS[u].ability == ability for u in self.unlocked)
@@ -27,17 +38,36 @@ class LivesMixin:
         record_death(self.journal, self.cause or "exhaustion", self.game.elapsed_ms)
         self._end_life()
 
-    def return_to_anchor(self):
-        """End a life by choice after buying the skill; uses simulation time for cooldown."""
-        if not self.has_ability("return_to_anchor") or self.anchor_ms is not None or self.in_prologue:
-            raise ValueError("return to anchor is unavailable")
-        if self.total_ms < self.return_ready_ms:
-            raise ValueError("return to anchor is cooling down")
-        self.return_ready_ms = self.total_ms + RETURN_COOLDOWN_MS
-        self.cause = "return"
-        self._end_life()
+    def contact_block(self):
+        """Why the anchor cannot be contacted now, or None."""
+        if self.anchor_ms is not None or self.contact:
+            return "Already at the anchor"
+        if self.in_prologue:
+            return "Not yet"
+        if self.total_ms < self.contact_ready_ms:
+            return "Recharging"
+        return None
+
+    def contact_anchor(self):
+        """Reach the anchor mid-life: the world waits and the shop opens; resume_life closes it."""
+        reason = self.contact_block()
+        if reason is not None:
+            raise ValueError(f"cannot contact the anchor: {reason.lower()}")
+        if self.possessing:
+            self._end_possession()
+        self.contact = True
+
+    def resume_life(self):
+        """Close a mid-life contact: the life goes on exactly where it stopped."""
+        if not self.contact:
+            raise ValueError("the anchor is not contacted")
+        self.contact = False
+        self.contact_ready_ms = self.total_ms + CONTACT_COOLDOWN_MS
 
     def _end_life(self):
+        if self.possessing:
+            self._end_possession()
+        self.contact = False
         carried = self._converting()
         gained = economy.rebirth_ash(carried, self.depth, self.converted)
         self.report = self._life_report(gained)
@@ -80,7 +110,7 @@ class LivesMixin:
                   f" ({self.stats['pity']} by pity), {self.stats['rejected']} turned away by caps",
                   f"Crafted {self.stats['crafted']}, ate {self.stats['eaten']}, prayed {self.stats['prayers']}",
                   f"Carried resources and depth became {gained} dimensional ash.",
-                  f"Blessing {self.blessing} - dimensional ash {self.ash + gained}",
+                  f"Dimensional ash now: {self.ash + gained}",
                   f"Encounters completed: {len(self.completed)}",
                   f"Deepest ring reached: {self.depth} (best {self.best_depth})",
                   f"Survived: {lived // 60}m {lived % 60:02d}s", cause, "Returning to anchor..."]
@@ -117,8 +147,9 @@ class LivesMixin:
         return fresh
 
     # Anchor action type -> exact fields it carries (session.validate_input checks the type).
-    ANCHOR_FIELDS = {"return": {"type"}, "campfire": {"type"}, "begin_life": {"type"}, "unlock": {"type", "id"}, "bind": {"type", "id"},
-                     "boon": {"type", "id"}, "journal_favor": {"type", "id", "mode"},
+    ANCHOR_FIELDS = {"contact": {"type"}, "resume": {"type"}, "possess": {"type"}, "release": {"type"},
+                     "campfire": {"type"}, "begin_life": {"type"}, "unlock": {"type", "id"},
+                     "bind": {"type", "id"}, "keep": {"type", "id"}, "journal_favor": {"type", "id", "mode"},
                      "journal_guarantee": {"type", "id", "region"}}
     ANCHOR_ACTIONS = tuple(ANCHOR_FIELDS)
     # Journal controls work at any time (Journal page): they shape chunks not yet rolled.
@@ -129,14 +160,24 @@ class LivesMixin:
         return economy.offers(self)
 
     def anchor_action(self, action):
-        """At the anchor: buy an unlock / boon or begin a life. Journal controls work any time."""
+        """Skills (contact, possess, campfire) during a life; at the anchor (between lives or
+        contacted mid-life): buy, begin the next life or resume this one. Journal controls work any time."""
         if type(action) is not dict:
             raise ValueError("anchor action requires the anchor space")
         kind = action.get("type")
         if type(kind) is not str or self.ANCHOR_FIELDS.get(kind) != set(action):
             raise ValueError("invalid anchor action")
-        if kind == "return":
-            self.return_to_anchor()
+        if kind == "contact":
+            self.contact_anchor()
+            return
+        if kind == "resume":
+            self.resume_life()
+            return
+        if kind == "possess":
+            self.possess()
+            return
+        if kind == "release":
+            self.release()
             return
         if kind == "campfire":   # a skill during a life (manual or auto): start making a fire here
             if not self.can_make_fire():
@@ -144,7 +185,7 @@ class LivesMixin:
             self.goal = None
             self._start_self(BY_ID["make_campfire"])
             return
-        if kind not in self.JOURNAL_ACTIONS and self.anchor_ms is None:
+        if kind not in self.JOURNAL_ACTIONS and self.anchor_ms is None and not (self.contact and kind != "begin_life"):
             raise ValueError("anchor action requires the anchor space")
         if kind == "begin_life":
             self._begin_life()
@@ -169,7 +210,7 @@ class LivesMixin:
             if type(action["id"]) is not str:
                 raise ValueError("invalid anchor action")
             row = economy.purchase(self, kind, action["id"])
-            self.anchor_wait = True
+            self.anchor_wait = self.anchor_ms is not None
             self._entry("purchase", f"Bought {row['name']} for {row['cost']} {row['currency']}.")
 
     def _journal_favor(self, ident, mode):
@@ -187,7 +228,11 @@ class LivesMixin:
     def _begin_life(self):
         self.anchor_ms = None
         self.anchor_wait = False
-        self.boon, self.boon_next = self.boon_next, None
+        if self.opening:   # a new expedition leaves the anchor for its first life: the prologue
+            self.opening = False
+            self._start_task("awaken", PROLOGUE_MS["awaken"])
+            self._screen()
+            return
         self.life += 1
         self._new_life_state()
         self._entry("rebirth", "The anchor sends you into another life with your new possibilities.")
@@ -195,14 +240,17 @@ class LivesMixin:
     @classmethod
     def rebuilt(cls, old, game):
         """A brand-new world (`game`) for an existing expedition: keeps everything that
-        persists across lives (dimensional XP, currencies, unlocks, mastery, journal,
-        skills, the boon chosen for the next life) and starts the next life there,
+        persists across lives (dimensional XP, ash, unlocks, mastery, journal,
+        cooldowns) and starts the next life there,
         without the prologue. Used by the hosted "New world, keep progress" button."""
-        new = cls(game, skills=old.skills, fresh=False)
+        new = cls(game, fresh=False)
         new.dimensional = dict(old.dimensional)
-        for name in ("blessing", "ash", "best_depth", "total_ms", "sequence", "decisions",
-                     "return_ready_ms"):
+        for name in ("ash", "best_depth", "total_ms", "sequence", "decisions",
+                     "contact_ready_ms", "possess_ready_ms"):
             setattr(new, name, getattr(old, name))
+        if old.possessing:
+            old._end_possession()
+        new.possess_ready_ms = old.possess_ready_ms
         carried = old._converting() if old.anchor_ms is None else {}
         if old.anchor_ms is None:
             new.ash += economy.rebirth_ash(carried, old.depth, old.converted)
@@ -219,8 +267,8 @@ class LivesMixin:
         new.journal = validate_journal(old.journal)
         new.log = [dict(e) for e in old.log]
         new.life = old.life + 1
-        new.boon, new.boon_next = old.boon_next, None
         new._new_life_state()
+        new.life_recipes = set(old.life_recipes) if old.anchor_ms is not None else set()
         new._screen()
         new._entry("rebirth", "The world was rebuilt. A new forest, the same soul.")
         return new

@@ -7,15 +7,22 @@
   `padded_jerkin` recipe (an abandoned camp's bedroll), `studded_wrap` recipe (a watchtower's armory).
   Leads (deer trail, deer) are temporary.
 - Frontier: the auto-pilot explores only rings where one boar fight costs <= 60% health
-  (`tuning.COMFORT_DAMAGE_PERCENT`); damage, endurance, gear and boons push it outward. Starving adds one
+  (`tuning.COMFORT_DAMAGE_PERCENT`); damage, endurance and gear push it outward. Starving adds one
   ring. Deeper rings = more ash at rebirth and stronger XP sources (boars).
 
 ## Between runs (meta)
 - Dimensional XP (20% of every gain) persists and speeds later lives.
-- Possibility space (ash): manual return 10 (5-minute cooldown), climbing 15, scavenging 20, snares 25, meditation 30, mushroom lore 45
-  (needs climbing), hide working 50, road lore 70 (needs meditation).
-- Blessing: shrine path 3 (shrines on the old road: reliable prayer), boons 2 (bountiful path: +1 food
-  windows; iron skin: boar hits x0.75) for the next life only.
+- Actions open by permanent dimensional level, never by ash (schema 17): climbing at strength 2,
+  scavenging at perception 2, snare lines (hunter's cabins) at perception 3, meditation at endurance 2,
+  road lore at endurance 3, mushroom lore at perception 4. The anchor log says when one opens; the
+  Character page lists what is still ahead.
+- Ash buys skills (campfire 25) and keeps crafts: a recipe found in a life
+  (snare from the hunter's cabin or animal tracks, hide wrap from skinning a boar, ...) lasts only that
+  life unless it is kept at the anchor ("Keep: X"): snare 15, hide wrap 20, padded jerkin 25,
+  spear 35, axe 35, studded wrap 40.
+- Shrine path opens at willpower 3 like the other actions. Blessings and boons were removed (schema 18).
+- The anchor can be contacted mid-life (skill 1, 2-minute recharge): the world waits while ash is spent.
+- Possession (skill 3): 30 s of manual control, moving and actions 20% faster, then 60 s to recharge.
 - Repeating a spot action earns mastery at 10, 100 and 1,000 lifetime completions. Grade 1 reveals
   its Journal entry, location and current-run chance; grade 2 allows favor (x1.5) or suppress (x0.5);
   grade 3 adds one guaranteed encounter in a chosen eligible region per life, outside the usual roll bucket.

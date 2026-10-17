@@ -80,17 +80,18 @@ function character(d) {
       ...(load ? [['Carry load', load.percent > 100 ? `walking +${load.percent - 100}% slower` : 'no penalty',
         `${load.carried} items carried; the first ${load.free} are free, then +${load.per_item}% each (max +${load.max}%), eased by Endurance and Strength (x${(load.relief_permille / 1000).toFixed(2)})`]] : []),
     ], note: 'Every craft needs a crafting station at the camp. Buildings fall when the life ends unless bound.'},
-    {title: 'Gear and boons', kind: 'rows', rows: [
+    {title: 'Gear', kind: 'rows', rows: [
       ['Gear', c.gear.length ? c.gear.join(', ') : 'none'],
-      ['Boon this life', c.boon || 'none'], ['Boon next life', c.boon_next || 'none'],
     ]},
     {title: 'Journey', kind: 'rows', rows: [
       ['Life', String(c.life)], ['Ring now', String(c.depth)], ['Frontier (safe push)', `ring ${c.frontier}`],
       ['Inventory', `${c.inventory_slots[0]} / ${c.inventory_slots[1]} slots`],
-      ['Dimensional ash', String(c.currencies.ash), 'carried resources convert on return; buys new possibilities'],
-      ['Blessing', String(c.currencies.blessing), 'from prayer; buys boons and the shrine path'],
+      ['Dimensional ash', String(c.currencies.ash), 'carried resources convert when a life ends; keeps recipes, binds buildings, buys skills (contact the anchor with skill 1)'],
       ['Unlocked', c.unlocked.length ? c.unlocked.join(', ') : 'none yet'],
     ]},
+    ...(c.openings ? [{title: 'What opens as you grow', kind: 'table', head: ['Opens', 'Needs (dimensional level)', 'You', ''],
+      rows: c.openings.map(o => [o.name, `${label(o.attribute)} ${o.level}`, String(o.have), o.open ? 'open' : `${o.level - o.have} to go`]),
+      note: 'New kinds of encounters open by themselves when a dimensional level is reached. Dimensional levels carry over between lives.'}] : []),
   ];
 }
 
@@ -161,7 +162,8 @@ function encounters(d) {
       empty: 'No known action has a bonus roll yet.'},
     {title: 'Chains and discoveries', kind: 'rows', rows: [
       ['Knowledge', j.knowledge.map(title).join(', ') || 'none yet'],
-      ['Recipes', j.recipes.map(title).join(', ') || 'none yet'],
+      ['Recipes kept', j.recipes.map(title).join(', ') || 'none yet', 'known in every life'],
+      ...(j.life_recipes?.length ? [['Found this life', j.life_recipes.map(title).join(', '), 'keep them at the anchor with ash, or they are forgotten']] : []),
       ['Active leads', String(j.leads.length)],
     ]},
     {title: 'Recent leads', kind: 'table', head: ['Lead', 'Source', 'State'],
@@ -188,7 +190,7 @@ function settings(state, host, prefs = {}) {
   const sections = [{title: 'This world', kind: 'rows', rows}];
   if (host) sections.push({title: 'Reset', kind: 'actions', buttons: [
     {id: 'rebuild', label: 'New world, keep progress',
-      note: 'A fresh forest from a new seed. Keeps dimensional levels, ash, blessing, unlocks, mastery and the journal; starts the next life.'},
+      note: 'A fresh forest from a new seed. Keeps dimensional levels, ash, unlocks, mastery and the journal; starts the next life.'},
     {id: 'wipe', label: 'Start over', danger: true,
       note: 'Deletes this browser\'s save and its cloud link, then starts a brand-new game. Copy your save code first if you may want it back.'},
   ]});

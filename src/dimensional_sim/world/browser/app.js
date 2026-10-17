@@ -4,13 +4,13 @@ import {PALETTE, OBJECT_PAD, paintChunk, drawTree} from './art.js';
 import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawUnarmedReach, drawDamage, drawFloat, drawReveal, drawSpot, drawSpotCompletion, drawCamp, drawBuildings, drawCampfire, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
 import {PAGES, needsDetail, pageModel, PANELS, COLLAPSE_KEY, loadCollapsed, toggleCollapsed, defaultCollapsed, subtabsOf} from './pages.js';
 import {debugText, ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
-import {regionCue, skillSlots, worldMode} from './world_ui.js';
+import {clockText, regionCue, skillSlots, worldMode} from './world_ui.js';
 import {$, el, readUi, writeUi} from './dom.js';
 import {hosted, request, releaseInput} from './transport.js';
 import {drawMinimap, visibleAt} from './minimap.js';
 import {anchorAction, renderAnchor} from './anchor_ui.js';
 import {buildTabs, journalAction, renderSection, renderSubtabs} from './page_ui.js';
-import {drawEyelids, drawVignette, tintPicture} from './scene_fx.js';
+import {drawEdgeMarker, drawEyelids, drawPossessionAura, drawPossessionGround, drawPossessionTint, drawVignette, edgePoint, possessionGlow, tintPicture} from './scene_fx.js';
 import {drawMotes, drawReflection, drawWaterGlints, isWater} from './nature_art.js';
 import {ACTOR_FOOT} from './sprites.js';
 import {SOUND_KEY, SoundEngine, VOLUMES, loadSettings, soundEvents, surfaceOf} from './sound.js';
@@ -69,9 +69,8 @@ const closedSections = new Set();
 const isMobile = () => matchMedia('(max-width: 720px)').matches;
 let collapsed = loadCollapsed(readUi(COLLAPSE_KEY), isMobile());
 let controlMode = 'auto', bagOpen = false, pendingInteract = false;
-/* A mode the player just chose; polls already in flight still carry the old mode, so the
- * server's answer is only adopted once a request with this mode has been answered. */
-let requestedMode = null;
+/* Possession (manual control) comes from the server; the client only times its glow. */
+let possessedSince = null;
 let stickPointer = null;
 const STICK_KEY = 'touch:stick';
 const manualAllowed = () => !state?.expedition || controlMode === 'active';
@@ -91,6 +90,12 @@ function moveStick(event) {
 }
 
 function status(message) { if ($('status').textContent !== message) $('status').textContent = message; }
+/** A short message that clears itself (skill hints, sound toggles). */
+let toastTimer = 0;
+function toast(message, ms = 3200) {
+  status(message); clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { if ($('status').textContent === message) status(''); }, ms);
+}
 function resize() {
   width = innerWidth; height = innerHeight; dpr = Math.min(devicePixelRatio || 1, 3);
   canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
@@ -137,17 +142,21 @@ function adopt(next, sentControl = null) {
     setPause(false);
   }
   state = next; mapDirty = true;
-  if (requestedMode !== null && sentControl === requestedMode) requestedMode = null;
-  if (next.expedition?.anchor_space || next.expedition?.prologue) { controlMode = 'auto'; requestedMode = null; }
-  else if (requestedMode === null) controlMode = worldMode(next.expedition);
+  controlMode = next.expedition?.anchor_space || next.expedition?.prologue ? 'auto' : worldMode(next.expedition);
   const active = controlMode === 'active';
-  if (!active) resetStick();
+  if (active && possessedSince === null) possessedSince = performance.now();
+  if (!active) { possessedSince = null; resetStick(); }
   document.body.classList.toggle('active-control', active);
   document.body.classList.toggle('manual-unlocked', active);
-  $('mode-switch').textContent = active ? 'Auto explore' : 'Take control';
+  const possession = next.expedition?.possession;
+  $('mode-switch').innerHTML = (active ? 'Release' : 'Possess') + ' <span class="shortcut">Q</span>';
   $('mode-switch').setAttribute('aria-pressed', String(active));
+  $('possess-clock').textContent = active ? clockText(possession?.remaining_ms || 0) : '';
   $('attack-state').textContent = next.expedition?.auto_target ? 'TARGET IN REACH' : 'AUTO STRIKE';
-  $('mode-switch').disabled = !!next.expedition?.prologue || !!next.expedition?.anchor_space;
+  $('mode-switch').disabled = !!next.expedition?.prologue || !!next.expedition?.anchor_space
+    || (!active && !!possession?.ready_in_ms);
+  $('mode-switch').title = active ? 'Hand the avatar back to the auto-pilot (Q)'
+    : possession?.ready_in_ms ? `Possess again in ${clockText(possession.ready_in_ms)}` : 'Possess the avatar for 30 seconds (Q)';
   $('region-tip').textContent = regionCue(next.expedition?.region);
   const progress = next.expedition?.activity;
   $('action-name').textContent = progress?.name || (active ? 'Choose your path' : 'Exploring');
@@ -156,9 +165,16 @@ function adopt(next, sentControl = null) {
   for (const [index, slot] of skillSlots(next.expedition).entries()) {
     const button = document.querySelector(`[data-skill-slot="${index}"]`);
     button.dataset.state = slot.state;
-    button.disabled = !slot.usable;
+    button.disabled = false;   // a tap on a skill that can't run explains why instead
+    button.setAttribute('aria-disabled', String(!slot.usable));
+    button.dataset.note = slot.note;
     button.querySelector('span').textContent = slot.name;
-    button.setAttribute('aria-label', `Skill ${index + 1}: ${slot.name}, ${slot.state}`);
+    let note = button.querySelector('small');
+    if (!note) { note = document.createElement('small'); button.append(note); }
+    note.textContent = slot.note;
+    button.style.setProperty('--charge', String(slot.charge));
+    button.title = slot.hint + (slot.usable ? '' : slot.note ? ` (${slot.note})` : '');
+    button.setAttribute('aria-label', `Skill ${index + 1}: ${slot.name}. ${slot.note}. ${slot.hint}`);
   }
   if (firstSnapshot && $('report').hidden) setPause(false);
   hud.update(next);
@@ -267,7 +283,6 @@ async function poll() {
   const started = performance.now();
   try {
     const body = controls.payload(paused, [...chunks.keys()]);
-    body.control = controlMode;
     if (pendingInteract) body.interact = true;
     if (pendingAction) body.action = pendingAction;
     if (debugOn) body.debug = true;
@@ -278,7 +293,7 @@ async function poll() {
     // Clear only what this request carried: a click made while it was in flight is sent next.
     if (pendingAction === body.action) pendingAction = null;
     if (body.interact) pendingInteract = false;
-    adopt(next, body.control);
+    adopt(next);
     if (connection !== 'connected') { connection = 'connected'; status(''); }
   } catch {
     connection = 'disconnected';
@@ -322,7 +337,7 @@ function waterTiles(chunk) {
 function render(now) {
   const dt=Math.min(100,now-lastFrame || 16); lastFrame=now;
   ctx.setTransform(dpr,0,0,dpr,0,0); ctx.fillStyle=PALETTE.void; ctx.fillRect(0,0,width,height);
-  if (state?.expedition?.anchor_space) {
+  if (state?.expedition?.anchor_space && state.expedition.anchor_space.kind !== 'contact') {
     const scale=Math.min(2.6,width/240,height/340);
     ctx.translate(width/2,height*.38);ctx.scale(scale,scale);
     drawCamp(ctx,-48,-15,{clock:state.expedition.total_ms,reducedMotion});
@@ -446,8 +461,14 @@ function render(now) {
       : {...activity, kind: prologue.stage === 'awaken' || prologue.progress < 650 ? 'kneel' : 'stand'};
     actors.sort((a,b)=>a.row-b.row || (a.kind==='player')-(b.kind==='player'));
     for(const item of actors) {
-      if(item.kind==='player') drawPlayer(ctx,state.player,actor.x,actor.y,attackPhase(state.player),
-        {activity, clock:state.clock_ms, reducedMotion, weapon: state.expedition?.weapon});
+      if(item.kind==='player') {
+        const glow = possessionGlow(state.expedition?.possession, possessedSince === null ? Infinity : now - possessedSince);
+        if (glow) drawPossessionGround(ctx, actor.x, actor.y, {clock: now, glow, foot: ACTOR_FOOT, reducedMotion});
+        drawPlayer(ctx,state.player,actor.x,actor.y,attackPhase(state.player),
+          {activity, clock:state.clock_ms, reducedMotion, weapon: state.expedition?.weapon});
+        if (glow) drawPossessionAura(ctx, actor.x, actor.y, {clock: now, glow, lift: TORSO_LIFT, reducedMotion,
+          sinceMs: possessedSince === null ? Infinity : now - possessedSince});
+      }
       else if(item.kind==='elder') drawElder(ctx,(item.tx+.5)*TILE_W+item.shift,(item.ty+.5)*TILE_H,
         {clock:state.clock_ms,facing:item.facing,alpha:item.alpha,talking:item.talking,reducedMotion});
       else {
@@ -508,8 +529,23 @@ function render(now) {
         {color: rewards[i].color, duration: 1600, size: rewards[i].glint ? 11 : 9});
     }
     ctx.setTransform(dpr,0,0,dpr,0,0);
+    // Off-screen guides: the anchor camp (always) and this life's campfire, at the screen edge.
+    if (!prologue && state.expedition) {
+      const inset = isMobile() ? {top: 120, right: 24, bottom: 230, left: 24} : {top: 170, right: 260, bottom: 140, left: 340};
+      const guides = [[state.expedition.anchor, 'Camp', '#f1d38a'], [state.expedition.campfire, 'Fire', '#ff9a4a']];
+      for (const [place, name, color] of guides) {
+        if (!place) continue;
+        const sx = width / 2 + ((place.x + .5) * TILE_W - view.x) * view.scale;
+        const sy = height / 2 + ((place.y + .5) * TILE_H - view.y) * view.scale;
+        const at = edgePoint(sx, sy, width, height, inset);
+        const steps = Math.abs(place.x - state.player.x) + Math.abs(place.y - state.player.y);
+        if (at) drawEdgeMarker(ctx, at, `${name} · ${steps} steps`, color);
+      }
+    }
     drawEyelids(ctx, prologueView(prologue), width, height, reducedMotion);
     drawVignette(ctx, width, height);
+    drawPossessionTint(ctx, width, height, possessionGlow(state.expedition?.possession,
+      possessedSince === null ? Infinity : now - possessedSince));
     $('zoom').textContent=Math.round(view.scale*100)+'%';
     $('zoom-out').disabled=zoom<=ZOOM.min; $('zoom-in').disabled=zoom>=ZOOM.max;
     if(mapDirty && state) { drawMinimap(map, state, chunks, dpr); mapDirty = false; }
@@ -527,11 +563,12 @@ addEventListener('keydown', event=>{
   else if(event.code==='Space') { event.preventDefault(); if(!paused && manualAllowed()) controls.attack(true); }
   else if(event.code==='KeyE' && !event.repeat) { event.preventDefault(); if(!paused && manualAllowed()) pendingInteract = true; }
   else if(event.code==='KeyP' && !event.repeat) { event.preventDefault(); setPause(!paused); }
+  else if(event.code==='KeyQ' && !event.repeat) { event.preventDefault(); togglePossession(); }
   else if(event.code==='Backquote' && !event.repeat) { event.preventDefault(); toggleDebug(); }
   else if(event.code==='KeyM' && !event.repeat) {
     event.preventDefault();
     setSound({...sound.settings, volume: sound.settings.volume ? 0 : lastVolume});
-    status(sound.settings.volume ? `Sound ${sound.label.toLowerCase()}` : 'Sound off');
+    toast(sound.settings.volume ? `Sound ${sound.label.toLowerCase()}` : 'Sound off');
   }
   else if(event.code==='Escape' && page !== 'world') { event.preventDefault(); openPage('world'); }
   else if(/^Digit[1-9]$/.test(event.code) && !event.repeat) {
@@ -561,16 +598,16 @@ addEventListener('pagehide',()=>{
 });
 canvas.addEventListener('pointerdown',()=>canvas.focus());
 $('pause').addEventListener('click',()=>setPause(!paused));
-$('mode-switch').addEventListener('click',()=>{
-  if ($('mode-switch').disabled) return;
-  controlMode = controlMode === 'auto' ? 'active' : 'auto';
-  requestedMode = controlMode;
-  controls.reset(); resetStick(); pendingInteract = false;
-  document.body.classList.toggle('active-control', controlMode === 'active');
-  document.body.classList.toggle('manual-unlocked', controlMode === 'active');
-  $('mode-switch').textContent = controlMode === 'active' ? 'Auto explore' : 'Take control';
-  $('mode-switch').setAttribute('aria-pressed', String(controlMode === 'active'));
-});
+/** Possess the avatar, or hand it back early (the server times possession and its recharge). */
+function togglePossession() {
+  const ex = state?.expedition;
+  if (!ex || pendingAction || paused) return;
+  if (controlMode === 'active') { pendingAction = {type: 'release'}; controls.reset(); resetStick(); return; }
+  const slot = skillSlots(ex)[2];
+  if (slot.state !== 'ready') { toast(`Possess: ${slot.note || 'not available'}`); return; }
+  pendingAction = {type: 'possess'}; controls.reset(); pendingInteract = false;
+}
+$('mode-switch').addEventListener('click', togglePossession);
 function setBag(open) {
   bagOpen = open;
   document.body.classList.toggle('bag-open', bagOpen);
@@ -589,8 +626,10 @@ for (const id of ['anchor-begin', 'anchor-shop']) $(id).addEventListener('click'
 });
 $('skill-bar').addEventListener('click', event => {
   const slot = event.target.closest('button[data-skill-slot]');
-  if (slot?.dataset.state !== 'ready' || pendingAction) return;
-  if (slot.dataset.skillSlot === '0') pendingAction = {type: 'return'};
+  if (!slot || pendingAction) return;
+  if (slot.dataset.skillSlot === '2') { togglePossession(); return; }
+  if (slot.dataset.state !== 'ready') { toast(`${slot.querySelector('span').textContent}: ${slot.dataset.note || 'not available'}`); return; }
+  if (slot.dataset.skillSlot === '0') pendingAction = {type: 'contact'};
   else if (slot.dataset.skillSlot === '1') pendingAction = {type: 'campfire'};
 });
 $('resume').addEventListener('click',()=>{setPause(false);canvas.focus();});

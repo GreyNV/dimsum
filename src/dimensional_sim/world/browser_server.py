@@ -14,7 +14,7 @@ import time
 from .assets import parse_json
 from .models import integer
 # Re-exported: the session logic lives in session.py so the hosted build can reuse it.
-from .session import (INPUT_LEASE, LOG_ENTRIES, MANUAL_HOLD, TICK_MS,  # noqa: F401
+from .session import (INPUT_LEASE, LOG_ENTRIES, TICK_MS,  # noqa: F401
                       BrowserSession as _BaseSession, snapshot, validate_input)
 CLIENT_MODULES = ("app.js", "art.js", "actors.js", "sprites.js", "player_art.js", "combat_art.js", "place_art.js",
                   "hud.js", "world_ui.js", "pages.js", "page_ui.js", "anchor_ui.js", "minimap.js", "scene_fx.js", "nature_art.js", "sound.js",
@@ -118,7 +118,7 @@ def serve(game, port=8765, expedition=None):
     worker = threading.Thread(target=tick, name="world-simulation", daemon=True)
     worker.start()
     print(f"World browser: http://127.0.0.1:{server.server_port}/", flush=True)
-    print("Auto explores by default; Take control switches to active movement. Ctrl+C stops the server.", flush=True)
+    print("Auto explores by default; Possess (Q) steers the avatar for 30 seconds. Ctrl+C stops the server.", flush=True)
     try:
         server.serve_forever(poll_interval=0.1)
     except KeyboardInterrupt:

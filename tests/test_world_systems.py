@@ -14,7 +14,7 @@ from dimensional_sim.world.actions import Context, spot_shares, spot_tiers
 from dimensional_sim.world.encounters import roll_loot
 from dimensional_sim.world.autopilot import Expedition
 from dimensional_sim.world.catalog import (
-    ACTIONS, BIOMES, BOONS, BY_ID, CATEGORY_STYLES, DROP_TABLES, ENEMIES, ITEMS, UNLOCKS, DropTable, Effect,
+    ACTIONS, BIOMES, BY_ID, CATEGORY_STYLES, DROP_TABLES, ENEMIES, ITEMS, UNLOCKS, DropTable, Effect,
     EnemyDef, Pick, validate_catalog)
 from dimensional_sim.world.models import ChunkKey
 from gear_fixture import TEST_STAFF, test_weapon
@@ -56,16 +56,15 @@ class ArtCoverageTests(unittest.TestCase):
 
 
 class EffectTests(unittest.TestCase):
-    def test_gear_and_boons_combine_in_order(self):
+    def test_gear_effects_combine_in_slot_order(self):
         with test_weapon():
-            self.assertEqual(effects.total({"weapon": "test_staff"}, None, "punch_damage"), 1)
-        both = effects.scale(1000, {"body": "hide_wrap"}, "iron_skin", "enemy_hit_percent")
-        self.assertEqual(both, 1000 * 70 // 100 * 75 // 100)
-        self.assertEqual(effects.scale(1000, {}, None, "enemy_hit_percent"), 1000)
-        self.assertEqual(effects.breakdown({"body": "hide_wrap"}, "iron_skin", "enemy_hit_percent"),
-                         [("Hide wrap", 70), ("Iron skin boon", 75)])
+            self.assertEqual(effects.total({"weapon": "test_staff"}, "punch_damage"), 1)
+        both = effects.scale(1000, {"body": "hide_wrap"}, "enemy_hit_percent")
+        self.assertEqual(both, 1000 * 70 // 100)
+        self.assertEqual(effects.scale(1000, {}, "enemy_hit_percent"), 1000)
+        self.assertEqual(effects.breakdown({"body": "hide_wrap"}, "enemy_hit_percent"), [("Hide wrap", 70)])
         with self.assertRaises(ValueError):
-            effects.total({}, None, "enemy_hit_percent")
+            effects.total({}, "enemy_hit_percent")
 
     def test_a_new_gear_effect_needs_no_engine_change(self):
         spear = replace(TEST_STAFF, id="test_spear", name="Test spear",
@@ -76,10 +75,10 @@ class EffectTests(unittest.TestCase):
             e.equipped = {"weapon": "test_spear"}
             self.assertEqual(e.punch_damage(), base + 3)
 
-    def test_a_new_boon_effect_widens_food_windows(self):
-        boon = replace(BOONS["bountiful_path"], id="test_feast", effects=(Effect("food_window_bonus", 2),))
-        with patch.dict(BOONS, test_feast=boon):
-            self.assertEqual(effects.total({}, "test_feast", "food_window_bonus"), 2)
+    def test_a_new_gear_effect_widens_food_windows(self):
+        feast = replace(TEST_STAFF, id="test_feast", effects=(Effect("food_window_bonus", 2),))
+        with patch.dict(ITEMS, test_feast=feast):
+            self.assertEqual(effects.total({"weapon": "test_feast"}, "food_window_bonus"), 2)
 
     def test_effects_are_validated(self):
         with self.assertRaises(ValueError):
@@ -237,12 +236,13 @@ class RarityTests(unittest.TestCase):
 
 
 class AbilityTests(unittest.TestCase):
-    def test_return_to_anchor_is_an_ability_granted_by_an_unlock(self):
+    def test_the_campfire_is_an_ability_granted_by_an_unlock(self):
         e = expedition()
-        self.assertFalse(e.has_ability("return_to_anchor"))
-        owner = next(u.id for u in UNLOCKS.values() if u.ability == "return_to_anchor")
+        self.assertFalse(e.has_ability("make_campfire"))
+        owner = next(u.id for u in UNLOCKS.values() if u.ability == "make_campfire")
+        self.assertEqual((UNLOCKS[owner].currency, UNLOCKS[owner].cost), ("ash", 25))
         e.unlocked.add(owner)
-        self.assertTrue(e.has_ability("return_to_anchor"))
+        self.assertTrue(e.has_ability("make_campfire"))
 
 
 if __name__ == "__main__":

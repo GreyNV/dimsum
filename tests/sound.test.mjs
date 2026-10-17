@@ -65,7 +65,7 @@ test('every patch plays without errors, and silence makes no nodes', () => {
   const engine = new SoundEngine({AudioContextClass: Ctx, settings: {volume: 2, ambience: true}});
   engine.unlock();
   const before = made.length;
-  for (const name of ['hit', 'kill', 'hurt', 'ambush', 'loot', 'rare', 'level', 'eat', 'crafted', 'built', 'blessing',
+  for (const name of ['hit', 'kill', 'hurt', 'ambush', 'loot', 'rare', 'level', 'eat', 'crafted', 'built', 'possess', 'release',
     'kindle', 'shimmer', 'death', 'anchor', 'chop', 'rustle', 'tap', 'thunk', 'scrape', 'sip', 'page', 'click', 'tab'])
     engine.play({name});
   for (const shape of ['punch', 'thrust', 'swing']) engine.play({name: 'swing', shape});
@@ -76,4 +76,11 @@ test('every patch plays without errors, and silence makes no nodes', () => {
   const n = made.length; engine.play({name: 'hit'});
   assert.equal(made.length, n, 'a hidden tab is silent');
   assert.equal(VOLUMES[engine.settings.volume][0], engine.label);
+});
+
+test('taking and releasing the avatar each have a sound', () => {
+  const at = (active, life = 1) => ({player: {x: 0, y: 0, animation: 'idle', animation_ms: 0}, targets: [],
+    expedition: {life, log: [], attributes: {}, possession: {active}}});
+  assert.deepEqual(soundEvents(at(false), at(true)).map(e => e.name), ['possess']);
+  assert.deepEqual(soundEvents(at(true), at(false)).map(e => e.name), ['release']);
 });

@@ -13,7 +13,7 @@ runtime before each step, so any slicing of time moves the same.
 from ..catalog import BUILDINGS, ITEMS
 from ..models import DELTAS
 from ..tuning import CAMPFIRE_AWAY, CARRY_FREE, CARRY_MAX_PERCENT, CARRY_PERCENT_PER_ITEM, CHEST_SLOTS, STOW_TRIP_AT
-from .constants import CAMP_SAFE_RADIUS, RESTED_AT, RETREAT_BELOW, STACK_LIMIT
+from .constants import CAMP_SAFE_RADIUS, FIRE_KIT, POSSESS_SPEED_PERCENT, RESTED_AT, RETREAT_BELOW, STACK_LIMIT
 
 STATION_FUNCTION = "crafting"
 
@@ -127,8 +127,9 @@ class CampMixin:
         return seat is not None and abs(gx - seat[0]) + abs(gy - seat[1]) <= 1
 
     def can_make_fire(self):
-        return (self.anchor_ms is None and not self.in_prologue and self.task is None
-                and self.inventory.get("stick", 0) >= 3)
+        return (self.anchor_ms is None and not self.in_prologue and self.task is None and not self.contact
+                and self.has_ability("make_campfire")
+                and all(self.inventory.get(item, 0) >= n for item, n in FIRE_KIT.items()))
 
     def _place_fire(self):
         """Set this life's campfire down beside the avatar (the avatar keeps its cell)."""
@@ -153,7 +154,8 @@ class CampMixin:
     def load_percent(self):
         """Movement interval in percent of normal: 100 + the carry penalty (capped)."""
         extra = max(0, self.carried_units() - CARRY_FREE)
-        if not extra:
-            return 100
-        relief = (self.speed("endurance") + self.speed("strength")) // 2   # permille, >= 1000
-        return 100 + min(CARRY_MAX_PERCENT, extra * CARRY_PERCENT_PER_ITEM * 1000 // relief)
+        load = 100
+        if extra:
+            relief = (self.speed("endurance") + self.speed("strength")) // 2   # permille, >= 1000
+            load += min(CARRY_MAX_PERCENT, extra * CARRY_PERCENT_PER_ITEM * 1000 // relief)
+        return load * 100 // POSSESS_SPEED_PERCENT if self.possessing else load

@@ -7,6 +7,14 @@ from dimensional_sim.world import session as session_module
 from dimensional_sim.world.web import CATCH_UP_SLICE_MS, OFFLINE_CAP_MS, WebGame
 
 IDLE = json.dumps({"move": None, "attack": False, "paused": False, "known": []})
+BEGIN = json.dumps({"move": None, "attack": False, "paused": False, "known": [], "action": {"type": "begin_life"}})
+
+
+def begun(game, now=0.0):
+    """A new hosted game opens at the anchor; leave it for the first life."""
+    frame = json.loads(game.input(BEGIN, now))
+    assert frame["expedition"]["anchor_space"] is None
+    return game
 
 
 class WebBridgeTests(unittest.TestCase):
@@ -15,6 +23,11 @@ class WebBridgeTests(unittest.TestCase):
         frame = json.loads(game.input(IDLE, 0.0))
         self.assertEqual(len(frame["chunks"]), 9)
         self.assertEqual(frame["expedition"]["life"], 1)
+        self.assertEqual(frame["expedition"]["anchor_space"]["kind"], "opening", "a new game starts at the anchor")
+        game.advance(5000, 0.0)
+        self.assertEqual(json.loads(game.summary())["total_ms"], 0, "the anchor waits for the player")
+        begun(game)
+        self.assertEqual(game.expedition.prologue()["stage"], "awaken")
         for i in range(25):
             game.advance(40, i * 0.04)
         save = game.save()
@@ -35,12 +48,12 @@ class WebBridgeTests(unittest.TestCase):
         self.assertEqual(WebGame.offline_ms(-5), 0)
         self.assertEqual(WebGame.offline_ms(10_000), 6_500)
         self.assertEqual(WebGame.offline_ms(10 ** 9), OFFLINE_CAP_MS)
-        game = WebGame(seed=3)
+        game = begun(WebGame(seed=3))
         self.assertEqual(game.catch_up(60_000), CATCH_UP_SLICE_MS)
         self.assertEqual(json.loads(game.summary())["total_ms"], CATCH_UP_SLICE_MS)
 
     def test_bulk_advance_equals_ticks_and_pause_freezes(self):
-        bulk, ticks = WebGame(seed=5), WebGame(seed=5)
+        bulk, ticks = begun(WebGame(seed=5)), begun(WebGame(seed=5))
         bulk.advance(4000, 4.0)
         for i in range(200):
             ticks.advance(20, i * 0.02)
@@ -56,7 +69,7 @@ class WebBridgeTests(unittest.TestCase):
         before = game.save()
         game.advance(5000, 5.0)
         self.assertEqual(game.save(), before)
-        frame = json.loads(game.input(IDLE, 5.0))
+        frame = json.loads(game.input(BEGIN, 5.0))
         self.assertFalse(frame["paused"])
         game.advance(1000, 6.0)
         self.assertEqual(json.loads(game.summary())["total_ms"], 1000)

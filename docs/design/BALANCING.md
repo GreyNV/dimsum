@@ -187,3 +187,26 @@ Restless bones at burial mounds and fallen watchtowers. Seeds 1-12, 90 simulated
 Ruins are deep (ring 3 and 5+) and rare, so guards add danger where the autopilot already pushes
 its luck; the life-length difference is inside the run-to-run spread seen across phases
 (16.7-20.3 min). Knobs: `restless_bones` hit/aggro/leash/step, the guards' HP and weights.
+
+### Level-gated actions, kept recipes (2026-10-17)
+Actions open by permanent dimensional level; ash keeps recipes found in a life. Seeds 1-12, 90
+simulated minutes (cumulative minute at the end of the life that first had it):
+
+| variant | lives | mean life | deaths: boar / starved / other | unspent ash at 90 min |
+|---|---|---|---|---|
+| ruin guards + wisp (v12) | 53 | 17.6 min | 23 / 28 / 2 | 3-62 |
+| level gates + keep (v14) | 38 | 20.2 min | 16 / 21 / 1 | 4-138 |
+
+| opens | seeds (of 12) | minute range |
+|---|---|---|
+| scavenging (perception 2) | 12 | 15-62 |
+| climbing (strength 2) | 12 | 18-62 |
+| snare lines (perception 3) | 12 | 26-62 |
+| mushroom lore (perception 4) | 10 | 50-71 |
+| meditation (endurance 2) | 8 | 54-76 |
+| road lore (endurance 3) | 1 | 62 |
+
+Kept recipes: hide wrap 10 seeds, snare 9, padded jerkin 5, axe 3, spear 2. Lives run about 15%
+longer because the old ash prices (15-70) no longer delay the early actions, and ash now piles up
+by the third or fourth life. Knobs: the `level` gates in `UNLOCKS`, `RECIPE_KEEP_COST`, and new ash
+sinks if the surplus holds in playtest.
