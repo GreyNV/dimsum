@@ -118,23 +118,56 @@ function statistics(d) {
   ];
 }
 
-/** Journal · Encounters (main): tiers here, every known encounter, controls, durations, drops, chains. */
+/** Journal controls for one encounter: favor/suppress (grade 2) and a regional guarantee (grade 3). */
+function encounterButtons(e, guarantee) {
+  return [
+    ...(e.can_favor ? [{label: `Odds: ${e.mode}`, note: 'select to cycle normal → favor → suppress',
+      action: {type: 'journal_favor', id: e.id, mode: nextMode(e.mode)}, on: e.mode !== 'normal'}] : []),
+    ...(e.can_guarantee ? e.regions.map(region => {
+      const chosen = guarantee.id === e.id && guarantee.region === region.id;
+      return {label: chosen ? `Guaranteed in ${region.name}` : `Guarantee in ${region.name}`,
+        note: chosen ? (guarantee.used ? 'placed this life; select to clear' : 'select to clear') : 'once per life',
+        action: {type: 'journal_guarantee', id: chosen ? null : e.id, region: chosen ? null : region.id}, on: chosen};
+    }) : []),
+  ];
+}
+
+const pips = level => '●'.repeat(level) + '○'.repeat(Math.max(0, 3 - level));
+/** One encounter as a tree node: a one-line summary, details on opening, and the trails it opens. */
+function encounterNode(n, byId, guarantee) {
+  const e = byId[n.id];
+  if (!e) return null;
+  const spot = e.placement === 'spot';
+  const where = e.placement === 'site' ? `at ${e.site.toLowerCase()}` : e.placement === 'lead' ? 'follows another encounter'
+    : e.regions.map(x => x.name).join(', ') || '-';
+  const count = e.next ? `${e.done} / ${e.next}` : String(e.done);
+  return {key: `enc:${e.id}`, label: e.name, tier: e.rarity,
+    badge: spot ? `${pips(e.level)} ${count}` : count === '0' ? 'not done yet' : `done ${count}`,
+    rows: [
+      ['What you do', e.interaction || '-'],
+      ['Where', where],
+      ...(spot ? [['Grade', `${e.level} / 3`, e.next ? `next at ${e.next} completions` : 'mastered'],
+        ['Chance here', e.level >= 1 ? `${pct(e.current_share_permille)} per spot` : '?', 'grade 1 reveals it']] : []),
+      ...(spot && e.level >= 1 ? [['Seen this life', e.locations.length ? `${e.locations.length} place${e.locations.length > 1 ? 's' : ''}` : 'none yet']] : []),
+    ],
+    buttons: encounterButtons(e, guarantee),
+    hidden: n.hidden,
+    children: n.children.map(c => encounterNode(c, byId, guarantee)).filter(Boolean)};
+}
+
+/** The encounter tree: branches by what you do, landmarks by site, trails under their source. */
+export function encounterTree(j) {
+  const byId = Object.fromEntries((j.encounters || []).map(e => [e.id, e]));
+  const guarantee = j.guarantee || {};
+  const branch = g => ({key: `group:${g.id}`, label: g.title, group: true, badge: `${g.known} / ${g.total} found`,
+    rows: [], buttons: [], hidden: 0,
+    children: [...(g.groups || []).map(branch), ...g.nodes.map(n => encounterNode(n, byId, guarantee)).filter(Boolean)]});
+  return (j.tree || []).map(branch);
+}
+
+/** Journal · Encounters (main): tiers here, the encounter tree, durations, drops, chains. */
 function encounters(d) {
   const j = d.journal, r = d.rolls || {};
-  const list = j.encounters || [];
-  const guarantee = j.guarantee || {};
-  const controls = list.filter(e => e.can_favor || e.can_guarantee).map(e => ({
-    label: `${e.name} · grade ${e.level}`,
-    buttons: [
-      ...(e.can_favor ? [{label: `Odds: ${e.mode}`, note: 'select to cycle normal → favor → suppress',
-        action: {type: 'journal_favor', id: e.id, mode: nextMode(e.mode)}, on: e.mode !== 'normal'}] : []),
-      ...(e.can_guarantee ? e.regions.map(region => {
-        const chosen = guarantee.id === e.id && guarantee.region === region.id;
-        return {label: chosen ? `Guaranteed in ${region.name}` : `Guarantee in ${region.name}`,
-          note: chosen ? (guarantee.used ? 'placed this life; select to clear' : 'select to clear') : 'once per life',
-          action: {type: 'journal_guarantee', id: chosen ? null : e.id, region: chosen ? null : region.id}, on: chosen};
-      }) : []),
-    ]}));
   const bonus = (r.loot || []).flatMap(a => a.drops.filter(drop => drop.roll !== 'fixed')
     .map((drop, i) => [i ? '' : a.name, drop.item, drop.roll, `${drop.chance}%`]));
   const m = d.multipliers;
@@ -142,19 +175,8 @@ function encounters(d) {
     {title: 'Encounter rarity here', kind: 'rows', rows: (r.tiers || []).map(t =>
       [t.name, `${pct(t.permille)} per spot`, `${t.actions} eligible`]),
       note: 'Each spot rolls rare first, then uncommon; a miss falls through to common. Unlocking more of a tier raises its odds.'},
-    {title: 'Encounters', kind: 'table',
-      head: ['Encounter', 'What you do', 'Tier', 'Grade', 'Completions', 'Chance here', 'Regions', 'Seen this life'],
-      rows: list.map(e => [e.name, e.interaction || '-', title(e.rarity), e.placement === 'spot' ? `${e.level} / 3` : '-',
-        e.next ? `${e.done} / ${e.next}` : String(e.done),
-        e.placement === 'lead' ? 'chain only' : e.placement === 'site' ? `at ${e.site.toLowerCase()}`
-          : e.level >= 1 ? `${pct(e.current_share_permille)} per spot` : '?',
-        e.placement === 'site' ? e.site : e.regions.map(x => x.name).join(', ') || '-',
-        e.level >= 1 ? (e.locations.join(', ') || 'none yet') : '?']),
-      empty: 'No encounters known yet.',
-      note: 'Grade 1 reveals locations and current odds; grade 2 shapes future odds; grade 3 guarantees a chosen encounter. Site encounters appear only inside their landmark.'},
-    {title: 'Journal controls', kind: 'controls', items: controls,
-      empty: 'Reach grade 2 with an encounter to favor or suppress it.',
-      note: 'Changes apply to chunks you have not entered yet, during this life and the next.'},
+    {title: 'Encounters', kind: 'tree', items: encounterTree(j), empty: 'No encounters known yet.',
+      note: 'Open a branch, then an encounter. ●●○ is its grade: grade 1 reveals where and how often it appears, grade 2 lets you favor or suppress it, grade 3 guarantees it in a chosen region. Trails hang under what opens them; "not found yet" keeps their names secret.'},
     {title: 'Action durations', kind: 'table', head: ['Action', 'Attribute', 'Speed', 'Base', 'Now'],
       rows: m.actions.map(a => [a.name, label(a.attribute), times(a.speed), seconds(a.base_ms), seconds(a.effective_ms)]),
       note: 'Only actions you know are listed. Prayer and reflection take fixed time.'},

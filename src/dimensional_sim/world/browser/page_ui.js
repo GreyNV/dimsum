@@ -45,7 +45,41 @@ export function renderSection(section, {page, closed, armed}) {
   return box;
 }
 
-const SECTION_KINDS = {rows, table, progress, actions, controls};
+const SECTION_KINDS = {rows, table, progress, actions, controls, tree};
+
+/* Tree nodes the player opened (by node key). Pages re-render twice a second while open,
+ * so the open state lives here, not in the DOM. Branches start open, encounters closed. */
+const opened = new Set(), shut = new Set();
+export const treeState = {opened, shut};
+
+/** A collapsible tree: branches (groups) and encounter nodes, each a <details>. */
+function tree(section) {
+  if (!section.items.length) return el('p', 'note', section.empty || 'Nothing yet.');
+  const root = el('div', 'tree');
+  for (const item of section.items) root.append(treeNode(item, 0));
+  return root;
+}
+
+function treeNode(item, depth) {
+  const box = el('details', ['tree-node', item.group ? 'tree-branch' : 'tree-leaf', item.tier ? `tier-${item.tier}` : ''].join(' ').trim());
+  box.open = item.group && depth === 0 ? !shut.has(item.key) : opened.has(item.key);   // top branches start open
+  box.addEventListener('toggle', () => {
+    if (box.open) { opened.add(item.key); shut.delete(item.key); } else { opened.delete(item.key); shut.add(item.key); }
+  });
+  const summary = el('summary');
+  summary.append(el('span', 'tree-label', item.label));
+  if (item.tier && item.tier !== 'common') summary.append(el('span', 'tree-tier', item.tier));
+  if (item.badge) summary.append(el('span', 'tree-badge', item.badge));
+  box.append(summary);
+  const body = el('div', 'tree-body');
+  if (item.rows.length) body.append(rows({rows: item.rows}));
+  if (item.buttons.length) body.append(controls({items: [{label: 'Journal', buttons: item.buttons}]}));
+  for (const child of item.children) body.append(treeNode(child, depth + 1));
+  if (item.hidden) body.append(el('p', 'tree-hidden', `${item.hidden} trail${item.hidden > 1 ? 's' : ''} from here not found yet`));
+  if (!body.childNodes.length && item.group) body.append(el('p', 'tree-hidden', 'Nothing found here yet.'));
+  box.append(body);
+  return box;
+}
 
 function rows(section) {
   const list = el('dl', 'rows');

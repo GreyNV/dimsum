@@ -1204,6 +1204,20 @@ UNLOCKS = {u.id: u for u in (
 )}
 
 
+# Journal tree (details.encounter_tree): wild spots are grouped by what you do there; landmark
+# encounters by their site; leads hang under whatever opens them; night creatures have their own branch.
+JOURNAL_GROUPS = (
+    ("food", "Food and water", ("forage", "drink", "hunt")),
+    ("wood", "Wood and finds", ("gather", "climb", "scavenge")),
+    ("signs", "Signs and lore", ("observe", "study")),
+    ("quiet", "Quiet places", ("meditate", "pray")),
+    ("danger", "Danger", ("fight",)),
+)
+_grouped = {c for _, _, cats in JOURNAL_GROUPS for c in cats}
+for _a in ACTIONS:
+    if _a.placement == "spot" and _a.category not in _grouped:
+        raise ValueError(f"journal group missing for category {_a.category} ({_a.id})")
+
 # Completing the same encounter earns mastery at tenfold lifetime milestones.
 MASTERY_MAX = 3
 MASTERY_THRESHOLDS = (10, 100, 1000)

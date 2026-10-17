@@ -39,6 +39,12 @@ const detail = {
         done: 1, next: null, regions: [], current_share_permille: 0, locations: [], mode: 'normal',
         can_favor: false, can_guarantee: false}],
     guarantee: {id: 'bramble_berries', region: 'still_glade', used: false},
+    tree: [
+      {id: 'food', title: 'Food and water', known: 1, total: 6, groups: [], nodes: [{id: 'bramble_berries', hidden: 1, children: []}]},
+      {id: 'signs', title: 'Signs and lore', known: 1, total: 5, groups: [],
+        nodes: [{id: 'old_carvings', hidden: 0, children: [{id: 'hunt_deer', hidden: 0, children: []}]}]},
+      {id: 'landmarks', title: 'Landmarks', known: 1, total: 22, nodes: [], groups: [
+        {id: 'site:abandoned_camp', title: 'Abandoned camp', known: 1, total: 3, groups: [], nodes: [{id: 'camp_bedroll', hidden: 0, children: []}]}]}],
     lead_history: [{action: 'follow_deer_tracks', source: 'enc:forest:1:0:2', status: 'expired'}],
     achievements: [{id: 'first_steps', name: 'First steps', description: 'Complete an action.', progress: 1, threshold: 1, done: true},
       {id: 'woodsman', name: 'Woodsman', description: 'Gather 25 times.', progress: 3, threshold: 25, done: false}]},
@@ -63,7 +69,7 @@ test('pages: every tab and subtab has a model, world has none, detail pages wait
       assert.equal(model.sub, t.id);
       assert.ok(model.sections.length >= 1, `${p.id}/${t.id}`);
       for (const s of model.sections) {
-        assert.ok(['rows', 'table', 'progress', 'actions', 'controls'].includes(s.kind));
+        assert.ok(['rows', 'table', 'progress', 'actions', 'controls', 'tree'].includes(s.kind));
         assert.ok(JSON.stringify(s).length > 10);
         if (s.kind === 'table') for (const row of s.rows) assert.equal(row.length, s.head.length, `${p.id}:${s.title}`);
       }
@@ -97,18 +103,27 @@ test('stats: character is the main view with multipliers; statistics holds every
   assert.equal(times(1000), '×1.00'); assert.equal(seconds(90000), '1.5 min');
 });
 
-test('journal: encounters (main) list tiers, hide odds until grade 1, carry controls; achievements apart', () => {
+test('journal: encounters (main) are a tree - branches, landmarks by site, trails under their source', () => {
   const journal = pageModel('journal', state).sections;
   assert.equal(journal[0].title, 'Encounter rarity here');
   assert.deepEqual(journal.find(s => s.title === 'Encounter rarity here').rows[0], ['Uncommon', '8.3% per spot', '2 eligible']);
-  const list = journal.find(s => s.title === 'Encounters').rows;
-  assert.deepEqual(list[0], ['Bramble berries', 'Picking berries', 'Common', '3 / 3', '120', '12.7% per spot', 'The Old Road, Still Glade', 'forest:0:0']);
-  assert.deepEqual(list[1].slice(2, 6), ['Uncommon', '0 / 3', '2 / 5', '?'], 'grade 0 hides odds');
-  assert.equal(list[2][5], 'chain only');
-  assert.deepEqual(list[3].slice(3, 7), ['-', '1', 'at abandoned camp', 'Abandoned camp'], 'site encounters name their landmark');
-  const controls = journal.find(s => s.title === 'Journal controls');
-  assert.equal(controls.items.length, 1);
-  const [odds, road, glade] = controls.items[0].buttons;
+  const tree = journal.find(s => s.title === 'Encounters');
+  assert.equal(tree.kind, 'tree');
+  const [food, signs, landmarks] = tree.items;
+  assert.deepEqual([food.label, food.badge, food.group], ['Food and water', '1 / 6 found', true]);
+  const berries = food.children[0];
+  assert.equal(berries.label, 'Bramble berries');
+  assert.equal(berries.badge, '●●● 120');
+  assert.equal(berries.hidden, 1, 'trails not found yet are counted, not named');
+  assert.deepEqual(berries.rows.find(r => r[0] === 'Chance here').slice(0, 2), ['Chance here', '12.7% per spot']);
+  const carvings = signs.children[0];
+  assert.equal(carvings.rows.find(r => r[0] === 'Chance here')[1], '?', 'grade 0 hides odds');
+  assert.equal(carvings.badge, '○○○ 2 / 5');
+  assert.equal(carvings.children[0].label, 'Hunt deer', 'a trail hangs under what opens it');
+  assert.equal(carvings.children[0].rows.find(r => r[0] === 'Where')[1], 'follows another encounter');
+  assert.equal(landmarks.children[0].label, 'Abandoned camp');
+  assert.equal(landmarks.children[0].children[0].rows.find(r => r[0] === 'Where')[1], 'at abandoned camp');
+  const [odds, road, glade] = berries.buttons;
   assert.deepEqual(odds.action, {type: 'journal_favor', id: 'bramble_berries', mode: 'suppress'});
   assert.deepEqual(road.action, {type: 'journal_guarantee', id: 'bramble_berries', region: 'old_road'});
   assert.deepEqual(glade.action, {type: 'journal_guarantee', id: null, region: null}, 'the chosen guarantee clears');

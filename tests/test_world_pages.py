@@ -86,7 +86,7 @@ class DetailTests(unittest.TestCase):
         self.assertEqual(set(d["rolls"]), {"life", "windows", "spots_per_chunk", "tiers", "pity", "stats", "loot"})
         self.assertEqual(set(d["journal"]), {"actions", "items", "deaths", "best_life_min", "lives", "best_depth",
                                              "achievements", "knowledge", "recipes", "disabled", "favor",
-                                             "encounters", "guarantee", "leads", "lead_history", "life_recipes"})
+                                             "encounters", "guarantee", "leads", "lead_history", "life_recipes", "tree"})
         row = next(r for r in d["journal"]["encounters"] if r["id"] == "bramble_berries")
         self.assertTrue({"rarity", "placement", "level", "done", "next", "regions", "current_share_permille",
                          "locations", "mode", "can_favor", "can_guarantee"} <= set(row))

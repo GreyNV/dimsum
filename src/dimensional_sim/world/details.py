@@ -9,7 +9,7 @@ TESTS: tests/test_world_pages.py.
 from .actions import Context, describe_bucket, known, spot_tiers
 from .autopilot import INVENTORY_SLOTS, POINT, REGEN, REST_REGEN
 from . import effects
-from .catalog import (ACTIONS, BY_ID, ENEMIES, ITEMS, JOURNAL_FAVOR_MASTERY, JOURNAL_GUARANTEE_MASTERY,
+from .catalog import (ACTIONS, BY_ID, ENEMIES, ITEMS, JOURNAL_FAVOR_MASTERY, JOURNAL_GROUPS, JOURNAL_GUARANTEE_MASTERY,
                       MASTERY_THRESHOLDS, RARITY, REGIONS, SITES, UNLOCKS)
 from .drops import SCALE, table_chances, tier_chances
 from .encounters import spawn_window
@@ -123,6 +123,42 @@ def rolls(e):
             "stats": dict(e.stats), "loot": loot}
 
 
+def encounter_tree(known_ids):
+    """The Journal's encounter tree: [{id, title, known, total, nodes, groups}].
+
+    Wild spots sit in JOURNAL_GROUPS by what you do there; landmark encounters under their site;
+    every lead hangs under the encounters whose outcomes open it (chains nest); night creatures
+    get their own branch; a known lead nothing known opens goes to "Other trails". A node is
+    {id, children, hidden} - `hidden` counts follow-ups not found yet (names stay secret)."""
+    opens = {a.id: list(dict.fromkeys(o.id for o in a.outcomes if o.kind == "lead")) for a in ACTIONS}
+    placed = set()
+
+    def node(ident, path=()):
+        placed.add(ident)
+        kids = [k for k in opens[ident] if k not in path and k != ident]
+        return {"id": ident, "hidden": sum(1 for k in kids if k not in known_ids),
+                "children": [node(k, path + (ident,)) for k in kids if k in known_ids]}
+
+    def branch(ident, title, members):
+        return {"id": ident, "title": title, "known": sum(1 for a in members if a.id in known_ids),
+                "total": len(members), "nodes": [node(a.id) for a in members if a.id in known_ids], "groups": []}
+
+    tree = []
+    for ident, title, categories in JOURNAL_GROUPS:
+        tree.append(branch(ident, title, [a for a in ACTIONS if a.placement == "spot" and a.category in categories]))
+    sites = [branch(f"site:{site.id}", site.name, [a for a in ACTIONS if a.placement == "site" and a.site == site.id])
+             for site in SITES.values()]
+    tree.append({"id": "landmarks", "title": "Landmarks", "known": sum(g["known"] for g in sites),
+                 "total": sum(g["total"] for g in sites), "nodes": [], "groups": [g for g in sites if g["known"]]})
+    night = [a for a in ACTIONS if a.placement == "lead" and "night" in a.tags]
+    tree.append(branch("night", "The night", night))
+    others = [a for a in ACTIONS if a.placement == "lead" and a.id in known_ids and a.id not in placed
+              and "night" not in a.tags]
+    if others:
+        tree.append(branch("trails", "Other trails", others))
+    return tree
+
+
 def journal(e):
     """Lifetime record plus every known encounter with its tier, grade, odds here and Journal
     control state (favor/suppress at grade 2, a regional guarantee at grade 3)."""
@@ -159,6 +195,8 @@ def journal(e):
             "life_recipes": sorted(e.life_recipes - e.recipes),
             "disabled": sorted(e.journal_disabled), "favor": dict(e.journal_favor),
             "encounters": encounters,
+            "tree": encounter_tree({row["id"] for row in encounters if row["placement"] != "lead" or row["done"]
+                                     or any(lead["action"] == row["id"] for lead in e.leads + e.lead_history)}),
             "guarantee": {"id": e.journal_guarantee, "region": e.journal_guarantee_region,
                           "used": e.guarantee_used},
             "leads": [dict(row) for row in e.leads],
