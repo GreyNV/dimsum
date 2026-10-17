@@ -2,7 +2,7 @@
 from dataclasses import replace
 
 from ..actions import describe_bucket, explain
-from ..catalog import BY_ID, ITEMS
+from ..catalog import BUILDINGS, BY_ID, ITEMS, rarity_glint
 from ..equipment import is_equipped
 from ..models import chunk_ident
 from ..tuning import PITY_CHUNKS
@@ -12,7 +12,8 @@ from .constants import (ELDER_LINES, FOOD_COOLDOWN_MS, MEMORIES, PROLOGUE_MS, PR
 def _style(action):
     """Client presentation of an activity from the catalog (verb, body pose, work-mark color)."""
     style = action.style
-    return {"verb": style.verb, "pose": style.pose, "color": action.color or style.color}
+    return {"verb": style.verb, "pose": style.pose, "color": action.color or style.color,
+            "interaction": action.interaction}
 
 
 class PresentationMixin:
@@ -46,6 +47,7 @@ class PresentationMixin:
                 "region_parameters": {"canopy": region.canopy, "brush": region.brush,
                                       "landmark": region.landmark} if region else None,
                 "knowledge": sorted(self.knowledge), "recipes": sorted(self.recipes),
+                "pressure_here": self.pressure_percents(key),
                 "journal": {"disabled": sorted(self.journal_disabled), "favor": dict(self.journal_favor)},
                 "states": [{"id": r["id"], "state": r["state"], "admitted": r["id"] in admitted}
                            for r in (explain(a.id, replace(spot_ctx, spawned=a.id in rolled)
@@ -89,8 +91,12 @@ class PresentationMixin:
             return {"encounter": action.id, "name": action.name, "kind": action.id if action.category == "reflect"
                     else action.category, "x": px, "y": py, "progress": progress, **_style(action)}
         if task["type"] == "rest":
-            return {"encounter": "anchor_rest", "name": "Resting at the anchor camp", "kind": "rest",
-                    "x": self.anchor[0], "y": self.anchor[1], "progress": progress}
+            if self.at_camp():
+                return {"encounter": "anchor_rest", "name": "Resting at the anchor camp", "kind": "rest",
+                        "x": self.anchor[0], "y": self.anchor[1], "progress": progress}
+            px, py = self._player()
+            return {"encounter": "campfire_rest", "name": "Resting by the campfire", "kind": "rest",
+                    "x": px, "y": py, "progress": progress}
         spot = self._spot_by_id(task["spot"])
         if spot is None:
             return None
@@ -139,8 +145,16 @@ class PresentationMixin:
                 gx, gy = self._global(spot.chunk, spot.x, spot.y)
                 result.append({"id": spot.id, "encounter": spot.encounter, "name": entry.name,
                                "kind": entry.kind, "x": gx, "y": gy, "art": entry.sprite,
-                               "seal": entry.style.seal})
+                               "seal": entry.style.seal, "glint": rarity_glint(entry.rarity)})
         return result
+
+    def camp_view(self):
+        """Buildings at the anchor camp (bound or for this life) and the chest's contents."""
+        return {"buildings": [{"id": b, "name": BUILDINGS[b].name, "bound": b in self.bound_buildings}
+                              for b in BUILDINGS if b in self.buildings or b in self.bound_buildings],
+                "chest": [{"item": i, "name": ITEMS[i].name, "count": n, "color": ITEMS[i].color}
+                          for i, n in sorted(self.chest.items())],
+                "at_camp": self.at_camp()}
 
     def opponent(self):
         """Name of the enemy the avatar is fighting (goal target), or None."""

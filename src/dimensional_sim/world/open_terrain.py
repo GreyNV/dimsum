@@ -60,14 +60,28 @@ def open_assets(width=32, height=16):
     return tuple(result)
 
 
+def _flood(collision, origin):
+    """Cells reachable from `origin` through open cells (four directions)."""
+    h, w = len(collision), len(collision[0])
+    seen, queue = {origin}, deque([origin])
+    while queue:
+        x, y = queue.popleft()
+        for dx, dy in DELTAS.values():
+            point = (x + dx, y + dy)
+            if 0 <= point[0] < w and 0 <= point[1] < h and point not in seen and not collision[point[1]][point[0]]:
+                seen.add(point)
+                queue.append(point)
+    return seen
+
+
 def _trail(seed, along, other, band, size, label, amplitude, scale):
     """Centre of a meandering trail inside its band (global integer noise)."""
     return size // 2 + (_noise(seed, along, band * other, scale, label) - 50) * max(1, amplitude) // 50
 
 
-def compose_open(source, spec, key, seed, *, region=None, region_grid=None, water=None):
+def compose_open(source, spec, key, seed, *, region=None, region_grid=None, water=None, site=None):
     if region_grid is not None:
-        return _compose_v3(source, spec, key, seed, region, region_grid, water)
+        return _compose_v3(source, spec, key, seed, region, region_grid, water, site)
     if "open-terrain-v1" not in source.tags:
         raise ValueError("open generation requires a supported versioned recipe")
     w, h = source.width, source.height
@@ -161,7 +175,7 @@ def compose_open(source, spec, key, seed, *, region=None, region_grid=None, wate
                    spawns=tuple(spawns))
 
 
-def _compose_v3(source, spec, key, seed, region, grid, water=None):
+def _compose_v3(source, spec, key, seed, region, grid, water=None, site=None):
     """Generator v3: tile-level regions (organic borders) and narrow meandering game trails.
 
     Trails still cross every chunk north-south and east-west so all four exits connect,
@@ -172,7 +186,10 @@ def _compose_v3(source, spec, key, seed, region, grid, water=None):
 
     Generator v4 adds `water` (water.WaterField.grid: the chunk plus a one-tile border).
     Water blocks like a tree; a trail over it is a ford, a road over it a bridge, so the
-    trail network (and every exit it reaches) stays connected. Banks grow no trees."""
+    trail network (and every exit it reaches) stays connected. Banks grow no trees.
+
+    Generator v5 adds `site` (sites.SitePlacement): a treeless clearing with the site's
+    structures, joined to the vertical trail along its centre row (a ford over water)."""
     w, h = source.width, source.height
     ox, oy = key.x * w, key.y * h
     vertical = lambda gy: _trail(seed, gy, key.x, 37, w, "trail-v3-vertical", w // 2 - 2, 7)
@@ -226,6 +243,35 @@ def _compose_v3(source, spec, key, seed, region, grid, water=None):
             else:
                 row.append(density > 100 - r.canopy and derive_seed(seed, "tree", gx, gy) % 100 < r.canopy)
         collision.append(row)
+    site_objects, site_ground = {}, {}
+    if site is not None:
+        from .sites import layout
+        site_objects, site_ground = layout(site, seed)
+        for y in range(h):
+            for x in range(w):
+                if site.contains(x, y) and not wet(x, y):
+                    collision[y][x] = False
+        trail_x = min(w - 1, max(0, vertical(oy + site.y)))
+        for x in range(min(site.x, trail_x), max(site.x, trail_x) + 1):
+            paths[site.y][x] = True
+            collision[site.y][x] = False
+        # A structure may cover a trail, but never cut a boundary (an exit) off from the
+        # trails: each piece is kept only if every edge cell reachable before stays reachable.
+        start = min(((x, y) for y in range(h) for x in range(w) if paths[y][x]),
+                    key=lambda p: (abs(p[0] - w // 2) + abs(p[1] - h // 2), p[1], p[0]))
+        edge = lambda cells: {(x, y) for x, y in cells if x in (0, w - 1) or y in (0, h - 1)}
+        exits = edge(_flood(collision, start))
+        kept = {}
+        for (x, y) in sorted(site_objects, key=lambda p: (p[1], p[0])):
+            if wet(x, y) or (x, y) == start:
+                continue
+            collision[y][x] = True
+            if edge(_flood(collision, start)) == exits:
+                kept[(x, y)] = site_objects[(x, y)]
+                paths[y][x] = road[y][x] = False
+            else:
+                collision[y][x] = False
+        site_objects = kept
     lanes = [(x, y) for y in range(h) for x in range(w) if paths[y][x]]
     origin = min(lanes, key=lambda p: (abs(p[0] - w // 2) + abs(p[1] - h // 2), p[1], p[0]))
     ambush = region is not None and source.biome == "dark_forest" and key.x == key.y == 0
@@ -262,6 +308,8 @@ def _compose_v3(source, spec, key, seed, region, grid, water=None):
                 env_row.append(bridge if road[y][x] else ford if paths[y][x] else river)
             elif road[y][x]:
                 env_row.append(trail)
+            elif (x, y) in site_ground and not paths[y][x]:
+                env_row.append(replace(ground, glyph=site_ground[(x, y)]))
             elif r is not None and r.landmark in marks and not paths[y][x] and roll % marks[r.landmark][0] == 0:
                 env_row.append(marks[r.landmark][1])
             else:
@@ -276,8 +324,12 @@ def _compose_v3(source, spec, key, seed, region, grid, water=None):
                         env_row[-1] = replace(ground, glyph=":")
             if wet(x, y):
                 obj_row.append(None)
+            elif (x, y) in site_objects and collision[y][x]:
+                obj_row.append(Cell(site_objects[(x, y)], floor.fg, floor.bg))
             elif collision[y][x]:
                 obj_row.append(tree if forest and roll % 11 else rock)
+            elif site is not None and site.contains(x, y):
+                obj_row.append(None)   # the clearing grows no brush
             elif not paths[y][x] and not road[y][x] and (roll % 9 == 0 if r is None else roll % 100 < r.brush):
                 obj_row.append(brush)
             else:

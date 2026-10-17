@@ -6,6 +6,7 @@ from dimensional_sim.world import autopilot as ap
 from dimensional_sim.world.autopilot import Expedition
 from dimensional_sim.world.catalog import BY_ID
 from dimensional_sim.world.equipment import equip_item
+from gear_fixture import test_weapon
 from dimensional_sim.world.models import ChunkKey, DimensionSpec
 from dimensional_sim.world.open_terrain import open_assets
 from dimensional_sim.world.repository import WorldRepository
@@ -13,6 +14,12 @@ from dimensional_sim.world.runtime import Exploration, Target
 
 
 def fight(seed, ring, *, staff=False):
+    """One adjacent boar ambush (a +1 test staff stands in for any weapon)."""
+    with test_weapon():
+        return _fight(seed, ring, staff=staff)
+
+
+def _fight(seed, ring, *, staff=False):
     """One adjacent boar ambush at full health, with no unrelated rolled spots."""
     spec = DimensionSpec("forest", ("dark_forest",), 32, 16, 25)
     world = WorldRepository(seed, (spec,), open_assets(32, 16), 9)
@@ -26,8 +33,8 @@ def fight(seed, ring, *, staff=False):
     px, py = e._player()
     e.anchor = (px + 40, py)  # keep the encounter beyond the camp's safe radius
     if staff:
-        e.inventory["walking_staff"] = 1
-        e.equipped = equip_item(e.equipped, e.inventory, "walking_staff")
+        e.inventory["test_staff"] = 1
+        e.equipped = equip_item(e.equipped, e.inventory, "test_staff")
     e.game.targets.clear()
     e.admitted.clear()
     e._screen = lambda: None  # hold all other seeded opportunities out of this duel

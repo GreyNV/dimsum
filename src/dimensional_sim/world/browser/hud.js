@@ -2,7 +2,10 @@
  * life reports. Reads snapshot fields only; never decides game rules. */
 export const ATTRIBUTES = Object.freeze([
   ['strength', 'Strength', 'STR'], ['endurance', 'Endurance', 'END'], ['agility', 'Agility', 'AGI'],
-  ['intelligence', 'Intelligence', 'INT'], ['perception', 'Perception', 'PER'], ['willpower', 'Willpower', 'WIL']]);
+  ['intelligence', 'Intelligence', 'INT'], ['perception', 'Perception', 'PER'], ['willpower', 'Willpower', 'WIL'],
+  ['building', 'Building', 'BLD']]);
+/** Disciplines show only once they have earned experience (this life or dimensional). */
+export const usedAttributes = attributes => ATTRIBUTES.filter(([id]) => attributes?.[id]?.xp || attributes?.[id]?.dim_xp);
 export const LABEL = Object.freeze(Object.fromEntries(ATTRIBUTES.map(([id, name]) => [id, name])));
 /** Text color for items without a catalog color (catalog.ItemDef.color arrives in frames). */
 export const ITEM_COLOR_DEFAULT = '#e7d7b0';
@@ -21,15 +24,16 @@ export function activityText(state, paused = false) {
   }
   if (ex.activity) {
     const pct = Math.floor(ex.activity.progress / 10);
-    if (ex.activity.kind === 'rest') return `Resting at the anchor camp - ${pct}%`;
+    if (ex.activity.kind === 'rest') return `${ex.activity.name || 'Resting at the anchor camp'} - ${pct}%`;
     if (ex.activity.kind === 'pray') return `Praying to the gods - ${pct}%`;
     if (ex.activity.kind === 'think') return `Thinking about the road - ${pct}%`;
     if (ex.activity.kind === 'contemplate') return `Contemplating the forest - ${pct}%`;
-    if (ex.activity.kind === 'craft') return `${ex.activity.name} - ${pct}%`;
+    if (ex.activity.kind === 'craft' || ex.activity.kind === 'build') return `${ex.activity.name} - ${pct}%`;
+    if (ex.activity.interaction) return `${ex.activity.interaction} - ${pct}%`;
     return `${ex.activity.verb || 'Investigating'} ${ex.activity.name.toLowerCase()} - ${pct}%`;
   }
   if (ex.mode === 'home') return 'Badly hurt - heading back to the anchor camp';
-  if (ex.mode === 'fight') return `Fists up - punching a ${(ex.opponent || 'foe').toLowerCase()}`;
+  if (ex.mode === 'fight') return `${ex.weapon?.item ? 'Weapon up' : 'Fists up'} - fighting a ${(ex.opponent || 'foe').toLowerCase()}`;
   if (ex.control === 'manual') return 'You have taken control';
   if (ex.mode === 'travel' && ex.goal) {
     const spot = state.spots?.find(s => s.x === ex.goal.x && s.y === ex.goal.y);
@@ -39,13 +43,16 @@ export function activityText(state, paused = false) {
 }
 
 /** Floating texts for new log entries: XP, items gained, food eaten. */
-export function rewardTexts(entry, colors = {}) {
+/** Floating texts for one log entry; items with a rarity glint (frame `item_glints`) carry
+ * `glint` so the scene plays a reveal burst for them. */
+export function rewardTexts(entry, colors = {}, glints = {}) {
   const texts = [];
   if (entry.type === 'encounter' && entry.xp) texts.push({text: `+${entry.xp} ${LABEL[entry.attribute]}`, color: '#bfe39a'});
   if (entry.blessing) texts.push({text: `+${entry.blessing} blessing`, color: '#ffe9a8'});
   if (entry.type === 'blessing') texts.push({text: 'Prayer completed', color: '#fff3c4'});
   for (const [item, count] of entry.items || []) {
-    if (count > 0) texts.push({text: `+${count} ${item.replaceAll('_', ' ')}`, color: colors[item] || ITEM_COLOR_DEFAULT});
+    if (count > 0) texts.push({text: `+${count} ${item.replaceAll('_', ' ')}`, color: colors[item] || ITEM_COLOR_DEFAULT,
+      ...(glints[item] ? {glint: glints[item]} : {})});
   }
   if (entry.type === 'eat') texts.push({text: entry.text.replace(/^Ate /, '').replace(/\.$/, ''), color: '#f0c56a'});
   return texts;
@@ -163,7 +170,7 @@ export class ExpeditionHud {
     }
   }
   renderAttributes(ex) {
-    this.$('attributes').replaceChildren(...ATTRIBUTES.map(([id, name, short]) => {
+    this.$('attributes').replaceChildren(...usedAttributes(ex.attributes).map(([id, name, short]) => {
       const a = ex.attributes[id], li = this.doc.createElement('li');
       li.title = `${name}: level ${a.level} (${a.into}/${a.next} XP this life)\n`
         + `Dimensional level ${a.dim_level} (${a.dim_into}/${a.dim_next}, persists)\nSpeed x${(a.speed / 1000).toFixed(2)}`;
@@ -180,7 +187,9 @@ export class ExpeditionHud {
   }
   renderInventory(ex) {
     const rows = ex.inventory;
-    this.$('inventory-count').textContent = `${rows.length}/${ex.inventory_slots}`;
+    const load = ex.load?.percent > 100 ? ` · load +${ex.load.percent - 100}%` : '';
+    this.$('inventory-count').textContent = `${rows.length}/${ex.inventory_slots}${load}`;
+    this.$('inventory-count').title = ex.load ? `Carrying ${ex.load.carried} items: walking takes ${ex.load.percent}% of normal time` : '';
     const slots = [];
     for (let i = 0; i < ex.inventory_slots; i++) {
       const row = rows[i], li = this.doc.createElement('li');
@@ -208,7 +217,8 @@ export class ExpeditionHud {
           + (entry.blessing ? ` ✦+${entry.blessing}` : '')
         : {eat: 'Ate', rest: 'Rested', life: 'Anchor', blessing: 'Prayer', lore: 'The road', trade: 'Offered',
           ambush: 'Ambush', craft: entry.xp ? `Crafted +${entry.xp} ${LABEL[entry.attribute] || ''}` : 'Crafted',
-          reflect: 'Thought', purchase: 'Anchor', rebirth: 'Rebirth'}[entry.type] || entry.type;
+          reflect: 'Thought', purchase: 'Anchor', rebirth: 'Rebirth',
+          build: entry.xp ? `Built +${entry.xp} ${LABEL[entry.attribute] || ''}` : 'Built', stow: 'Chest'}[entry.type] || entry.type;
       const text = this.doc.createElement('span'); text.textContent = entry.text;
       li.append(head, text);
       return li;
@@ -232,7 +242,8 @@ export class ExpeditionHud {
 
 /** Anchor shop rows grouped for display: [{title, rows}] (rows come from the server). */
 export function shopSections(shop) {
-  const groups = [['unlock', 'New possibilities (ash / blessing)'], ['boon', 'Next-life boon (blessing)']];
+  const groups = [['unlock', 'New possibilities (ash / blessing)'], ['boon', 'Next-life boon (blessing)'],
+    ['bind', 'Bind camp buildings (ash)']];
   return groups.map(([kind, title]) => ({kind, title, rows: (shop || []).filter(r => r.kind === kind && !r.owned)}))
     .filter(section => section.rows.length);
 }

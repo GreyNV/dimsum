@@ -53,6 +53,8 @@ class PlanningMixin:
 
     def _choose_goal(self):
         if self.health < RETREAT_BELOW and (self.hunger > 0 or not self._has_food()):
+            return self._rest_goal()
+        if self._camp_work_ready():   # a craft or building waits at the camp, or a full pack to stow
             return self._home_goal()
         player_field = self._field({self._player()})
         return self._best_candidate(player_field) or self._wander_goal(player_field)
@@ -96,15 +98,17 @@ class PlanningMixin:
         """Cells that count as arriving at the goal (home crosses chunks stepwise)."""
         if goal["kind"] == "wander":
             return {(goal["x"], goal["y"])}
+        if goal["kind"] == "target":   # anywhere a blow reaches it from
+            return self.strike_cells(goal["x"], goal["y"])
         if goal["kind"] != "home":
             return self._approach(goal["x"], goal["y"])
         w, h = self._dims()
-        ax, ay = self.anchor
+        ax, ay = goal["x"], goal["y"]   # the anchor, or this life's campfire
         acx, acy = ax // w, ay // h
         center = self.game.player.chunk
         if abs(acx - center.x) <= 1 and abs(acy - center.y) <= 1 and \
                 self.game.world.peek(ChunkKey(self.dimension, acx, acy)) is not None:
-            return {self.anchor}
+            return {(ax, ay)}
         # Anchor beyond the resident area: walk into the neighbor chunk toward it.
         step = (acx > center.x) - (acx < center.x), (acy > center.y) - (acy < center.y)
         tx, ty = center.x + step[0], center.y + step[1]

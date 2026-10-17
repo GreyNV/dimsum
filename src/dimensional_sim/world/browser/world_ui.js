@@ -6,8 +6,16 @@ export const REGION_CUES = Object.freeze({
   still_glade: 'Open ground and quiet water. Springs and animal signs are easier to find.'
 });
 
+/** Plain words for catalog.ECOLOGY, for the "picked over" cue. */
+const ECOLOGY_WORDS = {wood: 'fallen wood', berries: 'berries', game: 'animal signs', fungi: 'mushrooms', eggs: 'nests', fish: 'fish'};
 export function regionCue(region) {
-  return REGION_CUES[region?.id] || '';
+  if (region?.shimmer) return 'The air hums here. Rare things are closer this life.';
+  const base = region?.site ? `${region.site}: ${region.condition?.text || 'a landmark with its own encounters and materials.'}`
+    : REGION_CUES[region?.id] || '';
+  const worked = (region?.worked || []).map(e => ECOLOGY_WORDS[e] || e);
+  if (!worked.length) return base;
+  const list = worked.length > 1 ? `${worked.slice(0, -1).join(', ')} and ${worked.at(-1)}` : worked[0];
+  return `Picked over this life: fewer ${list} around here.`;   // replaces the flavour line (panel height)
 }
 
 export function skillSlots(expedition) {

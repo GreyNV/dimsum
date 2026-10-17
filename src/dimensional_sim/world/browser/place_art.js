@@ -2,7 +2,7 @@
  * site and the old man of the prologue. Ground decoration only (never blocking). */
 import {CELL_W, CELL_H, visualHash} from './view.js';
 import {setupText} from './art.js';
-import {ACTOR_FOOT, OUTLINE, mirrorSprite, paintParts} from './sprites.js';
+import {ACTOR_FOOT, OUTLINE, litCell, mirrorSprite, paintParts} from './sprites.js';
 
 /** Encounter spot sprites: small ground features, outlined like actors. */
 const SPOT_ROLES = Object.freeze({
@@ -11,7 +11,9 @@ const SPOT_ROLES = Object.freeze({
   g: {fill: '#6d7468', ink: '#b9bfae'}, q: {fill: '#55743c', ink: '#a9c97a'},
   u: {fill: '#3b2a1c', ink: '#8b6b4a'}, x: {fill: '#6d7468', ink: '#f2d27a'},
   y: {fill: '#e5c772', ink: '#fff3bc'}, c: {fill: '#a6bacc', ink: '#e8f5ff'},
-  d: {fill: '#9a6a3c', ink: '#d9b07a'}, w: {fill: '#e8dcc4', ink: '#fff8e8'}, k: {fill: '#4a3626', ink: '#a88a64'}
+  d: {fill: '#9a6a3c', ink: '#d9b07a'}, w: {fill: '#e8dcc4', ink: '#fff8e8'}, k: {fill: '#4a3626', ink: '#a88a64'},
+  // rare phenomena: an off-colour shimmer and shadows that fall the wrong way
+  v: {fill: '#5b3f8a', ink: '#e2d2ff'}, s: {fill: '#16131f', ink: '#5d5080'}
 });
 export const SPOTS = Object.freeze({
   bramble_berries: {paint: ['  l r l  ', ' lrlrlrl ', 'lrrllrrll', ' lllrlll '], glyph: ['  / o \\  ', ' /o/o/o\\ ', ';o;v;o;v;', ' \\;o;;;/ ']},
@@ -19,16 +21,108 @@ export const SPOTS = Object.freeze({
   animal_tracks: {paint: ['u  u   u ', '  u  u   ', 'u   u  u '], glyph: ['v  v   v ', '  v  v   ', 'v   v  v ']},
   gnarled_tree: {paint: ['   lll   ', '  lllll  ', '  lolol  ', '   ooo   ', '  oo oo  '], glyph: ['   ^^^   ', '  /:::\\  ', '  (|:|)  ', '   |||   ', '  /| |\\  ']},
   forest_spring: {paint: ['  cccccc  ', ' gaaaaaag ', 'gaaaaaaaag', ' gggggggg '], glyph: ['  .    .  ', ' /~~~~~~\\ ', '|~*~~~~*~|', ' \\______/ ']},
+  hanging_leaf: {paint: ['    v    ', '   qqq   ', '  qqqqq  ', '   qqq   ', '         ', '  s s s  '],
+    glyph: ['    *    ', '   /^\\   ', '  <:|:>  ', '   \\v/   ', '         ', '  . . .  ']},
+  backward_ripple: {paint: [' aaavaaa ', 'aavaaavaa', ' aaavaaa '], glyph: [' ~~~^~~~ ', '~~^~~~^~~', ' ~~~^~~~ ']},
+  double_shadow: {paint: ['    qqq    ', '   qgqgq   ', '  ggggggg  ', 'sss ggg sss'],
+    glyph: ['    .^.    ', '   /:,:\\   ', '  /:___:\\  ', '::: \\_/ :::']},
+  split_shadow_tree: {paint: ['  v lll v  ', '   lllll   ', '   lolol   ', '    ooo    ', 'sss ooo sss'],
+    glyph: ['  * ^^^ *  ', '   /:::\\   ', '   (|:|)   ', '    |||    ', '::: /|\\ :::']},
   mossy_stone: {paint: ['   qqq   ', '  qgqgq  ', ' ggggggg ', '  ggggg  '], glyph: ['   .^.   ', '  /:,:\\  ', ' /:___:\\ ', '  \\___/  ']},
   old_carvings: {paint: ['   xxx   ', '  ggggg  ', '  gxgxg  ', '  ggggg  '], glyph: ['   *:*   ', '  /___\\  ', '  |*o*|  ', '  /___\\  ']},
-  abandoned_camp: {paint: ['  rrrrr  ', 'orrrrrro ', ' ooooooo ', ' qooqooq '],
-    glyph: ['  /^^^\\  ', ' /_____\\ ', ' |# # #| ', ' /_o_o_\\ ']},
   moonlit_pool: {paint: ['  ccccc  ', ' caaaaac ', 'caaaaaaac', ' gcccccg '],
     glyph: ['  .***.  ', ' /~~~~~\\ ', '|~*~~~*~|', ' \\_____/ ']},
-  fallen_watchtower: {paint: ['  qxxq   ', '  qxxq   ', ' qxxxxq  ', ' qgxxgq  ', ' qgggggq '],
-    glyph: ['  /++\\   ', '  |::|   ', ' /|::|\\  ', ' |/__\\|  ', ' /_//_\\  ']},
   mushroom_ring: {paint: [' r r r r ', 'rggrggrgr', ' gg gg gg', 'rgggggggr'],
     glyph: [' ^ ^ ^ ^ ', '/o\\/o\\/o\\', ' .. .. ..', '^.......^']},
+  // Landmark site encounters (abandoned camp, fallen watchtower).
+  camp_packs: {paint: ["  dd  oo ", " dddd ooo", " dddd ooo", "  uu  uu "],
+    glyph: ["  /\\  ,. ", " (::) (*)", " (__) (_)", "  \"\"  \"\" "]},
+  camp_firepit: {paint: ["    k    ", "  okkko  ", " gooooog ", "  ggggg  "],
+    glyph: ["    |    ", "  \\.:./  ", " o=====o ", "  o-o-o  "]},
+  camp_bedroll: {paint: ["  wwwwww ", " rrrrrrrr", " rwrwrwrr", "  uu  uu "],
+    glyph: ["  ~~~~~~ ", " (======)", " (::::::)", "  \"\"  \"\" "]},
+  tower_rubble: {paint: ["   gg    ", "  gxgg o ", " ggggxgo ", "gggggggg "],
+    glyph: ["   ..    ", "  /:\\. / ", " /:.:\\./ ", "/______\\ "]},
+  tower_stair: {paint: ["      gg ", "    gggg ", "  gggggg ", "gggggggg "],
+    glyph: ["      _| ", "    _|:| ", "  _|::.| ", "_|:::::| "]},
+  tower_armory: {paint: ["  ooooo  ", " oxoxoxo ", " ooooooo ", " gggggg  "],
+    glyph: ["  |=|=|  ", " |+|+|+| ", " |_|_|_| ", " /::::\\  "]},
+  // Woodcutters' clearing, hunter's lodge, ruined shrine, old barrow.
+  lumber_logs: {paint: ['  oo oo  ', ' oooooooo', 'oooooooo ', ' uu   uu '],
+    glyph: ['  () ()  ', ' (@)(@)(@', '(@)(@)(@)', ' "" ""   ']},
+  lumber_shed: {paint: [' kkkkkkk ', 'kooooooo ', 'ko rr go ', 'ko dd go '],
+    glyph: [' /=====\\ ', '/|-----| ', '||&& !|| ', '||[] ||| ']},
+  lumber_oak: {paint: ['ll    l  ', 'llloooooo', ' looooooo', '  u    u '],
+    glyph: ['^v    ^  ', 'v^(=====@', ' ^(=====@', '  "    " ']},
+  lodge_racks: {paint: ['k     k ', 'kdddddk ', 'kdddddk ', 'k     k '],
+    glyph: ['+-----+ ', '|#####| ', '|#:#:#| ', '/     \\ ']},
+  lodge_snares: {paint: ['o   o   ', ' rr  rr ', 'oqqoqqoq', ' u   u  '],
+    glyph: ['|   |   ', ' ()  () ', '-;;-;;-;', ' "   "  ']},
+  lodge_trophies: {paint: ['w  w  w ', 'wkkwkkw ', ' kkkkk  ', ' k   k  '],
+    glyph: ['Y  )  Y ', '\\=|=|=/ ', ' |===|  ', ' |   |  ']},
+  shrine_altar: {paint: ['   yy    ', '  ggggg  ', ' gxg gxg ', ' ggg ggg ', 'ggggggggg'],
+    glyph: ['   **    ', '  _/ \\_  ', ' |*| |*| ', ' |_| |_| ', '/_______\\']},
+  shrine_offerings: {paint: ['  y  y   ', ' ggg ggg ', ' gyg gxg ', '  g   g  '],
+    glyph: ['  .  $   ', ' \\$/ \\o/ ', ' (_) (_) ', '  "   "  ']},
+  shrine_pillars: {paint: ['  xgx  ', '  g g  ', '  gxg  ', '  g g  ', ' ggggg '],
+    glyph: ['  =o=  ', '  |@|  ', '  |o|  ', '  |@|  ', ' /___\\ ']},
+  barrow_goods: {paint: ['  qqqqq  ', ' qgggggq ', 'qgu y ugq', 'qgu w ugq'],
+    glyph: ['  _;;;_  ', ' /=====\\ ', '/|  $  |\\', ';|  "  |;']},
+  barrow_stones: {paint: ['g   g   g', 'g q g q g', 'g q g q g', 'qqqqqqqqq'],
+    glyph: ['n   n   n', '| , | , |', '| ; | ; |', ';;;;;;;;;']},
+  barrow_bones: {paint: ['   w     ', '  www w  ', ' wwwwwww ', '  u   u  '],
+    glyph: ['   o     ', '  )=( )  ', ' <=o==o> ', '  "   "  ']},
+  // Forest chain leads: clues that point on, and what they lead to.
+  broken_branches: {paint: ['  l    l ', ' oo   oo ', 'o  o o  o', ' u  u  u '],
+    glyph: ['  ^    ^ ', ' /=   =\\ ', '/  \\ /  \\', ' "  "  " ']},
+  cut_wood: {paint: [' o   kk  ', 'dddddkkk ', 'ddddddddd', ' u     u '],
+    glyph: [' |   /\\  ', '(@)(@)\\| ', '(@)(@)(@)', ' "     " ']},
+  trampled_bushes: {paint: ['l  l   l ', 'llqllqlll', 'qqqqqqqqq', ' u u u u '],
+    glyph: ['v  ;   v ', '_,_;__,_;', '=========', ' v v v v ']},
+  feeding_ground: {paint: ['  l r l  ', ' lllrlll ', 'u lllll u', '  u   u  '],
+    glyph: ['  / o \\  ', ' /;;o;;\\ ', 'v ;;;;; v', '  v   v  ']},
+  mushroom_dust: {paint: ['  c   c  ', ' c  c   c', 'w  c  c  ', '  w    w '],
+    glyph: ['  .   \'  ', ' ,  .   \'', 'o  ,  .  ', '  o    o ']},
+  rotten_log: {paint: ['  w  w   ', 'kkkkkkkkk', 'kukkkkkuk', ' qq   qq '],
+    glyph: ['  n  n   ', '(=======)', '(o:::::o)', ' ;;   ;; ']},
+  trail_marker: {paint: ['  dddd   ', '  dddd   ', '   k     ', '   k     ', '  qqq    '],
+    glyph: ['  <==|   ', '  |==>   ', '   |     ', '   |     ', '  ;;;    ']},
+  looping_path: {paint: [' dddddd  ', 'd      d ', 'd  ddd  d', ' ddd ddd '],
+    glyph: [' .-~~-.  ', '(      ) ', '\'  .-.  )', ' \'-\' \'-\' ']},
+  map_scrap: {paint: ['dddddddd ', 'ddrdddkd ', 'dddrrddd ', 'kddddddd '],
+    glyph: ['.------. ', '|.-.  x| ', "|  '-.-| ", "'------' "]},
+  hidden_stash: {paint: ['   uuu   ', ' uuddduu ', 'uudydduu ', ' uuuuuu  '],
+    glyph: ['   ,.,   ', ' ./==\\.  ', '.|[o]=|. ', ' \'\'\'\'\'\'  ']},
+  // The riverbank: things beside a river or ford, and the chains that lead along it.
+  reed_bed: {paint: ['q q q q  ', 'qlqlqlq  ', 'qlqlqlql ', 'aaaaaaaaa'],
+    glyph: ['| | | |  ', '|\\|/|\\|  ', '|||||||/ ', '~~~~~~~~~']},
+  fishing_pool: {paint: ['  ggggg  ', ' gaaaaag ', 'gaacaaaag', ' ggggggg '],
+    glyph: ['  .---.  ', ' /~ ~~ \\ ', '(~ ><> ~)', ' \\_____/ ']},
+  river_shallows: {paint: ['  aa aa  ', ' agaagaa ', 'aaagaagaa', ' aaaaaaa '],
+    glyph: ['  ~~ ~~  ', ' ~o~~o~~ ', '~~~O~~o~~', ' ~~~~~~~ ']},
+  fishing_net: {paint: [' w   r   ', 'wdddddddw', 'dwdwdwdwd', ' ddddddd '],
+    glyph: [' o   o   ', '#########', '#+#+#+#+#', ' ####### ']},
+  fish_scales: {paint: ['  c   c  ', ' c  c   c', '  c   c  ', ' uu  uu  '],
+    glyph: ['  *   *  ', ' *  \'   *', '  \'   *  ', ' ""  ""  ']},
+  busy_pool: {paint: [' c  c  c ', ' gaaaaag ', 'gaacaacag', ' ggggggg '],
+    glyph: [' \'  .  \' ', ' /~><~~\\ ', '(~ ><> <)', ' \\_____/ ']},
+  ripples: {paint: [' aaaaaaa ', 'aaaaaaaaa', ' aaaaaaa '],
+    glyph: [' ( ~ ~ ) ', '( ( O ) )', ' ( ~ ~ ) ']},
+  float_line: {paint: ['r   r   r', 'kkkkkkkkk', 'aaaaaaaaa'],
+    glyph: ['o   o   o', '~-~-~-~-~', '~~~~~~~~~']},
+  fishing_platform: {paint: ['ooooo    ', 'oo oo k  ', 'k  k  kk ', 'aaaaaaaaa'],
+    glyph: ['=====    ', '== =/ |  ', '|  |  |\\ ', '~~~~~~~~~']},
+  bootprints: {paint: ['u    u   ', '  u    u ', 'u    u   ', '  u    u '],
+    glyph: ['0    0   ', '  0    0 ', '0    0   ', '  0    0 ']},
+  fishing_camp: {paint: ['  dd   k k', ' dddd  kck', 'dduudd kck', 'dduudd k k'],
+    glyph: ['  /\\   | |', ' /..\\  |<|', '/_||_\\ |<|', '|_||_| | |']},
+  fresh_footprints: {paint: ['u   u    ', '  u   u  ', '    u   u', 'qq    qq '],
+    glyph: ['o   o    ', '  o   o  ', '    o   o', ';;    ;; ']},
+  hidden_ford: {paint: ['aaaaaaaaa', 'agaaagaaa', 'aaagaaaga', 'aaaaaaaaa'],
+    glyph: ['~~~~~~~~~', '~O~~~O~~~', '~~~O~~~O~', '~~~~~~~~~']},
+  // Needs an axe: a standing dead tree to chop.
+  dead_tree: {paint: ['  k   k  ', ' kk k kk ', '  kkokk  ', '   ooo   ', '  oo oo  '],
+    glyph: ['  \\   /  ', ' \\\\ | // ', '  \\\\|//  ', '   |||   ', '  /| |\\  ']},
   // Temporary deer leads: a fresh hoof trail, then the deer itself at the crossing.
   deer_trail: {paint: ['k   k     ', '  k   k   ', '    k   k ', ' oo     k '],
     glyph: ['"   "     ', '  "   "   ', '    "   " ', ' /=     " ']},
@@ -37,6 +131,34 @@ export const SPOTS = Object.freeze({
   wayside_shrine: {paint: ['    y    ', '  ggggg  ', ' ggggggg ', '  gxyxg  ', '  ggggg  ', ' qgggggq '],
     glyph: ['    +    ', '  /^^^\\  ', ' /_____\\ ', '  |*i*|  ', '  |___|  ', ' ;/___\\; ']}
 });
+
+/** A campfire the avatar made this life: a ring of stones, crossed sticks and a small
+ * flickering flame with a warm glow. Ground decoration only (non-blocking). */
+const FIRE_BASE = Object.freeze({paint: [' ko ok ', 'gokkkog', 'ggggggg'],
+  glyph: [' \\/ \\/ ', 'o=XXX=o', 'o.o.o.o']});
+const FLAME_ROLES = Object.freeze({y: {fill: '#ffd36a', ink: '#fff6c8'}, r: {fill: '#e8742c', ink: '#ffd36a'},
+  d: {fill: '#b8323f', ink: '#ff9a5a'}});
+export const FLAMES = Object.freeze([
+  {paint: ['   y   ', '  yry  ', '  rdr  '], glyph: ['   ^   ', '  ^*^  ', '  ***  ']},
+  {paint: ['  y    ', '  ryy  ', '  rdr  '], glyph: ['  ^    ', '  *^^  ', '  ***  ']},
+  {paint: ['    y  ', '  yyr  ', '  rdr  '], glyph: ['    ^  ', '  ^^*  ', '  ***  ']},
+]);
+export function drawCampfire(ctx, x, y, {clock = 0, reducedMotion = false} = {}) {
+  setupText(ctx);
+  x = Math.round(x); y = Math.round(y);
+  const ground = y + ACTOR_FOOT - 2;
+  ctx.save();
+  const pulse = reducedMotion ? 0 : Math.sin(clock / 240) * .04;
+  const glow = ctx.createRadialGradient(x, ground - 8, 2, x, ground - 8, 46);
+  glow.addColorStop(0, `rgba(255,170,80,${.30 + pulse})`); glow.addColorStop(1, 'rgba(255,140,60,0)');
+  ctx.fillStyle = glow; ctx.beginPath(); ctx.ellipse(x, ground - 6, 46, 30, 0, 0, Math.PI * 2); ctx.fill();
+  const baseW = FIRE_BASE.paint[0].length * CELL_W;
+  paintParts(ctx, FIRE_BASE, SPOT_ROLES, x - baseW / 2, ground - FIRE_BASE.paint.length * CELL_H);
+  const flame = FLAMES[reducedMotion ? 0 : Math.floor(clock / 180) % FLAMES.length];
+  const flameW = flame.paint[0].length * CELL_W;
+  paintParts(ctx, flame, FLAME_ROLES, x - flameW / 2, ground - (FIRE_BASE.paint.length + 2) * CELL_H);
+  ctx.restore();
+}
 
 /** The anchor stone at the anchor cell. Ground decoration only (non-blocking). */
 const CAMP_ROLES = Object.freeze({g: {fill: '#5d6470', ink: '#9fd0ff'}, v: {fill: '#2b3140', ink: '#cfe6ff'},
@@ -154,7 +276,6 @@ export function drawAmbushSite(ctx, x, y) {
   part('sack', -78, 35); part('sack', 19, 34); part('tornCloth', 115, 39);
 }
 
-/** Spot at tile center (x, y); a sparkle marks it, brighter when it is the goal. */
 /** Drawn for a spot whose art key has no sprite yet, so content is never invisible. */
 export const FALLBACK_SPOT = Object.freeze({paint: ['  ggg  ', ' gxxxg ', '  ggg  '],
   glyph: ['  .-.  ', ' ( ? ) ', "  '-'  "]});
@@ -162,6 +283,8 @@ export const FALLBACK_SPOT = Object.freeze({paint: ['  ggg  ', ' gxxxg ', '  ggg
 /** Sprite for a spot: its catalog art key (ActionDef.art, default the action id). */
 export const spotSprite = spot => SPOTS[spot.art || spot.encounter] || FALLBACK_SPOT;
 
+/** Spot at tile center (x, y); a sparkle marks it, brighter when it is the goal and in its
+ * rarity color (catalog RarityDef, frame `glint`) for uncommon and rarer spots. */
 export function drawSpot(ctx, spot, x, y, {clock = 0, goal = false, fade = 0} = {}) {
   if (!spot.encounter && !spot.art) return;
   const sprite = spotSprite(spot);
@@ -177,14 +300,19 @@ export function drawSpot(ctx, spot, x, y, {clock = 0, goal = false, fade = 0} = 
   sprite.paint.forEach((row, r) => [...row].forEach((role, c) => {
     if (role === ' ') return;
     ctx.fillStyle = SPOT_ROLES[role].fill; ctx.fillRect(left + c * CELL_W, top + r * CELL_H, CELL_W, CELL_H);
+    litCell(ctx, sprite.paint, r, c, left + c * CELL_W, top + r * CELL_H);
     const ch = sprite.glyph[r][c];
     if (ch !== ' ') { ctx.fillStyle = SPOT_ROLES[role].ink; ctx.fillText(ch, left + c * CELL_W, top + r * CELL_H); }
   }));
   if (!fade) {
     const lift = Math.round(Math.sin((clock + visualHash(spot.x, spot.y, 3) % 900) / 300) * 2);
-    const sy = top - 7 + lift, size = goal ? 3 : 2;
+    const sy = top - 7 + lift, size = goal || spot.glint ? 3 : 2;
     ctx.fillStyle = OUTLINE; ctx.fillRect(x - size - 1, sy - size - 1, size * 2 + 2, size * 2 + 2);
-    ctx.fillStyle = goal ? '#fff0b0' : '#d8b860'; ctx.fillRect(x - size, sy - size, size * 2, size * 2);
+    ctx.fillStyle = spot.glint || (goal ? '#fff0b0' : '#d8b860'); ctx.fillRect(x - size, sy - size, size * 2, size * 2);
+    if (spot.glint && Math.floor((clock + visualHash(spot.x, spot.y, 5) % 1200) / 400) % 3 === 0) {
+      ctx.fillStyle = spot.glint;   // a slow twinkle: four points around the sparkle
+      for (const [dx, dy] of [[0, -6], [0, 6], [-6, 0], [6, 0]]) ctx.fillRect(x + dx - 1, sy + dy - 1, 2, 2);
+    }
   }
   ctx.restore();
 }
@@ -246,4 +374,64 @@ export function drawElder(ctx, x, y, {clock = 0, facing = 'west', alpha = 1, tal
   }
   ctx.restore();
   return {left, top, width, height};
+}
+
+/** Buildings at the anchor camp (catalog BUILDINGS), built from several small parts in the same
+ * outlined cell style as the ambush wreckage beside them. Presentation only. */
+const BUILDING_ROLES = Object.freeze({
+  d: {fill: '#4a3626', ink: '#a88a64'}, w: {fill: '#7a5532', ink: '#3b2a1c'},
+  t: {fill: '#b59050', ink: '#6e5233'}, i: {fill: '#5f6660', ink: '#c9d0c4'},
+  s: {fill: '#788278', ink: '#d9ddd0'}, h: {fill: '#a6845d', ink: '#5a4128'},
+  r: {fill: '#c8a46a', ink: '#6e5233'}, c: {fill: '#8f7a55', ink: '#3b2a1c'},
+  y: {fill: '#e5c772', ink: '#fff3bc'}});
+export const BUILDING_PARTS = Object.freeze({
+  rack: {paint: ["ddddddd", "dhhhhhd", "dhhhhhd", "d hhh d", "d     d"],
+    glyph: ["+-=-=-+", "|/~~~\\|", "|(:::)|", "| \\_/ |", "|     |"]},
+  bench: {paint: ["  i  y    ", "tttttttttt", "wwiiwwrrww", "w        w"],
+    glyph: ["  T  o    ", "=-==-==-==", "|[=]|(@)||", "/        \\"]},
+  grind: {paint: [" sss ", "sssss", "d s d"],
+    glyph: [" .-. ", "(-o-)", "/ | \\"]},
+  stump: {paint: [" ii ", "dddd", " dd "],
+    glyph: [" /] ", "(@@)", " || "]},
+  chest: {paint: [" ttttttt ", "wiwwwwwiw", "wiwwywwiw", "ddddddddd"],
+    glyph: [" /=====\\ ", "|#|-=-|#|", "|#|=o=|#|", "\\_______/"]},
+  barrel: {paint: [" dd ", "wiiw", "wwww", "wiiw"],
+    glyph: [" __ ", "(==)", "|  |", "(==)"]},
+  rope: {paint: ["rrr", "rrr"],
+    glyph: [".@.", "(@)"]},
+  sack: {paint: [" c ", "ccc", "ccc"],
+    glyph: [" ^ ", "(:)", "(_)"]},
+});
+/** Per building: where it stands (tile offset from the anchor stone) and its parts, back to
+ * front, as [part, dx px, dy px] with dy measured up from the ground line. */
+export const BUILDING_ART = Object.freeze({
+  crafting_station: {slot: [-3, 2], parts: [['rack', -34, 6], ['grind', -44, 0], ['bench', -20, 0],
+    ['stump', 22, 0]]},
+  storage_chest: {slot: [3, 2], parts: [['barrel', -32, 0], ['chest', -16, 0], ['sack', 22, 0], ['rope', 21, -2]]},
+});
+
+/** Draw `buildings` ({id, bound}) around the anchor stone at (x, y); bound ones carry a soul glint. */
+export function drawBuildings(ctx, x, y, buildings = [], {clock = 0} = {}) {
+  setupText(ctx);
+  buildings.forEach((b, i) => {
+    const art = BUILDING_ART[b.id];
+    const [sx, sy] = art?.slot || [3, -2];
+    const bx = Math.round(x + sx * 24), ground = Math.round(y + sy * 28 + ACTOR_FOOT - 2);
+    ctx.save();
+    if (art) {
+      ctx.fillStyle = 'rgba(0,0,0,.28)';   // a soft footprint so the pieces read as one place
+      ctx.beginPath(); ctx.ellipse(bx - 4, ground + 3, 30, 6, 0, 0, Math.PI * 2); ctx.fill();
+      for (const [name, dx, dy] of art.parts) {
+        const part = BUILDING_PARTS[name];
+        paintParts(ctx, part, BUILDING_ROLES, bx + dx, ground - dy - part.paint.length * CELL_H);
+      }
+    } else {
+      paintParts(ctx, FALLBACK_SPOT, SPOT_ROLES, bx - 14, ground - 21);
+    }
+    if (b.bound) {   // bound to the anchor: a slow blue spark above it
+      ctx.globalAlpha = .55 + .35 * Math.sin(clock / 600 + i);
+      ctx.fillStyle = '#9fd0ff'; ctx.fillRect(bx - 2, ground - 48 - Math.round(Math.sin(clock / 400) * 2), 3, 3);
+    }
+    ctx.restore();
+  });
 }

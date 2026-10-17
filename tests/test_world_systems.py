@@ -9,11 +9,15 @@ import unittest
 from dataclasses import replace
 from unittest.mock import patch
 
-from dimensional_sim.world import effects
+from dimensional_sim.world import drops, effects
+from dimensional_sim.world.actions import Context, spot_shares, spot_tiers
+from dimensional_sim.world.encounters import roll_loot
 from dimensional_sim.world.autopilot import Expedition
 from dimensional_sim.world.catalog import (
-    ACTIONS, BIOMES, BOONS, BY_ID, CATEGORY_STYLES, ENEMIES, ITEMS, UNLOCKS, Effect, EnemyDef)
+    ACTIONS, BIOMES, BOONS, BY_ID, CATEGORY_STYLES, DROP_TABLES, ENEMIES, ITEMS, UNLOCKS, DropTable, Effect,
+    EnemyDef, Pick, validate_catalog)
 from dimensional_sim.world.models import ChunkKey
+from gear_fixture import TEST_STAFF, test_weapon
 from dimensional_sim.world.runtime import Exploration, Target
 from dimensional_sim.world.web import new_world
 
@@ -37,7 +41,7 @@ def expedition(seed=482910):
 class ArtCoverageTests(unittest.TestCase):
     def test_every_spot_and_lead_has_client_art(self):
         spots = js_object_keys((BROWSER / "place_art.js").read_text(encoding="utf-8"), "SPOTS")
-        missing = sorted(a.sprite for a in ACTIONS if a.placement in ("spot", "lead") and a.enemy is None
+        missing = sorted(a.sprite for a in ACTIONS if a.placement in ("spot", "lead", "site") and a.enemy is None
                          and a.sprite not in spots)
         self.assertEqual(missing, [], "add these keys to place_art.js SPOTS")
 
@@ -53,7 +57,8 @@ class ArtCoverageTests(unittest.TestCase):
 
 class EffectTests(unittest.TestCase):
     def test_gear_and_boons_combine_in_order(self):
-        self.assertEqual(effects.total({"weapon": "walking_staff"}, None, "punch_damage"), 1)
+        with test_weapon():
+            self.assertEqual(effects.total({"weapon": "test_staff"}, None, "punch_damage"), 1)
         both = effects.scale(1000, {"body": "hide_wrap"}, "iron_skin", "enemy_hit_percent")
         self.assertEqual(both, 1000 * 70 // 100 * 75 // 100)
         self.assertEqual(effects.scale(1000, {}, None, "enemy_hit_percent"), 1000)
@@ -63,7 +68,7 @@ class EffectTests(unittest.TestCase):
             effects.total({}, None, "enemy_hit_percent")
 
     def test_a_new_gear_effect_needs_no_engine_change(self):
-        spear = replace(ITEMS["walking_staff"], id="test_spear", name="Test spear",
+        spear = replace(TEST_STAFF, id="test_spear", name="Test spear",
                         effects=(Effect("punch_damage", 3),))
         with patch.dict(ITEMS, test_spear=spear):
             e = expedition()
@@ -105,7 +110,8 @@ class EnemyAndBiomeTests(unittest.TestCase):
         with patch.dict(ENEMIES, test_wolf=wolf), patch.dict(BY_ID, bramble_boar=fight):
             self.assertGreater(e.fight_damage(3, fight), before)
             self.assertLessEqual(e.frontier(), 2, "a deadlier threat pulls the frontier in")
-            self.assertEqual([a.enemy for a in e.threats()], ["test_wolf"])
+            self.assertIn("test_wolf", [a.enemy for a in e.threats()])
+            self.assertNotIn("bramble_boar", [a.enemy for a in e.threats()])
 
     def test_enemy_identity_survives_eviction_of_its_origin_chunk(self):
         e = expedition()
@@ -137,9 +143,97 @@ class EnemyAndBiomeTests(unittest.TestCase):
         e.advance(120_000)
         frame = snapshot(e.game, expedition=e)
         for target in frame["targets"]:
-            self.assertEqual((target["name"], target["sprite"]), ("Bramble boar", "boar"))
+            self.assertEqual((target["name"], target["sprite"]), ("Wild boar", "boar"))
         for spot in frame["spots"]:
             self.assertEqual(spot["art"], BY_ID[spot["encounter"]].sprite)
+
+
+class RarityTests(unittest.TestCase):
+    EVERYTHING = frozenset(UNLOCKS)
+
+    def test_cascade_tries_rarest_first_and_skips_empty_tiers(self):
+        self.assertEqual(drops.tier_chances({"rare": 1000, "uncommon": 2000}, {"rare", "uncommon", "common"}),
+                         {"rare": 1000, "uncommon": 1800, "common": 7200})
+        self.assertEqual(drops.tier_chances({"rare": 1000, "uncommon": 2000}, {"uncommon", "common"}),
+                         {"uncommon": 2000, "common": 8000}, "an empty tier is not rolled")
+        self.assertEqual(drops.tier_chances({"uncommon": 2000}, {"uncommon"}), {"uncommon": 10000})
+        self.assertIsNone(drops.cascade({}, set(), 1))
+        hits = sum(drops.cascade({"rare": 1000, "uncommon": 2000}, {"rare", "uncommon", "common"}, s) == "rare"
+                   for s in range(20000))
+        self.assertAlmostEqual(hits / 20000, 0.10, delta=0.01)
+
+    def test_spot_shares_sum_to_one_and_match_the_tiers(self):
+        for region in (None, "old_road", "still_glade", "deep_woods"):
+            ctx = Context(region=region, unlocked=self.EVERYTHING)
+            shares = spot_shares(ctx)
+            self.assertGreater(sum(shares.values()), 9900, region)
+            uncommon = sum(v for k, v in shares.items() if BY_ID[k].rarity == "uncommon")
+            self.assertGreater(uncommon, 0, region)
+
+    def test_new_common_content_does_not_dilute_rarer_spots(self):
+        ctx = Context(region="old_road", unlocked=self.EVERYTHING)
+        before = {k: v for k, v in spot_shares(ctx).items() if BY_ID[k].rarity != "common"}
+        extra = replace(BY_ID["bramble_berries"], id="test_weeds", weight=500)
+        with patch("dimensional_sim.world.actions.ACTIONS", ACTIONS + (extra,)):
+            after = {k: v for k, v in spot_shares(ctx).items() if BY_ID.get(k, extra).rarity != "common"}
+        self.assertEqual(after, before)
+
+    def test_tier_odds_grow_with_unlocked_tier_content(self):
+        one = spot_tiers(Context(unlocked=frozenset({"road_lore"})))["uncommon"][1]
+        more = spot_tiers(Context(unlocked=self.EVERYTHING))["uncommon"][1]
+        self.assertGreater(more, one)
+        self.assertNotIn("uncommon", spot_tiers(Context()), "nothing uncommon known: tier skipped")
+
+    def test_depth_bonus_is_a_biome_field_and_off_by_default(self):
+        ctx, deep = Context(unlocked=self.EVERYTHING), Context(unlocked=self.EVERYTHING, ring=6)
+        self.assertEqual(spot_tiers(ctx)["uncommon"][1], spot_tiers(deep)["uncommon"][1])
+        steep = replace(BIOMES["dark_forest"], spot_rarity_per_ring=10)
+        with patch.dict(BIOMES, dark_forest=steep):
+            self.assertEqual(spot_tiers(deep)["uncommon"][1], spot_tiers(ctx)["uncommon"][1] * 160 // 100)
+
+    def test_drop_tables_cascade_nest_and_report_exact_chances(self):
+        chances = drops.table_chances("boar_spoils")
+        self.assertEqual(chances["boar_tusk"][2], 1470)
+        self.assertEqual(chances["amber_charm"][2], 50, "rare 2% x the nested table's 25%")
+        tally = {}
+        for seed in range(40000):
+            for item, count, tier in drops.roll_table("boar_spoils", seed):
+                tally[item] = tally.get(item, 0) + 1
+                self.assertEqual(tier, "rare" if item != "boar_tusk" else "uncommon")
+        self.assertAlmostEqual(tally["boar_tusk"] / 40000, 0.147, delta=0.01)
+
+    def test_bonus_drops_add_to_fixed_loot_without_changing_it(self):
+        boar = BY_ID["bramble_boar"]
+        plain = replace(boar, drops=None)
+        bonus = 0
+        for seed in range(3000):
+            with_table, without = roll_loot(boar, seed), roll_loot(plain, seed)
+            self.assertEqual(with_table[:len(without)], without)
+            self.assertLessEqual(len(with_table) - len(without), 1, "one bonus roll, at most one item")
+            bonus += len(with_table) > len(without)
+            self.assertEqual(with_table, roll_loot(boar, seed))
+        self.assertGreater(bonus, 300)
+
+    def test_drop_tables_are_validated(self):
+        with self.assertRaises(ValueError):
+            DropTable("bad", {"common": 100}, {"common": (Pick("stick"),)})
+        with self.assertRaises(ValueError):
+            DropTable("bad", {"rare": 100}, {})
+        with self.assertRaises(ValueError):
+            Pick("stick", table="forest_trinkets")
+        loop = DropTable("loop", {"rare": 100}, {"rare": (Pick(table="loop"),)})
+        with patch.dict(DROP_TABLES, loop=loop), self.assertRaisesRegex(ValueError, "cycle"):
+            validate_catalog()
+
+    def test_frames_mark_rare_spots_and_rare_items(self):
+        from dimensional_sim.world.session import ITEM_GLINTS
+        self.assertEqual(set(ITEM_GLINTS), {i for i, d in ITEMS.items() if d.rarity != "common"})
+        e = expedition()
+        e.unlocked.update(UNLOCKS)
+        for _ in range(40):
+            e.advance(5000)
+        for spot in e.visible_spots():
+            self.assertEqual(spot["glint"] is None, BY_ID[spot["encounter"]].rarity == "common")
 
 
 class AbilityTests(unittest.TestCase):

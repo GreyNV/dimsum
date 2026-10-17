@@ -5,15 +5,17 @@ expedition still owns time, spots, vitals and enemies. Both cut time into steps 
 end at every event (vitals rate change, task end, monster step, lead expiry, attack
 impact), so any slicing of the same total time gives the same state.
 """
-from ..catalog import BY_ID
+from ..catalog import BUILDINGS, BY_ID
 from ..journal import new_journal
 from ..models import DELTAS, DIRECTIONS, integer
 from ..progression import scaled_ms, speed_permille
 from ..runtime import InputCommand, Target
 from ..tuning import PITY_CHUNKS
+from .camp import CampMixin
 from .combat import CombatMixin
+from .ecology import EcologyMixin
 from .constants import (MAX_EVENTS_PER_ADVANCE, MONSTER_STEP_MS, PAUSE_BETWEEN_PUNCHES_MS,
-                        PROLOGUE_MS, PROLOGUE_NEXT, REST_MS, RESTED_AT, SELF_ACTIONS, SKILLS, STAT_KEYS,
+                        PROLOGUE_MS, PROLOGUE_NEXT, REST_MS, RETREAT_BELOW, SELF_ACTIONS, SKILLS, STAT_KEYS,
                         VITAL_MAX, attribute_table, ceil_div)
 from .lives import LivesMixin
 from .navigation import NavigationMixin
@@ -26,7 +28,7 @@ from .vitals import VitalsMixin
 
 
 class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, OutcomesMixin, VitalsMixin,
-                 LivesMixin, SavesMixin, PresentationMixin):
+                 LivesMixin, SavesMixin, PresentationMixin, CampMixin, EcologyMixin):
     def __init__(self, game, *, skills=(), fresh=True):
         """fresh=True starts a new expedition (prologue first); loaders pass False."""
         self.game = game
@@ -57,6 +59,8 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.boon_next = None      # BoonDef id for the next life
         self.boon = None           # BoonDef id active this life
         self.journal = new_journal()   # lifetime counts (journal.py); persists across lives
+        self.bound_buildings = set()   # BuildingDef ids made permanent with ash
+        self.chest = {}                # storage chest contents (item -> count); kept only if bound
         self.screen_log = []       # debug only, not saved: recent admissions/rejections
         self.roll_log = []         # debug only: bucket at the instant of each new roll
         self.monster_ms = 0
@@ -94,6 +98,12 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.drought = {category: 0 for category in PITY_CHUNKS}
         self.forced = {}   # chunk id -> [encounter id, ...] pity spots, in order
         self.guarantee_used = False
+        self.buildings = set(self.bound_buildings)   # what stands at the camp this life
+        self.pressure = {}     # "dimension:cx:cy:ecology" -> harvests this life (autopilot/ecology.py)
+        self.shimmer = set()   # "dimension:cx:cy" region cells where rare spots roll more often this life
+        self.campfire = None   # {"dimension", "x", "y", "fire_x", "fire_y"}: this life's campfire (global cells)
+        if not any(BUILDINGS[b].function == "storage" for b in self.bound_buildings):
+            self.chest = {}   # an unbound chest does not outlast its life
         self._reset_spawns()
 
     # ----- public state -------------------------------------------------
@@ -147,7 +157,11 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.task = {"type": kind, "spot": spot, "elapsed_ms": 0, "duration_ms": duration_ms}
 
     def _start_perform(self, spot_id, action):
-        self._start_task("perform", scaled_ms(action.duration_ms, self.speed(action.attribute)), spot_id)
+        duration = scaled_ms(action.duration_ms, self.speed(action.attribute))
+        spot = self._spot_by_id(spot_id) if action.placement == "site" else None
+        if spot is not None:   # an overgrown site is slow going
+            duration = duration * self.site_condition(spot.chunk).duration_percent // 100
+        self._start_task("perform", max(1, duration), spot_id)
 
     # ----- settle --------------------------------------------------------
     def _settle(self):
@@ -184,6 +198,8 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         return False
 
     def _run(self, ms, command):
+        self.game.load_percent = self.load_percent()
+        self._arm()
         self.game.advance(ms, command)
         self._apply_vitals(ms)
         self.monster_ms += ms
@@ -208,9 +224,11 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         integer(milliseconds, "elapsed milliseconds", 0)
         if self.anchor_ms is not None or self.in_prologue:
             return self.advance(milliseconds)
+        self.game.load_percent = self.load_percent()
         if milliseconds == 0:
             self._settle()
             self._abandon_for(command)
+            self._arm()
             self.game.advance(0, self._manual_combat_command(command, auto_attack))
             return
         remaining = milliseconds
@@ -222,6 +240,9 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
                 self.advance(remaining)
                 return
             self._abandon_for(command)
+            if (self.task is None and not command.move and not command.attack
+                    and self.at_rest_place() and self._wants_rest()):
+                self._start_task("rest", REST_MS)   # standing still at the camp or a fire rests
             cap = self._step_cap(remaining)
             task = self.task
             if task:
@@ -259,6 +280,7 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         """Let the auto-pilot live for `milliseconds` (partition-independent).
         allow_prayer=False is offline catch-up: visible-only actions never start."""
         integer(milliseconds, "elapsed milliseconds", 0)
+        self.game.load_percent = self.load_percent()
         if type(allow_prayer) is not bool:
             raise ValueError("allow_prayer must be boolean")
         saved_press = self.game.step_on_press
@@ -297,6 +319,11 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         """One auto-pilot decision or step of at most `cap` ms; returns the ms used."""
         if self.game.player.animation == "attack":
             return self._punch_step(cap)
+        if (not self.task and self.attack().reach > 1 and (self.goal or {}).get("kind") not in ("home", "target")
+                and self.health >= RETREAT_BELOW):
+            ahead = self.strike_target()   # a weapon with reach strikes first as an enemy closes in
+            if ahead is not None:
+                self.goal = {"kind": "target", "id": ahead[1], "x": ahead[2], "y": ahead[3]}
         if self.task:
             return self._task_step(cap, allow_prayer)
         if self.goal is None:
@@ -356,17 +383,17 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
             else:
                 self._entry("lore", "The old man walks off down the road. Explore - and don't forget to pray.")
         elif kind == "rest":
-            if self.health < RESTED_AT and (self.hunger > 0 or self._has_food()):
+            if self._wants_rest() and self.at_rest_place():
                 self._start_task("rest", REST_MS)   # keep resting
             else:
                 self.goal = None
-                self._entry("rest", "Rested at the anchor camp.")
+                self._entry("rest", "Rested at the anchor camp." if self.at_camp() else "Rested by the campfire.")
 
     def _travel_step(self, cap):
         """Act on arrival at the goal, else take one step down its distance field."""
         game, here, goal = self.game, self._player(), self.goal
         goals = self._goal_cells(goal)
-        if here in goals and (goal["kind"] != "home" or here == self.anchor):
+        if here in goals and (goal["kind"] != "home" or here == (goal["x"], goal["y"])):
             self._arrive(goal)
             return 0
         field = self._field(goals, until=here)
@@ -380,12 +407,12 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
                     best = (field[nxt], direction)
         if best is None or best[0] >= field.get(here, 1 << 30):
             self.goal = None  # unreachable now: wait one interval, then replan
-            step = min(cap, game.movement_interval_ms)
+            step = min(cap, game.step_interval_ms)
             self._run(step, InputCommand())
             return step
         direction = best[1]
-        left = (game.movement_interval_ms - game.move_elapsed_ms
-                if game.last_move == direction else game.movement_interval_ms)
+        left = (max(1, game.step_interval_ms - game.move_elapsed_ms)   # a lighter load may shorten it
+                if game.last_move == direction else game.step_interval_ms)
         step = min(cap, left)
         self._run(step, InputCommand(direction))
         return step
@@ -394,11 +421,12 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         if goal["kind"] == "wander":
             self.goal = None
         elif goal["kind"] == "home":
+            self._stow()
             self._start_task("rest", REST_MS)
         elif goal["kind"] == "spot":
             self._face(goal["x"], goal["y"])
             self._start_perform(goal["id"], BY_ID[self._spot_by_id(goal["id"]).encounter])
         else:
             self._face(goal["x"], goal["y"])
-            self.game.attack_damage = self.punch_damage()
+            self._arm()
             self.game.advance(0, InputCommand(attack=True))  # rising edge: punch

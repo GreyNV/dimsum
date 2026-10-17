@@ -6,6 +6,7 @@ from dimensional_sim.world.autopilot import ANCHOR_COUNTDOWN_MS, Expedition
 from dimensional_sim.world.catalog import BY_ID
 from dimensional_sim.world.journal import record_action
 from tests.test_world_autopilot import expedition
+from camp_fixture import to_camp
 
 
 def tracks_with_lead(seed=482910):
@@ -103,31 +104,74 @@ class WorldGeneratorUpgradeTests(unittest.TestCase):
         self.assertEqual(canonical_json(again.to_dict()), canonical_json(e.to_dict()))
 
 
-class CraftingProgressionTests(unittest.TestCase):
-    def test_branches_teach_crafting_then_the_staff_recipe_and_staff_is_equipped_gear(self):
-        from dimensional_sim.world.catalog import ITEMS
+class AlternativeOutcomeTests(unittest.TestCase):
+    def test_grouped_outcomes_pick_at_most_one_alternative_at_their_chances(self):
+        from dataclasses import replace
+        from dimensional_sim.world.catalog import OutcomeDef
         e = expedition()
-        e.inventory = {"stick": 6}
-        self.assertIsNone(e._need_action(), "sticks alone do not make crafting a starting skill")
+        base = BY_ID["animal_tracks"]
+        action = replace(base, outcomes=(
+            OutcomeDef("note", "cold", chance=50, group="trail", text="The trail went cold."),
+            OutcomeDef("knowledge", "deer_sign", chance=30, group="trail"),
+            OutcomeDef("note", "always", text="Counted the hoofprints.")))
+        record_action(e.journal, "animal_tracks")
+        counts = {"cold": 0, "sign": 0, "none": 0}
+        for n in range(400):
+            e.log.clear()
+            e.knowledge.discard("deer_sign")
+            e._apply_outcomes(action, f"enc:test:{n}")
+            texts = [row["text"] for row in e.log]
+            self.assertIn("Counted the hoofprints.", texts, "ungrouped outcomes still roll on their own")
+            cold, sign = "The trail went cold." in texts, "deer_sign" in e.knowledge
+            self.assertFalse(cold and sign, "alternatives in one group never both happen")
+            counts["cold" if cold else "sign" if sign else "none"] += 1
+        self.assertTrue(160 <= counts["cold"] <= 240, counts)
+        self.assertTrue(80 <= counts["sign"] <= 160, counts)
+        self.assertTrue(40 <= counts["none"] <= 120, counts)
+
+    def test_group_chances_cannot_exceed_certainty_and_placed_things_need_an_interaction(self):
+        from dataclasses import replace
+        from dimensional_sim.world.catalog import ACTIONS, OutcomeDef
+        with self.assertRaises(ValueError):
+            replace(BY_ID["animal_tracks"], outcomes=(OutcomeDef("note", "a", chance=60, group="g", text="a"),
+                                                      OutcomeDef("note", "b", chance=60, group="g", text="b")))
+        with self.assertRaises(ValueError):
+            OutcomeDef("note", "silent")
+        with self.assertRaises(ValueError):
+            replace(BY_ID["animal_tracks"], interaction=None)
+        for a in ACTIONS:
+            if a.placement in ("spot", "lead", "site"):
+                self.assertTrue(a.interaction and a.interaction != a.name, a.id)
+
+
+class CraftingProgressionTests(unittest.TestCase):
+    def test_branches_teach_crafting_and_a_camp_bedroll_teaches_the_jerkin(self):
+        from dimensional_sim.world.catalog import ITEMS
+        e = to_camp(expedition())
+        e.inventory = {"cloth_scrap": 4, "rope": 1}
+        self.assertIsNone(e._need_action(), "materials alone do not make crafting a starting skill")
         branches = BY_ID["fallen_branches"]
-        thresholds = {o.kind: o.at_count for o in branches.outcomes}
-        for n in range(1, thresholds["recipe"] + 1):
+        at = next(o.at_count for o in branches.outcomes if o.id == "primitive_crafting")
+        for n in range(1, at + 1):
             record_action(e.journal, "fallen_branches")
             e._apply_outcomes(branches, f"enc:test:{n}")
-            self.assertEqual("primitive_crafting" in e.knowledge, n >= thresholds["knowledge"])
-            self.assertEqual("walking_staff" in e.recipes, n >= thresholds["recipe"])
-        self.assertEqual(e._need_action().id, "craft_staff")
+            self.assertEqual("primitive_crafting" in e.knowledge, n >= at)
+        self.assertIsNone(e._need_action(), "the recipe comes from a site")
+        record_action(e.journal, "camp_bedroll")
+        e._apply_outcomes(BY_ID["camp_bedroll"], "enc:test:bedroll")
+        self.assertIn("padded_jerkin", e.recipes)
+        self.assertEqual(e._need_action().id, "craft_jerkin")
         e._start_self(e._need_action())
         e.advance(e.task["duration_ms"])
-        self.assertEqual(ITEMS["walking_staff"].kind, "gear")
-        self.assertEqual(e.equipped, {"weapon": "walking_staff"})
-        self.assertEqual(e.inventory, {"walking_staff": 1, "stick": 3})
+        self.assertEqual(ITEMS["padded_jerkin"].kind, "gear")
+        self.assertEqual(e.equipped, {"body": "padded_jerkin"})
+        self.assertEqual(e.inventory, {"padded_jerkin": 1, "cloth_scrap": 1})
 
     def test_knowledge_and_journal_persist_while_gear_and_leads_reset_at_death(self):
         e = tracks_with_lead()
-        e.recipes.add("walking_staff")
-        e.inventory["walking_staff"] = 1
-        e.equipped = {"weapon": "walking_staff"}
+        e.recipes.add("padded_jerkin")
+        e.inventory["padded_jerkin"] = 1
+        e.equipped = {"body": "padded_jerkin"}
         e.mastery["fallen_branches"] = 3
         e.journal_disabled.add("fallen_branches")
         e.journal_favor["fallen_branches"] = "suppress"
@@ -140,6 +184,6 @@ class CraftingProgressionTests(unittest.TestCase):
         self.assertEqual(e.life, 2)
         self.assertEqual((e.inventory, e.equipped, e.leads), ({}, {}, []))
         self.assertIn("deer_sign", e.knowledge)
-        self.assertIn("walking_staff", e.recipes)
+        self.assertIn("padded_jerkin", e.recipes)
         self.assertEqual(e.journal_disabled, {"fallen_branches"})
         self.assertEqual(e.journal_favor, {"fallen_branches": "suppress"})

@@ -7,9 +7,10 @@ at once; pity forces a spot of a starved category after a few empty chunks.
 from ..actions import Context, bucket, bucket_reasons
 from .. import effects
 from ..catalog import ASSET_ENEMY_ACTION, BY_ID, ITEMS
-from ..encounters import EncounterSpot, chunk_spots, forced_spot, roll_window, spot_id
+from ..encounters import EncounterSpot, chunk_spots, features, forced_spot, roll_window, spot_id
 from ..models import ChunkKey, chunk_ident
 from ..seeds import derive_seed
+from ..sites import condition_for
 from ..tuning import PITY_CHUNKS
 from .constants import POINT, ROLL_LOG_LIMIT, SCREEN_LOG_LIMIT
 
@@ -96,12 +97,20 @@ class SpawningMixin:
                 "recipes": frozenset(self.recipes), "action_counts": self.journal["actions"],
                 "item_counts": self.journal["items"]}
 
+    def site_condition(self, key):
+        """This life's SiteConditionDef of the landmark in chunk `key`, or None."""
+        site = self.game.world.site_for(key)
+        return None if site is None else condition_for(self.game.world.world_seed, site, self.life)
+
     def spot_context(self, key):
         """Context for rolling and explaining world spots in chunk `key`."""
         chunk = self.game.world.peek(key)
         region = self.region(key)
         return Context(biome=chunk.asset.biome if chunk is not None else self.game.world.biome_for(key),
                        region=region.id if region else None, placement="spot", region_def=region,
+                       ring=self.ring(key), pressure=self.pressure_percents(key), rarity_percent=self.rarity_percent(key),
+                       gear=frozenset(i for i in self.inventory if ITEMS[i].kind == "gear"),
+                       features=features(chunk.asset) if chunk is not None else frozenset(),
                        mastery=self.mastery, journal_disabled=frozenset(self.journal_disabled),
                        journal_favor=self.journal_favor, **self._progress_fields())
 
@@ -111,13 +120,21 @@ class SpawningMixin:
         return Context(biome=spot.biome, region=spot.region, region_def=spot.region_def, placement="lead",
                        active_leads=frozenset(lead["action"] for lead in self.leads), **self._progress_fields())
 
-    def self_context(self, trigger=None, visible=True):
-        """Context for self actions (crafting, reflection, prayer) right now."""
-        return Context(placement="self", mastery=self.mastery, inventory=dict(self.inventory),
+    def self_context(self, trigger=None, visible=True, at_camp=None):
+        """Context for self actions (crafting, building, reflection, prayer) right now.
+        At the camp the chest's contents count as resources at hand."""
+        camp = self.at_camp() if at_camp is None else at_camp
+        stock = dict(self.inventory)
+        if camp:
+            for item, count in self.chest.items():
+                stock[item] = stock.get(item, 0) + count
+        return Context(placement="self", mastery=self.mastery, inventory=stock,
+                       at_camp=camp, buildings=frozenset(self.buildings),
                        gear=frozenset(i for i in self.inventory if ITEMS[i].kind == "gear"),
                        hunger=self.hunger // POINT, food_carried=self._has_food(),
                        trigger=trigger, visible=visible,
-                       flags=frozenset({"done:pray"} if self.prayers_this_life else ()),
+                       flags=frozenset(({"done:pray"} if self.prayers_this_life else set())
+                                       | ({"hurt_far"} if self._hurt_far() else set())),
                        **self._progress_fields())
 
     def _spots(self, chunk):
@@ -219,8 +236,9 @@ class SpawningMixin:
             roll_seed = derive_seed(self.game.world.world_seed, "runtime-opportunity-v1",
                                     self.life, len(self.spot_plans), ident)
             context = self.spot_context(chunk.key)
-            rolled = chunk_spots(chunk, life=self.life, context=context,
-                                 roll_seed=roll_seed)
+            site = self.game.world.site_for(chunk.key)
+            rolled = chunk_spots(chunk, life=self.life, context=context, roll_seed=roll_seed, site=site,
+                                 condition=self.site_condition(chunk.key))
             self.spot_plans[ident] = [(s.encounter, s.x, s.y) for s in rolled]
             self.roll_log.append({"chunk": ident, "region": context.region,
                                   "bucket": [{"id": a.id, "base": a.weight,

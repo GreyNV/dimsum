@@ -31,6 +31,7 @@ REST_MS = 10_000
 INVENTORY_SLOTS = 12
 STACK_LIMIT = 20
 # Enemy numbers (hit, aggro radius) live on catalog.EnemyDef; danger growth on catalog.BiomeDef.
+LOOK_RADIUS = 18                  # tiles a 'reveal' outcome uncovers around the avatar
 MONSTER_STEP_MS = 300             # chasing enemies take one step this often
 CAMP_SAFE_RADIUS = 5              # enemies stop at the edge of the anchor camp
 LEGACY_MONSTER_MAX_MS = 999       # saves before 2026-10-05 used a 1000 ms monster clock
@@ -38,11 +39,13 @@ AFTER_LOCATION_REST_WEIGHT = 26   # weight of "just pause" inside the after-loca
 SELF_ACTIONS = tuple(a.id for a in BY_ID.values() if a.placement == "self")
 NEED_ACTIONS = tuple(sorted((a for a in BY_ID.values() if a.trigger == "need"),
                             key=lambda action: (action.need_priority, action.id)))
+# An emergency campfire's materials: need crafts (not builds) never spend into them.
+FIRE_KIT = dict(next(a.cost for a in BY_ID.values() if a.places == "campfire"))
 SCREEN_LOG_LIMIT = 40              # debug only: recent admissions/rejections kept
 ROLL_LOG_LIMIT = 12                # debug only: recent chunk rolls kept
 LEAD_HISTORY_LIMIT = 100
 STAT_KEYS = ("chunks", "food_spots", "enemy_spots", "pity", "rejected", "completed", "eaten",
-             "crafted", "fights", "prayers")
+             "crafted", "fights", "prayers", "built")
 
 PROLOGUE_MS = {"awaken": 10_000, "stand_up": 3_500, "listen": 25_000}
 PROLOGUE_NEXT = {"awaken": "stand_up", "stand_up": "listen"}
@@ -63,9 +66,9 @@ ELDER_LINES = (
     "May the path be smooth. Only you will know what destiny awaits.",
 )
 LOG_TYPES = ("encounter", "eat", "rest", "life", "blessing", "lore", "trade", "ambush",
-             "craft", "reflect", "purchase", "rebirth")
+             "craft", "reflect", "purchase", "rebirth", "build", "stow")
 TASK_TYPES = ("perform", "pause", "rest", *SELF_ACTIONS, *PROLOGUE_MS)
-SCHEMA_VERSION = 10                # unified ash, earned mastery and manual return
+SCHEMA_VERSION = 16                # 16: shimmer cells; 15: ecological pressure (14: campfire; 13: camp buildings, chest; 12: sites)
 
 
 def attribute_table():

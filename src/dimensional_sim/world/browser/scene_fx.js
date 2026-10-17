@@ -37,7 +37,7 @@ export function drawEyelids(ctx, opening, width, height, reducedMotion) {
 
 /** A soft dark vignette around the screen edges. */
 export function drawVignette(ctx, width, height) {
-  const shade = ctx.createRadialGradient(width/2, height/2, Math.min(width, height)*.27, width/2, height/2, Math.max(width, height)*.7);
-  shade.addColorStop(0, '#00000000'); shade.addColorStop(1, '#070c0755');
+  const shade = ctx.createRadialGradient(width/2, height/2, Math.min(width, height)*.24, width/2, height/2, Math.max(width, height)*.68);
+  shade.addColorStop(0, '#00000000'); shade.addColorStop(1, '#040804a0');
   ctx.fillStyle = shade; ctx.fillRect(0, 0, width, height);
 }

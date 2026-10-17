@@ -66,7 +66,7 @@ class DetailTests(unittest.TestCase):
         d = detail(e)
         self.assertEqual(set(d), {"character", "stats", "multipliers", "rolls", "journal"})
         json.dumps(d)
-        self.assertEqual(len(d["stats"]), 6)
+        self.assertEqual(len(d["stats"]), 7)
         for w in d["rolls"]["windows"]:
             self.assertLessEqual(w["min"], w["max"])
             if w["rolled"] is not None:
@@ -80,12 +80,15 @@ class DetailTests(unittest.TestCase):
         self.assertEqual(set(d["character"]), {
             "life", "depth", "best_depth", "frontier", "health", "hunger", "punch_damage", "gear", "boon",
             "boon_next", "threats", "hunger_per_minute", "regen_per_minute",
-            "rest_regen_per_minute", "inventory_slots", "currencies", "unlocked"})
+            "rest_regen_per_minute", "inventory_slots", "currencies", "unlocked", "camp", "load"})
         self.assertEqual(set(d["multipliers"]), {"actions", "hunger_drain", "enemy_hit", "punch_damage", "punch_parts"})
-        self.assertEqual(set(d["rolls"]), {"life", "windows", "spots_per_chunk", "pity", "stats", "loot"})
+        self.assertEqual(set(d["rolls"]), {"life", "windows", "spots_per_chunk", "tiers", "pity", "stats", "loot"})
         self.assertEqual(set(d["journal"]), {"actions", "items", "deaths", "best_life_min", "lives", "best_depth",
                                              "achievements", "knowledge", "recipes", "disabled", "favor",
-                                             "mastery", "leads", "lead_history"})
+                                             "encounters", "guarantee", "leads", "lead_history"})
+        row = next(r for r in d["journal"]["encounters"] if r["id"] == "bramble_berries")
+        self.assertTrue({"rarity", "placement", "level", "done", "next", "regions", "current_share_permille",
+                         "locations", "mode", "can_favor", "can_guarantee"} <= set(row))
         self.assertTrue({"name", "level", "into", "next", "dim_level", "dim_into", "dim_next", "speed",
                          "speed_regular_only", "speed_dimensional_only", "life_gain", "xp"} <= set(d["stats"][0]))
 
@@ -110,7 +113,8 @@ class UpgradeAndRebuildTests(unittest.TestCase):
     def test_v6_save_upgrades_with_empty_journal(self):
         e = played(30_000)
         old = e.to_dict()
-        for key in (*saves.V7_FIELDS, *saves.V8_FIELDS, *saves.V9_FIELDS, *saves.V10_FIELDS):
+        for key in (*saves.V7_FIELDS, *saves.V8_FIELDS, *saves.V9_FIELDS, *saves.V10_FIELDS, *saves.V13_FIELDS,
+                    *saves.V14_FIELDS, *saves.V15_FIELDS, *saves.V16_FIELDS):
             old.pop(key)
         old["dust"] = 0
         old["schema_version"] = 6
@@ -123,7 +127,9 @@ class UpgradeAndRebuildTests(unittest.TestCase):
         e = played(90_000)
         e.unlocked.add("climbing")
         current = json.loads(canonical_json(e.to_dict()))
-        v8 = {k: v for k, v in current.items() if k not in ("spot_plans", *saves.V10_FIELDS)}
+        v8 = {k: v for k, v in current.items()
+              if k not in ("spot_plans", *saves.V10_FIELDS, *saves.V13_FIELDS, *saves.V14_FIELDS,
+                           *saves.V15_FIELDS, *saves.V16_FIELDS)}
         v8["dust"] = 0
         v8.update(schema_version=8, encounters="encounters-v7")
         v7 = {k: v for k, v in v8.items() if k not in ("equipped", "knowledge", "recipes", "journal_disabled",

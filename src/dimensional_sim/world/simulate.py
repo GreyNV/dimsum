@@ -19,7 +19,7 @@ from .actions import Context, describe_bucket, explain
 from .autopilot import Expedition
 from .catalog import BY_ID, ENEMIES, ITEMS, REGION_CELL, REGIONS
 from . import economy
-from .encounters import chunk_spots
+from .encounters import chunk_spots, features
 from .models import ChunkKey
 from .regions import region_cell
 from .runtime import Exploration
@@ -35,7 +35,7 @@ def anchor_policy(e, policy):
         return
     while True:
         rows = [r for r in e.anchor_offers() if r["available"]]
-        unlocks = sorted((r for r in rows if r["kind"] == "unlock"), key=lambda r: (r["cost"], r["id"]))
+        unlocks = sorted((r for r in rows if r["kind"] in ("unlock", "bind")), key=lambda r: (r["cost"], r["id"]))
         boons = [r for r in rows if r["kind"] == "boon"]
         choice = (unlocks or boons or [None])[0]
         if choice is None:
@@ -139,9 +139,10 @@ def inspect_chunk(seed, x, y, life=1, unlocked=(), knowledge=(), recipes=()):
     chunk = world.get(key)
     region = world.region_for(key)
     ctx = Context(biome=chunk.asset.biome, region=region.id, region_def=region, placement="spot",
-                  unlocked=frozenset(unlocked), knowledge=frozenset(knowledge), recipes=frozenset(recipes))
+                  unlocked=frozenset(unlocked), knowledge=frozenset(knowledge), recipes=frozenset(recipes),
+                  features=features(chunk.asset))
     sample_seed = derive_seed(seed, "runtime-opportunity-v1", life, 0, f"forest:{x}:{y}")
-    spots = chunk_spots(chunk, life, context=ctx, roll_seed=sample_seed)
+    spots = chunk_spots(chunk, life, context=ctx, roll_seed=sample_seed, site=world.site_for(key))
     rolled = {s.encounter for s in spots}
     return {"seed": seed, "chunk": [x, y], "biome": chunk.asset.biome,
             "generator_version": world.generator_version,

@@ -66,10 +66,32 @@ Module map (2026-10-07):
 - transport.js: local HTTP or the hosted worker transport (window.DIMSUM_TRANSPORT).
 - dom.js: $, el(), crash-proof localStorage helpers.
 - view.js: camera, tiles, input Controls. art.js: terrain stamps and chunk painting.
+- nature_art.js (2026-10-17): lit nature art used by art.js stamps and the render loop. Grass is
+  thin pixel blades leaning with one wind; tree canopies and rocks are shaded like a lit ball
+  (light from the upper left picks each cell's glyph from a density ramp and its color) over a
+  dark outlined silhouette; water is dark with ripple dashes, a shallow band and a broken pale
+  waterline at banks. Trees, rocks and structures beside water are mirrored into it when a chunk
+  is painted (cached); the avatar's reflection, water glints and drifting motes are drawn per
+  frame (glints and motes are skipped under reduced motion). Meadows get flower heads, the
+  old road trodden earth and pebbles, bridges planks, ruins flagstones.
+- sound.js (2026-10-17): all sound is synthesized with Web Audio, no audio files. `soundEvents(prev,
+  next)` is pure and names what changed between two snapshots (steps by surface, swings by weapon
+  shape, hits, kills, bites, ambush, loot, rare finds, levels, eating, crafting, building, prayer,
+  a new fire, death, reaching the anchor); `SoundEngine` plays short patches for them, a work
+  rhythm per activity kind (`WORK`: chopping, rustling, tapping...), UI clicks, and an ambience bed
+  (wind, random birds, the river louder near water, crackle beside a campfire or the anchor camp).
+  The context starts on the first key or pointer press and is suspended in a hidden tab. Settings:
+  Volume (Off/Low/Medium/High, M mutes) and Ambience, kept in localStorage (`dimsum.sound`).
+  Nothing plays while the hosted build fast-forwards offline time.
 - actors.js: re-exports sprites.js (roles, cell sprites, shadows, depth helpers),
   player_art.js (pixel avatar, poses, fists), combat_art.js (boars, hits, punch marks),
   place_art.js (spots, camp, ambush site, the old man).
 - hud.js: side panels and reports. pages.js: page models; page_ui.js renders them.
+  Pages: Stats (Character = main: levels, vitals, combat and speed multipliers, gear; Statistics: lifetime
+  and every count) and Journal (Encounters = main: rarity here, every known encounter with tier/grade/odds,
+  Journal controls, action durations, bonus drops, chains; Achievements). `PAGES[].subtabs` lists them; the
+  first subtab is the main view. Journal control buttons carry their session action (`data-journal`) and
+  work during a life, not only at the anchor.
 - anchor_ui.js: the anchor panel and its actions. minimap.js. scene_fx.js: region tint,
   prologue eyelids, vignette. world_ui.js: region cues, skill slots, control mode.
 The legacy ASCII-cell player sprite and its layered equipment overlay were removed; the

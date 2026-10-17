@@ -79,13 +79,18 @@ class GeographyStrategyTests(unittest.TestCase):
         self.assertEqual(outcome_chance(follow, REGIONS["still_glade"]), 39)
 
     def test_runtime_region_distributions_differ_without_becoming_certain(self):
-        woods = region_sample("deep_woods")
-        glade = region_sample("still_glade")
-        road = region_sample("old_road")
+        seeds = range(1, 11)   # tiered rolls: uncommon spots take their own share, so sample wider
+        woods = region_sample("deep_woods", seeds)
+        glade = region_sample("still_glade", seeds)
+        road = region_sample("old_road", seeds)
         self.assertGreater(woods["bramble_boar"], glade["bramble_boar"])
         self.assertGreater(glade["forest_spring"], woods["forest_spring"])
-        self.assertGreater(road["fallen_watchtower"], woods["fallen_watchtower"])
-        self.assertGreater(woods["fallen_branches"], road["fallen_branches"])
+        self.assertGreater(road["old_carvings"], woods["old_carvings"])
+        # Branch odds differ by only a few points; compare the exact per-spot chance, not a sample.
+        from dimensional_sim.world.actions import spot_shares
+        unlocked = frozenset({"road_lore", "scavenging"})
+        self.assertGreater(spot_shares(Context(region="deep_woods", unlocked=unlocked))["fallen_branches"],
+                           spot_shares(Context(region="old_road", unlocked=unlocked))["fallen_branches"])
         self.assertEqual(road["animal_tracks"], 0)
         for tally in (woods, glade, road):
             self.assertGreaterEqual(len(tally), 5)

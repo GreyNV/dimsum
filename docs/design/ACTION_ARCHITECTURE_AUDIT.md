@@ -1,5 +1,7 @@
 # Action architecture and current catalog audit
 
+> Note (2026-10-14): parts of this audit are historical. The abandoned camp and fallen watchtower are now landmark sites with their own encounters, and the walking staff (with its recipe) was removed until weapon animations exist. See CONTENT_SYSTEMS.md.
+
 Code audit for the integrated Forest, action, lead, Journal, crafting, and equipment iteration. The source of truth is `src/dimensional_sim/world/catalog.py` (definitions), `actions.py` (eligibility), `encounters.py` (placement), `autopilot/` (life cycle), and `equipment.py` (slots). This records implemented rules; it does not claim that every gated action occurs frequently in ordinary play. Seeded frequency and balance results belong in `BALANCING.md` after simulation.
 
 ## Availability contract

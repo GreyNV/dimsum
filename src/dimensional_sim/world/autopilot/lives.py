@@ -1,7 +1,7 @@
 """Death, the anchor interlude between lives, anchor purchases and rebirth."""
 from .. import economy
 from ..catalog import JOURNAL_FAVOR_MASTERY, JOURNAL_GUARANTEE_MASTERY, REGIONS
-from ..catalog import ATTRIBUTES, BY_ID, ENEMIES, UNLOCKS
+from ..catalog import ATTRIBUTES, BUILDINGS, BY_ID, ENEMIES, UNLOCKS
 from ..generation import GENERATOR_VERSION
 from ..journal import record_death, validate_journal
 from ..repository import WorldRepository
@@ -38,11 +38,14 @@ class LivesMixin:
         self._end_life()
 
     def _end_life(self):
-        gained = economy.rebirth_ash(self.inventory, self.depth, self.converted)
+        carried = self._converting()
+        gained = economy.rebirth_ash(carried, self.depth, self.converted)
         self.report = self._life_report(gained)
         self.ash += gained
-        for item, count in self.inventory.items():
+        for item, count in carried.items():
             self.converted[item] = self.converted.get(item, 0) + count
+        if not self._chest_bound():
+            self.chest = {}
         self.inventory.clear()
         self.equipped.clear()
         self._entry("life", f"Life {self.life} ended. The anchor gathers {gained} dimensional ash.")
@@ -54,10 +57,22 @@ class LivesMixin:
         self.goal = None
         self._field_cache.clear()
 
+    def _chest_bound(self):
+        return any(BUILDINGS[b].function == "storage" for b in self.bound_buildings)
+
+    def _converting(self):
+        """Everything that turns into ash when a life ends: the inventory, plus an unbound chest."""
+        carried = dict(self.inventory)
+        if not self._chest_bound():
+            for item, count in self.chest.items():
+                carried[item] = carried.get(item, 0) + count
+        return carried
+
     def _life_report(self, gained=0):
         lived = self.game.elapsed_ms // 1000
         lines = [f"{name.capitalize()} experience gained: {self.regular[name]}"
-                 f" (dimensional +{self.life_gain[name]})" for name in ATTRIBUTES]
+                 f" (dimensional +{self.life_gain[name]})" for name in ATTRIBUTES
+                 if self.regular[name] or self.life_gain[name]]   # unused disciplines stay hidden
         cause = death_cause_text(self.cause)
         bounty = ", ".join(f"{BY_ID[i].name.lower()} {n} (max {limit} at once)" for i, n, limit in self.bounty())
         lines += [f"Forest bounty this life: {bounty}",
@@ -102,17 +117,19 @@ class LivesMixin:
         return fresh
 
     # Anchor action type -> exact fields it carries (session.validate_input checks the type).
-    ANCHOR_FIELDS = {"return": {"type"}, "begin_life": {"type"}, "unlock": {"type", "id"},
+    ANCHOR_FIELDS = {"return": {"type"}, "campfire": {"type"}, "begin_life": {"type"}, "unlock": {"type", "id"}, "bind": {"type", "id"},
                      "boon": {"type", "id"}, "journal_favor": {"type", "id", "mode"},
                      "journal_guarantee": {"type", "id", "region"}}
     ANCHOR_ACTIONS = tuple(ANCHOR_FIELDS)
+    # Journal controls work at any time (Journal page): they shape chunks not yet rolled.
+    JOURNAL_ACTIONS = ("journal_favor", "journal_guarantee")
 
     def anchor_offers(self):
         """Anchor shop rows (economy.offers) for the UI and debugging."""
         return economy.offers(self)
 
     def anchor_action(self, action):
-        """At the anchor: buy an unlock / boon, set Journal controls, or begin a life."""
+        """At the anchor: buy an unlock / boon or begin a life. Journal controls work any time."""
         if type(action) is not dict:
             raise ValueError("anchor action requires the anchor space")
         kind = action.get("type")
@@ -121,7 +138,13 @@ class LivesMixin:
         if kind == "return":
             self.return_to_anchor()
             return
-        if self.anchor_ms is None:
+        if kind == "campfire":   # a skill during a life (manual or auto): start making a fire here
+            if not self.can_make_fire():
+                raise ValueError("cannot make a campfire now")
+            self.goal = None
+            self._start_self(BY_ID["make_campfire"])
+            return
+        if kind not in self.JOURNAL_ACTIONS and self.anchor_ms is None:
             raise ValueError("anchor action requires the anchor space")
         if kind == "begin_life":
             self._begin_life()
@@ -139,7 +162,7 @@ class LivesMixin:
                 raise ValueError("guarantee requires an eligible region")
             self.journal_guarantee = ident
             self.journal_guarantee_region = region
-            self.anchor_wait = True
+            self.anchor_wait = self.anchor_wait or self.anchor_ms is not None
             self._entry("purchase", f"Journal guarantee: {BY_ID[ident].name} in {REGIONS[region].name}."
                         if ident else "Journal guarantee cleared.")
         else:
@@ -158,7 +181,7 @@ class LivesMixin:
             self.journal_favor.pop(ident, None)
         else:
             self.journal_favor[ident] = mode
-        self.anchor_wait = True
+        self.anchor_wait = self.anchor_wait or self.anchor_ms is not None
         self._entry("purchase", f"Journal: {BY_ID[ident].name} odds set to {mode}.")
 
     def _begin_life(self):
@@ -180,12 +203,14 @@ class LivesMixin:
         for name in ("blessing", "ash", "best_depth", "total_ms", "sequence", "decisions",
                      "return_ready_ms"):
             setattr(new, name, getattr(old, name))
+        carried = old._converting() if old.anchor_ms is None else {}
         if old.anchor_ms is None:
-            new.ash += economy.rebirth_ash(old.inventory, old.depth, old.converted)
+            new.ash += economy.rebirth_ash(carried, old.depth, old.converted)
         new.converted = dict(old.converted)
-        if old.anchor_ms is None:
-            for item, count in old.inventory.items():
-                new.converted[item] = new.converted.get(item, 0) + count
+        for item, count in carried.items():
+            new.converted[item] = new.converted.get(item, 0) + count
+        new.bound_buildings = set(old.bound_buildings)   # bound buildings follow the anchor
+        new.chest = dict(old.chest) if old._chest_bound() else {}
         new.unlocked, new.mastery = set(old.unlocked), dict(old.mastery)
         new.journal_guarantee = old.journal_guarantee
         new.journal_guarantee_region = old.journal_guarantee_region

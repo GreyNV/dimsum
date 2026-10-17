@@ -6,16 +6,17 @@ it. Older saves are migrated one schema at a time by MIGRATIONS; schemas 1-5
 (before the hosted build) are no longer supported and are rejected.
 """
 from ..catalog import BOONS, DEATH_CAUSES, UNLOCKS
-from ..catalog import ATTRIBUTES, BY_ID, ITEMS, REGIONS
+from ..catalog import ATTRIBUTES, BUILDINGS, BY_ID, ITEMS, REGIONS
 from ..encounters import ENCOUNTER_VERSION
 from ..equipment import validate_equipped
 from ..journal import new_journal, validate_journal
 from ..models import ChunkKey, chunk_ident, fields, identifier, integer
 from ..runtime import Exploration
-from ..tuning import PITY_CHUNKS
+from ..tuning import CHEST_SLOTS, PITY_CHUNKS
 from .constants import (ANCHOR_COUNTDOWN_MS, FOOD_COOLDOWN_MS, INVENTORY_SLOTS, LEGACY_MONSTER_MAX_MS, LOG_LIMIT,
                         LOG_TYPES, MONSTER_STEP_MS, SCHEMA_VERSION, SELF_ACTIONS, STACK_LIMIT, STAT_KEYS,
                         TASK_TYPES, VITAL_MAX)
+from .ecology import valid_pressure, valid_shimmer
 
 SAVE_FIELDS = ("schema_version", "encounters", "exploration", "life", "total_ms", "regular",
                "dimensional", "life_gain", "completed", "inventory", "hunger", "health",
@@ -25,12 +26,18 @@ SAVE_FIELDS = ("schema_version", "encounters", "exploration", "life", "total_ms"
                "admitted", "screened_chunks", "screened_targets", "log", "sequence",
                "decisions", "skills", "report", "task", "goal", "equipped", "knowledge",
                "recipes", "journal_disabled", "journal_favor", "leads", "lead_history", "spot_plans",
-               "return_ready_ms", "journal_guarantee", "journal_guarantee_region", "guarantee_used", "converted")
+               "return_ready_ms", "journal_guarantee", "journal_guarantee_region", "guarantee_used", "converted",
+               "buildings", "bound_buildings", "chest", "campfire", "pressure", "shimmer")
 V7_FIELDS = ("journal",)                       # added by schema 7
 V8_FIELDS = ("equipped", "knowledge", "recipes", "journal_disabled", "journal_favor",
              "leads", "lead_history")         # added by schema 8
 V9_FIELDS = ("spot_plans",)                    # added by schema 9
 V10_FIELDS = ("return_ready_ms", "journal_guarantee", "journal_guarantee_region", "guarantee_used", "converted")
+V13_FIELDS = ("buildings", "bound_buildings", "chest")
+V14_FIELDS = ("campfire",)
+V15_FIELDS = ("pressure",)
+V16_FIELDS = ("shimmer",)
+SPOT_PLAN_LIMIT = 3 + 8          # wild spots per chunk plus the largest site bucket
 OLDEST_SUPPORTED_SCHEMA = 6
 
 
@@ -62,13 +69,13 @@ def _reroll_current_life(data):
 
 def _from_v6(data):
     """Schema 6 -> 7 adds the lifetime journal (empty: earlier lives were not counted)."""
-    fields(data, _without(V7_FIELDS, V8_FIELDS, V9_FIELDS, V10_FIELDS) + ("dust",))
+    fields(data, _without(V7_FIELDS, V8_FIELDS, V9_FIELDS, V10_FIELDS, V13_FIELDS, V14_FIELDS, V15_FIELDS, V16_FIELDS) + ("dust",))
     return {**data, "schema_version": 7, "journal": new_journal()}
 
 
 def _from_v7(data):
     """New action pool/regions: preserve earned progress, move carried gear into slots."""
-    fields(data, _without(V8_FIELDS, V9_FIELDS, V10_FIELDS) + ("dust",))
+    fields(data, _without(V8_FIELDS, V9_FIELDS, V10_FIELDS, V13_FIELDS, V14_FIELDS, V15_FIELDS, V16_FIELDS) + ("dust",))
     if data["encounters"] != "encounters-v6":
         raise ValueError("unsupported expedition save")
     equipped = {ITEMS[item].slot: item for item in dict(data["inventory"]) if ITEMS[item].kind == "gear"}
@@ -78,7 +85,7 @@ def _from_v7(data):
 
 def _from_v8(data):
     """Spots are now rolled on entry and saved as plans: affected plans re-roll."""
-    fields(data, _without(V9_FIELDS, V10_FIELDS) + ("dust",))
+    fields(data, _without(V9_FIELDS, V10_FIELDS, V13_FIELDS, V14_FIELDS, V15_FIELDS, V16_FIELDS) + ("dust",))
     if data["encounters"] != "encounters-v7":
         raise ValueError("unsupported expedition save")
     return _reroll_current_life(data)
@@ -86,10 +93,10 @@ def _from_v8(data):
 
 def _from_v9(data):
     """Combine prestige balances and reroll old encounter plans; paid mastery is legacy credit."""
-    fields(data, _without(V10_FIELDS) + ("dust",))
+    fields(data, _without(V10_FIELDS, V13_FIELDS, V14_FIELDS, V15_FIELDS, V16_FIELDS) + ("dust",))
     if data["encounters"] == "encounters-v8":
         data = _reroll_current_life(data)
-    elif data["encounters"] != ENCOUNTER_VERSION:
+    elif data["encounters"] not in ("encounters-v9", ENCOUNTER_VERSION):   # current = rerolled above
         raise ValueError("unsupported expedition save")
     ash = integer(data["ash"], "ash", 0) + integer(data["dust"], "dust", 0)
     favor = dict(data["journal_favor"])
@@ -101,7 +108,77 @@ def _from_v9(data):
             "converted": {}}
 
 
-MIGRATIONS = {6: _from_v6, 7: _from_v7, 8: _from_v8, 9: _from_v9}
+def _from_v10(data):
+    """Rarity tiers change how new chunks roll; chunks already rolled keep their saved plans."""
+    fields(data, _without(V13_FIELDS, V14_FIELDS, V15_FIELDS, V16_FIELDS))
+    if data["encounters"] not in ("encounters-v9", "encounters-v10", ENCOUNTER_VERSION):
+        raise ValueError("unsupported expedition save")
+    return {**data, "schema_version": 11, "encounters": "encounters-v10"}
+
+
+# Content removed by schema 12: the camp and watchtower became landmark sites (their own
+# encounters); the walking staff waits for weapon animations.
+REMOVED_V12_ACTIONS = ("abandoned_camp", "craft_staff", "fallen_watchtower")   # what schema 12 dropped
+REMOVED_V12_ITEMS = ("walking_staff",)
+REMOVED_V12_RECIPES = ("walking_staff",)
+
+
+def _from_v11(data):
+    """Landmark sites and the staff's removal: this life's spots re-roll, and every reference
+    to removed actions/items is dropped; earned progress otherwise stays."""
+    fields(data, _without(V13_FIELDS, V14_FIELDS, V15_FIELDS, V16_FIELDS))
+    if data["encounters"] not in ("encounters-v10", ENCOUNTER_VERSION):
+        raise ValueError("unsupported expedition save")
+    gone_a, gone_i = set(REMOVED_V12_ACTIONS), set(REMOVED_V12_ITEMS)
+    data = _reroll_current_life(data)
+    inventory = [row for row in data["inventory"] if not (type(row) is list and row and row[0] in gone_i)]
+    equipped = {slot: item for slot, item in dict(data["equipped"]).items() if item not in gone_i}
+    journal = dict(data["journal"])
+    journal["actions"] = {k: v for k, v in dict(journal["actions"]).items() if k not in gone_a}
+    journal["items"] = {k: v for k, v in dict(journal["items"]).items() if k not in gone_i}
+    guarantee = data["journal_guarantee"]
+    log = [dict(entry, items=[i for i in entry["items"] if not (type(i) is list and i and i[0] in gone_i)])
+           for entry in data["log"] if isinstance(entry, dict) and entry.get("encounter") not in gone_a]
+    return {**data, "schema_version": 12, "encounters": ENCOUNTER_VERSION,
+            "inventory": inventory, "equipped": equipped, "journal": journal, "log": log,
+            "converted": {k: v for k, v in dict(data["converted"]).items() if k not in gone_i},
+            "mastery": {k: v for k, v in dict(data["mastery"]).items() if k not in gone_a},
+            "journal_favor": {k: v for k, v in dict(data["journal_favor"]).items() if k not in gone_a},
+            "journal_disabled": [k for k in data["journal_disabled"] if k not in gone_a],
+            "recipes": [k for k in data["recipes"] if k not in REMOVED_V12_RECIPES],
+            "journal_guarantee": None if guarantee in gone_a else guarantee,
+            "journal_guarantee_region": None if guarantee in gone_a else data["journal_guarantee_region"],
+            "task": None, "goal": None}
+
+
+def _from_v12(data):
+    """Camp buildings, the chest, the Building discipline and the 'built' life stat."""
+    fields(data, _without(V13_FIELDS, V14_FIELDS, V15_FIELDS, V16_FIELDS))
+    xp = {name: {**dict(data[name]), "building": 0} for name in ("regular", "dimensional", "life_gain")}
+    return {**data, **xp, "schema_version": 13, "buildings": [], "bound_buildings": [], "chest": {},
+            "stats": {**dict(data["stats"]), "built": 0}}
+
+
+def _from_v13(data):
+    """This life's campfire (none in older saves)."""
+    fields(data, _without(V14_FIELDS, V15_FIELDS, V16_FIELDS))
+    return {**data, "schema_version": 14, "campfire": None}
+
+
+def _from_v14(data):
+    """Ecological pressure this life (none in older saves)."""
+    fields(data, _without(V15_FIELDS, V16_FIELDS))
+    return {**data, "schema_version": 15, "pressure": {}}
+
+
+def _from_v15(data):
+    """Shimmering region cells this life (none in older saves)."""
+    fields(data, _without(V16_FIELDS))
+    return {**data, "schema_version": 16, "shimmer": []}
+
+
+MIGRATIONS = {6: _from_v6, 7: _from_v7, 8: _from_v8, 9: _from_v9, 10: _from_v10, 11: _from_v11, 12: _from_v12,
+              13: _from_v13, 14: _from_v14, 15: _from_v15}
 
 
 def upgrade(data):
@@ -199,6 +276,32 @@ def _load_life(result, data):
     result.best_depth = integer(data["best_depth"], "best depth", result.depth)
     result.blessing = integer(data["blessing"], "blessing power", 0)
     result.ash = integer(data["ash"], "ash", 0)
+    for name in ("buildings", "bound_buildings"):
+        values = data[name]
+        if type(values) is not list or len(set(values)) != len(values) or any(v not in BUILDINGS for v in values):
+            raise ValueError(f"invalid {name}")
+    if not set(data["bound_buildings"]) <= set(data["buildings"]) and data["anchor_ms"] is None:
+        raise ValueError("a bound building must stand at the camp")
+    result.buildings, result.bound_buildings = set(data["buildings"]), set(data["bound_buildings"])
+    chest = data["chest"]
+    if type(chest) is not dict or len(chest) > CHEST_SLOTS or any(
+            item not in ITEMS for item in chest) or (chest and not any(
+            BUILDINGS[b].function == "storage" for b in result.buildings | result.bound_buildings)):
+        raise ValueError("invalid storage chest")
+    result.chest = {item: integer(count, "chest count", 1, STACK_LIMIT) for item, count in chest.items()}
+    fire = data["campfire"]
+    if fire is not None:
+        if type(fire) is not dict or set(fire) != {"dimension", "x", "y", "fire_x", "fire_y"} \
+                or fire["dimension"] != result.dimension:
+            raise ValueError("invalid campfire")
+        for name in ("x", "y", "fire_x", "fire_y"):
+            integer(fire[name], f"campfire {name}")
+        if abs(fire["x"] - fire["fire_x"]) + abs(fire["y"] - fire["fire_y"]) > 1:
+            raise ValueError("a campfire stands beside its seat")
+        fire = dict(fire)
+    result.campfire = fire
+    result.pressure = valid_pressure(data["pressure"], result.dimension)
+    result.shimmer = valid_shimmer(data["shimmer"], result.dimension)
     if type(data["converted"]) is not dict or any(item not in ITEMS for item in data["converted"]):
         raise ValueError("invalid converted resources")
     result.converted = {item: integer(count, "converted resources", 1)
@@ -247,7 +350,7 @@ def _load_life(result, data):
         raise ValueError("invalid spot plans")
     result.spot_plans = {}
     for ident, rows in plans.items():
-        if type(ident) is not str or type(rows) is not list or len(rows) > 3:
+        if type(ident) is not str or type(rows) is not list or len(rows) > SPOT_PLAN_LIMIT:
             raise ValueError("invalid spot plan")
         parts = ident.split(":")
         if len(parts) != 3 or parts[0] not in {d.id for d in result.game.world.dimensions}:
@@ -261,7 +364,7 @@ def _load_life(result, data):
         spec = next(d for d in result.game.world.dimensions if d.id == key.dimension)
         for row in rows:
             if (type(row) is not list or len(row) != 3 or row[0] not in BY_ID or
-                    BY_ID[row[0]].placement != "spot"):
+                    BY_ID[row[0]].placement not in ("spot", "site")):
                 raise ValueError("invalid spot plan row")
             integer(row[1], "spot x", 0, spec.width - 1)
             integer(row[2], "spot y", 0, spec.height - 1)
@@ -370,6 +473,10 @@ class SavesMixin:
                 "food_cooldown_ms": self.food_cooldown_ms, "cause": self.cause,
                 "depth": self.depth, "best_depth": self.best_depth, "blessing": self.blessing,
                 "ash": self.ash, "converted": dict(sorted(self.converted.items())),
+                "buildings": sorted(self.buildings), "bound_buildings": sorted(self.bound_buildings),
+                "chest": dict(sorted(self.chest.items())),
+                "campfire": dict(self.campfire) if self.campfire else None,
+                "pressure": dict(sorted(self.pressure.items())), "shimmer": sorted(self.shimmer),
                 "unlocked": sorted(self.unlocked),
                 "mastery": dict(sorted(self.mastery.items())), "boon": self.boon, "boon_next": self.boon_next,
                 "stats": dict(self.stats), "drought": dict(self.drought), "journal": validate_journal(self.journal),

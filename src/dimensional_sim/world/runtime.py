@@ -21,6 +21,7 @@ DIAGONALS = {"northeast": ("north", "east"), "southeast": ("south", "east"),
              "southwest": ("south", "west"), "northwest": ("north", "west")}
 MOVE_DIRECTIONS = DIRECTIONS + tuple(DIAGONALS)
 DIAGONAL_PERCENT = 141
+MAX_LOAD_PERCENT = 400   # carry load may stretch the movement interval up to 4x (owners cap it lower)
 REVEAL_RADIUS = 5
 from .seeds import derive_seed
 
@@ -71,6 +72,8 @@ def _target_id(key, spawn_id):
 class Exploration:
     """Own all mutable actor/input clocks; repository owns immutable world chunks."""
 
+    attack_reach = 1   # cells along the facing (the weapon); the owner sets it each step, never saved
+
     def __init__(self, world, dimension=None, *, movement_interval_ms=120,
                  animation_rate_percent=100, attack_rate_percent=100,
                  attack_damage=1, animations=None):
@@ -114,6 +117,24 @@ class Exploration:
                 rows = self.seen.setdefault(key, [0] * height)
                 rows[y % height] |= 1 << (x % width)
 
+    def reveal_area(self, radius):
+        """Remember every cell within `radius` tiles (a map-reading reward). Generates the
+        chunks it covers so their cells exist; deterministic like all generation."""
+        asset = self.current_chunk().asset
+        width, height = asset.width, asset.height
+        gx = self.player.chunk.x * width + self.player.x
+        gy = self.player.chunk.y * height + self.player.y
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                if dx * dx + dy * dy > radius * radius:
+                    continue
+                x, y = gx + dx, gy + dy
+                key = ChunkKey(self.player.chunk.dimension, x // width, y // height)
+                if self.world.status(key) == "unknown":
+                    self.world.get(key)
+                rows = self.seen.setdefault(key, [0] * height)
+                rows[y % height] |= 1 << (x % width)
+
     def visibility_rows(self, key):
         """Browser-safe row strings; absent cells remain hidden."""
         rows = self.seen.get(key)
@@ -141,6 +162,9 @@ class Exploration:
         integer(animation_rate_percent, "animation rate", 1, 10000)
         integer(attack_rate_percent, "attack rate", 1, 10000)
         integer(attack_damage, "attack damage", 1, 1000000)
+        if not hasattr(self, "load_percent"):
+            self.load_percent = 100
+        integer(self.load_percent, "carry load percent", 100, MAX_LOAD_PERCENT)
         validate_animations(animations)
         self._movement_interval_ms = movement_interval_ms
         self._animation_rate_percent = animation_rate_percent
@@ -193,15 +217,35 @@ class Exploration:
                 asset = self.current_chunk().asset
                 px = self.player.chunk.x * asset.width + self.player.x
                 py = self.player.chunk.y * asset.height + self.player.y
-                positions = {(px + dx, py + dy)
-                             for dx, dy in (rotate(p, self.player.facing) for p in frame.hitbox)}
+                live = {}
                 for target in self.targets.values():
-                    position = (target.chunk.x * asset.width + target.x,
-                                target.chunk.y * asset.height + target.y)
-                    if (target.chunk.dimension == self.player.chunk.dimension and target.hp > 0
-                            and target.id not in self.hit_targets and position in positions):
-                        target.hp = max(0, target.hp - self.attack_damage)
-                        self.hit_targets.add(target.id)
+                    if target.chunk.dimension == self.player.chunk.dimension and target.hp > 0:
+                        live.setdefault((target.chunk.x * asset.width + target.x,
+                                         target.chunk.y * asset.height + target.y), target)
+                for dx, dy in (rotate(p, self.player.facing) for p in frame.hitbox):
+                    # The frame's hitbox cell starts the line; a weapon extends it along the
+                    # facing. The first enemy in the line takes the blow; a wall stops it.
+                    for step in range(1, self.attack_reach + 1):
+                        cell = (px + dx * step, py + dy * step)
+                        target = live.get(cell)
+                        if target is not None:
+                            if target.id not in self.hit_targets:
+                                target.hp = max(0, target.hp - self.attack_damage)
+                                self.hit_targets.add(target.id)
+                            break
+                        if self.wall_at(*cell):
+                            break
+
+    def wall_at(self, gx, gy):
+        """A cell a blow cannot pass: a blocking object (tree, rock, structure) or an
+        unloaded chunk. Water blocks walking but not a thrust over it."""
+        asset = self.current_chunk().asset
+        key = ChunkKey(self.player.chunk.dimension, gx // asset.width, gy // asset.height)
+        chunk = self.world.peek(key)
+        if chunk is None:
+            return True
+        x, y = gx % asset.width, gy % asset.height
+        return chunk.asset.collision[y][x] and chunk.asset.objects[y][x] is not None
 
     def _step_target(self, key, x, y, direction):
         """Where one cardinal step from (key, x, y) lands, or None if blocked (pure)."""
@@ -234,10 +278,15 @@ class Exploration:
             return current if current in (vertical, horizontal) else horizontal
         return direction
 
+    @property
+    def step_interval_ms(self):
+        """The movement interval after carry load (`load_percent`, set each step by its owner)."""
+        return self.movement_interval_ms * self.load_percent // 100
+
     def interval_for(self, direction):
         if direction in DIAGONALS:
-            return self.movement_interval_ms * DIAGONAL_PERCENT // 100
-        return self.movement_interval_ms
+            return self.step_interval_ms * DIAGONAL_PERCENT // 100
+        return self.step_interval_ms
 
     def _move(self, direction):
         self.player.facing = self.facing_for(direction, self.player.facing)
@@ -306,7 +355,8 @@ class Exploration:
             else:
                 self._set_animation("walk" if command.move else "idle")
                 interval = self.interval_for(command.move) if command.move else 0
-                step = min(remaining, interval - self.move_elapsed_ms) if command.move else remaining
+                # max(0, ...): a lighter load can shorten the interval below the time already walked
+                step = min(remaining, max(0, interval - self.move_elapsed_ms)) if command.move else remaining
                 self.player.animation_elapsed_ms += step
                 if command.move:
                     self.move_elapsed_ms += step
@@ -360,7 +410,7 @@ class Exploration:
             integer(p["animation_elapsed_ms"], "animation elapsed", 0)
             integer(data["elapsed_ms"], "simulation elapsed", 0)
             integer(data["move_elapsed_ms"], "movement elapsed", 0,
-                    result.movement_interval_ms * DIAGONAL_PERCENT // 100 - 1)
+                    result.movement_interval_ms * MAX_LOAD_PERCENT // 100 * DIAGONAL_PERCENT // 100 - 1)
             if p["animation_elapsed_ms"] > data["elapsed_ms"]:
                 raise ValueError("animation clock exceeds simulation")
             if p["animation"] == "attack" and p["animation_elapsed_ms"] * result.attack_rate_percent >= result.animations["attack"].duration_ms * 100:

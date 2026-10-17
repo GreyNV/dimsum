@@ -22,11 +22,17 @@ CHAIN = ("animal_tracks", "follow_deer_tracks", "hunt_deer")
 
 
 def run_first_life(seed, *, staff, max_minutes=45, step_ms=5000):
+    from gear_fixture import test_weapon   # the game has no weapon yet: a +1 test staff
+    with test_weapon():
+        return _run_first_life(seed, staff=staff, max_minutes=max_minutes, step_ms=step_ms)
+
+
+def _run_first_life(seed, *, staff, max_minutes=45, step_ms=5000):
     e = Expedition(Exploration(new_world(seed), "forest"))
     e.crafting_enabled = False
-    e.inventory["walking_staff"] = 1
+    e.inventory["test_staff"] = 1
     if staff:
-        e.equipped = equip_item(e.equipped, e.inventory, "walking_staff")
+        e.equipped = equip_item(e.equipped, e.inventory, "test_staff")
     limit = max_minutes * 60_000
     lead_events = set()
     while e.anchor_ms is None and e.total_ms < limit:
@@ -78,7 +84,7 @@ def summarize(rows):
             "lead_created": {kind: sum(row["lead_created"][kind] for row in cohort)
                              for kind in ("follow_deer_tracks", "hunt_deer")},
             "craft_knowledge_seeds": sum("primitive_crafting" in row["knowledge"] for row in cohort),
-            "staff_recipe_seeds": sum("walking_staff" in row["recipes"] for row in cohort),
+            "jerkin_recipe_seeds": sum("padded_jerkin" in row["recipes"] for row in cohort),
         }
     return groups
 

@@ -31,7 +31,8 @@ EXPLORE   auto-pilot walks to unvisited chunks inside its frontier (autopilot.fr
 | Unlock -> next run | none | unlocked actions enter future buckets; mastery/boon change generation |
 
 ## Player questions and the in-game answer
-- **What can I do?** Watch the task line; at the anchor, buy unlocks and boons and set earned Journal controls.
+- **What can I do?** Watch the task line; at the anchor, buy unlocks and boons and bind camp buildings; any time, set earned Journal controls (Journal › Encounters).
+- **Where are things made?** Only at the anchor camp, once a crafting station stands there. Buildings fall with the life unless bound with ash.
 - **Why explore?** New chunks roll new spots; regions differ (berries in thickets, boars in deep woods).
 - **What are resources for?** Food is eaten; sticks/thorns/hides become a staff, snare or wrap; everything
   carried at death becomes dimensional ash.

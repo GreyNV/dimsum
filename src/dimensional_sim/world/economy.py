@@ -1,6 +1,7 @@
 """Currency rules: automatic dimensional ash conversion and anchor purchases.
 
     all carried items --(return to anchor)--> dimensional ash --(unlock)--> new actions
+    a building at the anchor camp --(bind, a lot of ash)--> stands in every later life
     prayer --> blessing --(shrine unlock | next-life boon)--> new spot / one-life favour
 
 WHAT: pure value rules and purchase validation over an object with the meta fields
@@ -8,7 +9,7 @@ WHAT: pure value rules and purchase validation over an object with the meta fiel
 is this worth" and "why can't I buy this". The auto-pilot applies the results.
 TESTS: tests/test_world_closed_loop.py.
 """
-from .catalog import BOONS, ITEMS, UNLOCKS
+from .catalog import BOONS, BUILDINGS, ITEMS, UNLOCKS
 from .tuning import ASH_PER_RING, OFFER_FULL
 
 
@@ -52,6 +53,20 @@ def offers(meta):
         rows.append({"kind": "boon", "id": boon.id, "name": boon.name, "description": boon.description,
                      "currency": "blessing", "cost": boon.cost, "owned": meta.boon_next == boon.id,
                      "available": not reasons, "reasons": reasons})
+    for building in BUILDINGS.values():   # bind what this life built at the camp
+        built = building.id in getattr(meta, "buildings", ())
+        bound = building.id in getattr(meta, "bound_buildings", ())
+        if not built and not bound:
+            continue
+        reasons = []
+        if bound:
+            reasons.append("already bound")
+        if meta.ash < building.bind_cost:
+            reasons.append(f"needs {building.bind_cost} ash")
+        rows.append({"kind": "bind", "id": building.id, "name": f"Bind the {building.name.lower()}",
+                     "description": f"{building.description} Binding keeps it standing in every later life.",
+                     "currency": "ash", "cost": building.bind_cost, "owned": bound,
+                     "available": not reasons, "reasons": reasons})
     return rows
 
 
@@ -67,4 +82,6 @@ def purchase(meta, kind, ident):
         meta.unlocked.add(ident)
     elif kind == "boon":
         meta.boon_next = ident
+    elif kind == "bind":
+        meta.bound_buildings.add(ident)
     return row

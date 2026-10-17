@@ -94,3 +94,96 @@ seed 1 `O D O O B | O B G G O | O D O O G | ...`, seed 2 `B G D O D | O D B G O 
 ### Offline catch-up cost
 30 simulated minutes in CPython: 5.4 s before, 6.7 s after (denser Deep Woods/Thicket terrain means longer
 routes). The hosted build shows the world first and fast-forwards in the background.
+
+### Walking staff removed, Strength scaling retuned (2026-10-14)
+The walking staff (+1 punch from the second life on) was removed until weapon animations exist.
+Seeds 1-4, 90 simulated minutes each (`simulate.run`):
+
+| variant | lives | starved | mean life |
+|---|---|---|---|
+| before (staff, +1 punch per 5 Strength levels) | 16 | 6 | 15.6 min |
+| staff removed, nothing else | 26 | 25 | 12.5 min |
+| staff removed, flat +1 punch from the start | 12 | 4 | 21 min (easier than before) |
+| staff removed, +1 punch per 3 Strength levels (**chosen**) | 15 | 7 | 16 min |
+
+The staff was load-bearing: faster boar kills mean more meat for less health and a deeper frontier.
+`tuning.STRENGTH_LEVELS_PER_PUNCH = 3` restores the old curve through progression instead of a weapon.
+A future weapon should come with a look at this number again.
+
+### Camp crafting, buildings and carry load (2026-10-14)
+All crafts now need a crafting station at the anchor camp (12 sticks, 2 hides; primitive crafting).
+Seeds 1-4, 90 simulated minutes, `simulate` "spend" policy (binds buildings when it can afford them):
+
+| variant | lives | starved | mean life | buildings built | crafts |
+|---|---|---|---|---|---|
+| before (craft anywhere) | 15 | 7 | 16 min | - | - |
+| station-only crafting + carry load | 21 | 8 | 14 min | 17 | 14 |
+| station-only crafting, no carry load | 21 | 9 | 15 min | 14 | 31 |
+
+Lives are a little shorter: early gear (hide wrap) now waits for a station and a trip home. Carry load
+costs little survival (mostly fewer crafts, since full packs walk slower). Knobs: the station cost
+(catalog `build_station`), `CARRY_FREE` / `CARRY_PERCENT_PER_ITEM` / `CARRY_MAX_PERCENT` (tuning.py).
+
+### Local exhaustion and fewer guaranteed sticks (2026-10-16)
+Harvesting a wild spot thins its kind (wood, berries, game, fungi, eggs) in that region cell
+for the rest of the life (`autopilot/ecology.py`). Fallen branches give 1 stick + 50% a second
+(was 2-3); the logging camp's log pile 2-3 (was 2-4). Seeds 1-6, 90 simulated minutes,
+"spend" policy, campfires on (`tools/measure_lives.py`, summarized with `tools/measure_report.py`):
+
+| variant | lives | starved | mean life | sticks/min | station built | station minute (median) |
+|---|---|---|---|---|---|---|
+| before | 30 | 12 | 16.4 min | 1.87 | 21/30 | 6.5 |
+| branches 1-2 (+50%), flat step 12% | 25 | 10 | 17.5 min | 1.58 | 16/25 | 8.9 |
+| branches 1 (+50%), flat step 20% | 27 | **18** | 15.9 min | 1.29 | 13/27 | 9.2 |
+| branches 1 (+50%), per-kind steps (**chosen**) | 26 | 12 | 18.1 min | 1.25 | 18/26 | 8.5 |
+
+A flat 20% step starved the autopilot (berries thinned too fast). The chosen steps thin food
+slowly and wood fast (`PRESSURE_STEP`: wood 20, game 15, fungi 10, eggs 10, berries 8; floor
+`PRESSURE_FLOOR` 25%). Stick income is a third lower, starvation unchanged, and the station
+moves from minute 6.5 to 8.5 of a life; about two lives in three still build one, so the path
+is there but takes a real stretch of a life. Knobs: `PRESSURE_STEP`, `PRESSURE_FLOOR` (tuning.py),
+the branches loot (catalog), the station cost.
+
+### Weapons: staff, spear, axe (2026-10-17)
+The walking staff is back (5 sticks at the station, reach 2, +1 punch) with the spear and axe after
+it (recipes from sites, iron nails). Seeds 1-6 (then 1-12), 90 simulated minutes, `tools/measure_lives.py`:
+
+| variant | seeds | lives | mean life | boar / starved | depth | campfires per life |
+|---|---|---|---|---|---|---|
+| no staff (Phase 4 rules) | 1-6 | 23 | 20.3 min | 11 / 12 | 4.9 | 3.1 |
+| staff; frontier counts reach (one fewer bite per extra cell) | 1-6 | 34 | 14.3 min | 19 / 15 | 5.6 | 1.6 |
+| same, frontier ignores reach | 1-6 | 26 | 17.4 min | 17 / 9 | 5.0 | 2.1 |
+| no staff | 1-12 | 50 | 18.4 min | 24 / 26 | 5.1 | 2.6 |
+| staff; frontier ignores reach; gear crafts keep a campfire's sticks (**chosen**) | 1-12 | 51 | 18.0 min | 28 / 23 | 5.1 | 2.5 |
+
+Reading: counting reach in `fight_damage` sent lives a ring deeper and the staff ate the sticks
+an emergency fire needs; both together cut a life by a quarter. With the frontier ignoring reach
+and the staff waiting for 8 sticks (`FIRE_KIT`), lives match the no-staff baseline. The staff is
+made in about one life in three; the spear and axe did not appear in 90 minutes (their recipes and
+nails are rare finds), so they are a later-life goal. The pre-emptive strike (reach > 1 hits an
+enemy already in a clear line) made no measurable difference to life length.
+
+### Site conditions and rare phenomena (2026-10-17)
+Seeds 1-12, 90 simulated minutes, `tools/measure_lives.py`:
+
+| variant | lives | mean life | boar / starved | depth | station built | site encounters done |
+|---|---|---|---|---|---|---|
+| Phase 5 | 51 | 18.0 min | 28 / 23 | 5.1 | 26/51 | 98 |
+| conditions + phenomena | 49 | 19.6 min | 26 / 23 | 5.2 | 30/49 | 98 |
+
+No measurable change to survival (inside the run-to-run noise). Phenomena seen in 49 lives:
+hanging leaf 20, backward ripple 5, double shadow 8, split-shadow tree 2 - roughly one strange
+thing every 35 minutes, and the shimmer about once in 25 lives. Knobs: phenomenon weights and
+windows (catalog), the double shadow's 12% and 60%, `SHIMMER_RARITY_PERCENT`, condition weights.
+
+### Ruin guards and the final sweep (2026-10-17)
+Restless bones at burial mounds and fallen watchtowers. Seeds 1-12, 90 simulated minutes:
+
+| variant | lives | mean life | deaths: boar / starved / lurker / bones | site guards fought |
+|---|---|---|---|---|
+| Phase 6 | 49 | 19.6 min | 26 / 23 / 0 / 0 | - |
+| with ruin guards | 53 | 17.6 min | 23 / 28 / 1 / 1 | 11 (4 mound, 7 tower) |
+
+Ruins are deep (ring 3 and 5+) and rare, so guards add danger where the autopilot already pushes
+its luck; the life-length difference is inside the run-to-run spread seen across phases
+(16.7-20.3 min). Knobs: `restless_bones` hit/aggro/leash/step, the guards' HP and weights.

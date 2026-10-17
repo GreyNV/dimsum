@@ -6,8 +6,9 @@ Self recipes use the same eligibility rules but need no terrain roll.
 """
 from dataclasses import dataclass, field
 
-from .catalog import (ACTIONS, BY_ID, ITEMS, JOURNAL_FAVOR_MASTERY, JOURNAL_FAVOR_PERCENT,
-                      JOURNAL_SUPPRESS_PERCENT, REGIONS, UNLOCKS)
+from .catalog import (ACTIONS, BIOMES, BUILDINGS, BY_ID, FALLBACK_RARITY, ITEMS, JOURNAL_FAVOR_MASTERY,
+                      JOURNAL_FAVOR_PERCENT, JOURNAL_SUPPRESS_PERCENT, RARITY, REGIONS, UNLOCKS)
+from .drops import SCALE, tier_chances
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,7 @@ class Context:
     biome: str = "dark_forest"
     region: str | None = None
     region_def: object | None = None
+    ring: int = 0                     # danger ring of the chunk (spot tier odds may grow with it)
     placement: str = "spot"
     unlocked: frozenset = frozenset()
     knowledge: frozenset = frozenset()
@@ -30,11 +32,16 @@ class Context:
     journal_favor: dict = field(default_factory=dict)
     inventory: dict = field(default_factory=dict)
     gear: frozenset = frozenset()
+    at_camp: bool = False             # standing in the anchor camp (workplace actions)
+    buildings: frozenset = frozenset()   # BuildingDef ids standing at the camp this life
     hunger: int = 0
     food_carried: bool = False
     trigger: str | None = None
     visible: bool = True
     flags: frozenset = frozenset()
+    pressure: dict = field(default_factory=dict)   # ecology -> spawn weight percent here (worked ground)
+    features: frozenset = frozenset()             # terrain here ("water"); spots with near="w" need it
+    rarity_percent: int = 100                     # odds of every tier above common (a shimmer raises it)
     spawned: bool | None = None
     admitted: bool | None = None
     resolved: bool = False
@@ -78,6 +85,8 @@ def _requirement_reasons(action, ctx):
             result.append(f"needs unlock {req.id}")
         elif req.kind == "recipe" and req.id not in ctx.recipes:
             result.append(f"needs recipe {req.id}")
+        elif req.kind == "gear" and req.id not in ctx.gear:
+            result.append(f"needs a {req.id.replace('_', ' ')} carried")
     return result
 
 
@@ -100,6 +109,8 @@ def bucket_reasons(action, ctx):
     region_id = ctx.region_def.id if ctx.region_def is not None else ctx.region
     if action.placement in ("spot", "lead") and action.regions is not None and region_id not in action.regions:
         reasons.append(f"region {region_id} not in {list(action.regions)}")
+    if action.placement == "spot" and action.near == "w" and "water" not in ctx.features:
+        reasons.append("needs a river or ford in this chunk")
     if action.placement == "spot" and region_id is not None:
         region = ctx.region_def or REGIONS.get(region_id)
         if region is not None and region.multiplier(action.id) == 0:
@@ -113,6 +124,12 @@ def context_reasons(action, ctx):
     """Why a known, placed opportunity cannot be performed right now."""
     reasons = []
     if action.placement == "self":
+        if action.builds is not None and action.builds in ctx.buildings:
+            reasons.append(f"{BUILDINGS[action.builds].name.lower()} already stands at the camp")
+        if action.workplace is not None and not ctx.at_camp:
+            reasons.append("only at the anchor camp")
+        elif action.workplace in BUILDINGS and action.workplace not in ctx.buildings:
+            reasons.append(f"needs a {BUILDINGS[action.workplace].name.lower()} at the camp")
         if ctx.trigger is not None and action.trigger != ctx.trigger:
             reasons.append(f"trigger is {action.trigger}, context is {ctx.trigger}")
         for item, count in action.cost:
@@ -120,6 +137,12 @@ def context_reasons(action, ctx):
                 reasons.append(f"needs {count} {ITEMS[item].name.lower()} (have {ctx.inventory.get(item, 0)})")
         if action.effect is not None and action.effect in ctx.gear:
             reasons.append(f"already carrying {ITEMS[action.effect].name.lower()}")
+        elif action.effect is not None:
+            # Gear crafts fill an empty slot, or upgrade the piece they consume - never downgrade.
+            consumed = {item for item, _ in action.cost}
+            worn = sorted(g for g in ctx.gear if g not in consumed and ITEMS[g].slot == ITEMS[action.effect].slot)
+            if worn:
+                reasons.append(f"{ITEMS[action.effect].slot} slot already holds {ITEMS[worn[0]].name.lower()}")
         if action.visible_only and not ctx.visible:
             reasons.append("only during live play")
         if "once_per_life" in action.tags and f"done:{action.id}" in ctx.flags:
@@ -129,6 +152,8 @@ def context_reasons(action, ctx):
                 reasons.append(f"hunger must be below {action.need_hunger_below}")
             if action.need_no_food and ctx.food_carried:
                 reasons.append("food already carried")
+            if action.need_flag is not None and action.need_flag not in ctx.flags:
+                reasons.append(f"only when {action.need_flag.replace('_', ' ')}")
     if ctx.resolved:
         reasons.append("opportunity resolved")
     return reasons
@@ -151,6 +176,8 @@ def weight(action, ctx):
     percent = _journal_percent(action, ctx)
     if percent is not None:
         weight_value = max(1, weight_value * percent // 100)
+    if action.placement == "spot" and action.ecology in ctx.pressure:
+        weight_value = max(1, weight_value * ctx.pressure[action.ecology] // 100)
     return weight_value
 
 
@@ -167,13 +194,56 @@ def bucket(ctx):
     return [(a, w) for a in ACTIONS if (w := weight(a, ctx)) > 0]
 
 
+def spot_tiers(ctx, entries=None):
+    """Encounter spots by rarity tier: {tier: ([(action, weight), ...], odds)}.
+
+    A tier's cascade odds scale with how much of its spot weight is eligible here
+    (region and Journal modifiers included) relative to RarityDef.spot_full_weight, then
+    with the biome's per-ring bonus and the place's `rarity_percent` (a shimmer). The fallback
+    tier's odds are unused (it catches misses)."""
+    entries = bucket(ctx) if entries is None else entries
+    biome = BIOMES.get(ctx.biome)
+    ring_percent = 100 + (biome.spot_rarity_per_ring * min(ctx.ring, biome.ring_cap) if biome else 0)
+    tiers = {}
+    for action, w in entries:
+        tiers.setdefault(action.rarity, []).append((action, w))
+    result = {}
+    for tier, pool in tiers.items():
+        rarity = RARITY[tier]
+        odds = 0 if tier == FALLBACK_RARITY else \
+            rarity.spot_odds * sum(w for _, w in pool) // rarity.spot_full_weight * ring_percent // 100 \
+            * ctx.rarity_percent // 100
+        result[tier] = (pool, odds)
+    return result
+
+
+def spot_shares(ctx, entries=None):
+    """{action id: basis points} — each spot action's chance per spot draw (tier x share in tier)."""
+    tiers = spot_tiers(ctx, entries)
+    chances = tier_chances({t: odds for t, (_, odds) in tiers.items()}, set(tiers))
+    result = {}
+    for tier, (pool, _) in tiers.items():
+        total = sum(w for _, w in pool)
+        for action, w in pool:
+            result[action.id] = chances[tier] * w // total
+    return result
+
+
+def _shares(action, ctx, entries):
+    """Per-draw chance in permille: spot actions use the tier cascade, others plain weights."""
+    if action.placement == "spot":
+        return spot_shares(ctx, entries).get(action.id, 0) * 1000 // SCALE
+    total = sum(w for _, w in entries)
+    w = weight(action, ctx)
+    return w * 1000 // total if total and w else 0
+
+
 def explain(action_id, ctx):
     """Separate permanent knowledge, pool, local context, and concrete spawn."""
     action = BY_ID[action_id]
     b_reasons = bucket_reasons(action, ctx)
     c_reasons = context_reasons(action, ctx)
     entries = bucket(ctx)
-    total = sum(w for _, w in entries)
     w = weight(action, ctx)
     eligible = w > 0
     spawned = ctx.spawned if action.placement == "spot" else \
@@ -190,7 +260,8 @@ def explain(action_id, ctx):
             "bucket_eligible": not b_reasons, "context_eligible": not c_reasons,
             "eligible": eligible, "weight": w,
             "base_weight": action.weight,
-            "share_permille": w * 1000 // total if total and w else 0,
+            "share_permille": _shares(action, ctx, entries) if eligible else 0,
+            "rarity": action.rarity,
             "spawned": spawned, "admitted": ctx.admitted if action.placement == "spot" else None,
             "available": available,
             "reasons": b_reasons + c_reasons or ["eligible"],
@@ -246,9 +317,11 @@ def _weight_modifiers(action, ctx):
 def describe_bucket(ctx):
     entries = bucket(ctx)
     total = sum(w for _, w in entries) or 1
+    shares = spot_shares(ctx, entries) if ctx.placement == "spot" else {}
     return [{"id": a.id, "name": a.name, "category": a.category, "base_weight": a.weight,
-             "modifiers": _weight_modifiers(a, ctx), "weight": w,
-             "share_permille": w * 1000 // total} for a, w in entries]
+             "modifiers": _weight_modifiers(a, ctx), "weight": w, "rarity": a.rarity,
+             "share_permille": shares[a.id] * 1000 // SCALE if a.id in shares else w * 1000 // total}
+            for a, w in entries]
 
 
 def outcome_chance(outcome, region=None):

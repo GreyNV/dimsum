@@ -13,6 +13,25 @@ export function buildTabs(pages) {
   }));
 }
 
+/** The page's subtab bar (hidden when the page has none); `sub` is the active one. */
+export function renderSubtabs(target, subtabs, sub) {
+  target.hidden = !subtabs.length;
+  target.replaceChildren(...subtabs.map(t => {
+    const button = el('button', '', t.label);
+    button.type = 'button'; button.dataset.subpage = t.id;
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-selected', String(t.id === sub));
+    return button;
+  }));
+}
+
+/** The Journal action a click on a control button asks for, or null. */
+export function journalAction(target) {
+  const raw = target.closest('button[data-journal]')?.dataset.journal;
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
 /** A collapsible <details> for one page section. `closed` remembers sections the
  * player folded (by page and title); `armed` is the action awaiting confirmation. */
 export function renderSection(section, {page, closed, armed}) {
@@ -26,7 +45,7 @@ export function renderSection(section, {page, closed, armed}) {
   return box;
 }
 
-const SECTION_KINDS = {rows, table, progress, actions};
+const SECTION_KINDS = {rows, table, progress, actions, controls};
 
 function rows(section) {
   const list = el('dl', 'rows');
@@ -77,6 +96,26 @@ function actions(section, armed) {
       armed === b.id ? 'Select again to confirm' : b.label);
     button.type = 'button'; button.dataset.act = b.id;
     row.append(button, el('small', '', b.note));
+    list.append(row);
+  }
+  return list;
+}
+
+/** Journal controls: one row per encounter with its toggle buttons (each carries its action). */
+function controls(section) {
+  if (!section.items.length) return el('p', 'note', section.empty || 'Nothing yet.');
+  const list = el('div', 'page-controls');
+  for (const item of section.items) {
+    const row = el('div', 'control-row');
+    row.append(el('span', 'control-label', item.label));
+    const buttons = el('div', 'control-buttons');
+    for (const b of item.buttons) {
+      const button = el('button', b.on ? 'on' : '', b.label);
+      button.type = 'button'; button.dataset.journal = JSON.stringify(b.action); button.title = b.note || '';
+      button.setAttribute('aria-pressed', String(!!b.on));
+      buttons.append(button);
+    }
+    row.append(buttons);
     list.append(row);
   }
   return list;

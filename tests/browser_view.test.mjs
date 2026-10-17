@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {visualHash, residentBounds, cameraView, follow, retainResident, tileAt, stickDirection, Controls, TILE_W, TILE_H} from '../src/dimensional_sim/world/browser/view.js';
 import {groundMarks, paintChunk, TREE, terrainColor, OBJECT_PAD, clearStamps, stampCount, TILE_VARIANTS, TREE_VARIANTS, ROCK_VARIANTS} from '../src/dimensional_sim/world/browser/art.js';
 import {ENEMY, ROLE, spriteSize, paintSprite, punchReach, hiddenBehind, occludingTreeTiles, SPOTS, POSE, drawSpot, CAMP, ELDER} from '../src/dimensional_sim/world/browser/actors.js';
-import {activityText, newRewards, ATTRIBUTES, rewardTexts, reportIsFresh, reportStorageKey, ExpeditionHud, prologueView, shopSections, debugText} from '../src/dimensional_sim/world/browser/hud.js';
+import {activityText, newRewards, ATTRIBUTES, usedAttributes, rewardTexts, reportIsFresh, reportStorageKey, ExpeditionHud, prologueView, shopSections, debugText} from '../src/dimensional_sim/world/browser/hud.js';
 import {anchorAction} from '../src/dimensional_sim/world/browser/anchor_ui.js';
 import {drawMinimap, visibleAt} from '../src/dimensional_sim/world/browser/minimap.js';
 const pose = (facing, animation='idle', animation_ms=0) => ({facing, animation, animation_ms, active:false});
@@ -127,6 +127,9 @@ test('character art is multi-cell; cached ground and objects paint separately wi
   assert.equal(stampCount(),new Set(stamped).size,'stamps are reused, not redrawn');
   assert.deepEqual(again.ground.log.map(e=>e[1]),groundLog.map(e=>e[1]),'same variant per coordinate');
   assert.notEqual(terrainColor('='),terrainColor('T'));
+  const site=chunk();site.tiles[0]='AM' + '.'.repeat(30);
+  assert.equal(paintChunk(site,factory).objects.log.filter(e=>e[0]==='image').length,2,'tent and masonry are drawn');
+  assert.notEqual(terrainColor('A'),terrainColor('.'));assert.notEqual(terrainColor('M'),terrainColor('.'));
 });
 
 test('a second tap during an in-flight attack survives acknowledgement and sends a release edge',()=>{
@@ -213,22 +216,30 @@ test('encounter spot sprites are well-formed and activity poses crouch the body'
   const calls=[];const ctx=new Proxy({},{get:(_,k)=>k==='save'||k==='restore'||k==='fillRect'||k==='fillText'?(...a)=>calls.push(k):undefined,set:()=>true});
   drawSpot(ctx,{encounter:'unknown',x:0,y:0},0,0); assert.ok(calls.length>0,'spots without art draw the fallback marker');
   calls.length=0; drawSpot(ctx,{x:0,y:0},0,0); assert.equal(calls.length,0,'a spot with no action draws nothing');
+  const fills=[];const paint=new Proxy({},{get:(t,k)=>k==='fillRect'?()=>fills.push(t.fillStyle):k==='save'||k==='restore'||k==='fillText'?()=>{}:t[k],set:(t,k,v)=>{t[k]=v;return true;}});
+  drawSpot(paint,{encounter:'old_carvings',x:0,y:0,glint:'#8fd17a'},0,0);
+  assert.ok(fills.includes('#8fd17a'),'uncommon and rarer spots sparkle in their rarity color');
 });
 test('HUD describes the auto-pilot from snapshot fields only',()=>{
   const base={spots:[{x:3,y:4,name:'Bramble berries'}],expedition:{mode:'travel',goal:{x:3,y:4},activity:null,control:'auto',log:[],xp:{},skills:[]}};
   assert.equal(activityText(base),'Heading for bramble berries');
   assert.equal(activityText({...base,expedition:{...base.expedition,activity:{name:'Forest spring',kind:'drink',verb:'Drinking at',progress:456}}}),'Drinking at forest spring - 45%');
-  assert.match(activityText({...base,expedition:{...base.expedition,mode:'fight'}}),/punching/);
+  assert.equal(activityText({...base,expedition:{...base.expedition,activity:{name:'Fallen boughs',kind:'gather',verb:'Gathering',
+    interaction:'Collecting fallen wood',progress:500}}}),'Collecting fallen wood - 50%','the interaction names what the avatar does');
+  assert.match(activityText({...base,expedition:{...base.expedition,mode:'fight'}}),/Fists up - fighting/);
   assert.equal(activityText(base,true),'Paused - the forest can wait');
   assert.equal(activityText({}),null,'legacy manual frames fall back');
   const log=[{seq:4},{seq:5},{seq:6}];
   assert.deepEqual(newRewards({expedition:{log}},4).map(e=>e.seq),[5,6]);
-  assert.equal(ATTRIBUTES.length,6);
+  assert.equal(ATTRIBUTES.length,7);
+  assert.deepEqual(usedAttributes({strength:{xp:5,dim_xp:0},building:{xp:0,dim_xp:3},agility:{xp:0,dim_xp:0}}).map(([id])=>id),['strength','building'],'disciplines without experience stay hidden');
 });
 
 test('HUD turns log entries into reward popups and shows reports only while fresh',()=>{
   const enc={type:'encounter',xp:40,attribute:'perception',items:[['wild_berries',3]],text:'x'};
   assert.deepEqual(rewardTexts(enc).map(r=>r.text),['+40 Perception','+3 wild berries']);
+  const rare=rewardTexts({type:'encounter',items:[['boar_meat',1],['amber_charm',1]]},{},{amber_charm:'#7fb4ff'});
+  assert.deepEqual(rare.map(r=>r.glint||null),[null,'#7fb4ff'],'only rarity items carry a reveal glint');
   assert.deepEqual(rewardTexts({type:'eat',text:'Ate boar meat (+35 hunger, +11 health).',items:[['boar_meat',-1]]}).map(r=>r.text),['boar meat (+35 hunger, +11 health)']);
   assert.ok(reportIsFresh({total_ms:5000,report:{clock_ms:0}}),'intro on a fresh world');
   assert.ok(!reportIsFresh({total_ms:600000,report:{clock_ms:0}}),'no stale report on reload');
@@ -236,7 +247,8 @@ test('HUD turns log entries into reward popups and shows reports only while fres
     'a new seeded world must show its own opening');
   const base={expedition:{mode:'home',goal:null,activity:null,control:'auto',depth:2}};
   assert.match(activityText(base),/anchor camp/);
-  assert.match(activityText({expedition:{...base.expedition,mode:'rest',activity:{kind:'rest',name:'Resting',progress:500}}}),/Resting at the anchor camp - 50%/);
+  assert.match(activityText({expedition:{...base.expedition,mode:'rest',activity:{kind:'rest',name:'Resting at the anchor camp',progress:500}}}),/Resting at the anchor camp - 50%/);
+  assert.match(activityText({expedition:{...base.expedition,mode:'rest',activity:{kind:'rest',name:'Resting by the campfire',progress:500}}}),/Resting by the campfire - 50%/);
   for(const [id,s] of Object.entries(CAMP)) s.paint.forEach((row,r)=>{assert.equal(row.length,s.paint[0].length,id);assert.equal(s.glyph[r].length,row.length,id);});
   assert.equal(POSE.rest,'sit');
 });
@@ -417,13 +429,11 @@ test('anchor shop groups server rows and the debug overlay explains buckets',()=
   assert.match(activityText({expedition:{control:'auto',activity:{kind:'craft',name:'Carve a walking staff',progress:500}}}),/^Carve a walking staff - 50%/);
 });
 
-test('mastery guarantee chooses and clears a named region',()=>{
-  const button={dataset:{journalGuarantee:'bramble_berries',region:'old_road'}};
-  const target={closest:selector=>selector==='button[data-journal-guarantee]' ? button : null};
-  assert.deepEqual(anchorAction(target,{meta:{journal_guarantee:null,journal_guarantee_region:null}}),
-    {type:'journal_guarantee',id:'bramble_berries',region:'old_road'});
-  assert.deepEqual(anchorAction(target,{meta:{journal_guarantee:'bramble_berries',journal_guarantee_region:'old_road'}}),
-    {type:'journal_guarantee',id:null,region:null});
+test('anchor clicks map to purchases and begin; Journal controls are not anchor buttons any more',()=>{
+  const at=(selector,data)=>({closest:sel=>sel===selector?{dataset:data}:null});
+  assert.deepEqual(anchorAction(at('button[data-buy]',{buy:'unlock:climbing'})),{type:'unlock',id:'climbing'});
+  assert.deepEqual(anchorAction(at('#anchor-begin',{})),{type:'begin_life'});
+  assert.equal(anchorAction(at('button[data-journal-guarantee]',{journalGuarantee:'bramble_berries'})),null);
 });
 
 test('stick and keys move in eight directions', async () => {
@@ -448,6 +458,20 @@ test('terrain marks never draw undefined glyphs or colors, for every terrain gly
       assert.equal(typeof mark.glyph, 'string', `${glyph} ${x},${y}`);
       assert.equal(mark.glyph.length, 1);
       assert.match(mark.color, /^#[0-9a-f]{6}$/);
+    }
+  }
+});
+
+test('every camp building has well-formed art', async () => {
+  const {BUILDING_ART, BUILDING_PARTS} = await import('../src/dimensional_sim/world/browser/place_art.js');
+  assert.deepEqual(Object.keys(BUILDING_ART).sort(), ['crafting_station', 'storage_chest']);
+  for (const art of Object.values(BUILDING_ART)) {
+    assert.ok(art.parts.length >= 3);
+    for (const [name] of art.parts) {
+      const part = BUILDING_PARTS[name];
+      assert.ok(part, name);
+      assert.equal(part.paint.length, part.glyph.length, name);
+      part.paint.forEach((row, i) => assert.equal(row.length, part.glyph[i].length, `${name} row ${i}`));
     }
   }
 });

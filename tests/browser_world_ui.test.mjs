@@ -6,6 +6,8 @@ import {regionCue, skillSlots, worldMode} from '../src/dimensional_sim/world/bro
 test('location cues teach geography without exposing weights', () => {
   assert.match(regionCue({id: 'deep_woods'}), /Branches and tracks/);
   assert.match(regionCue({id: 'still_glade'}), /water/);
+  assert.match(regionCue({id: 'deep_woods', worked: ['wood', 'berries']}), /Picked over this life: fewer fallen wood and berries/);
+  assert.doesNotMatch(regionCue({id: 'deep_woods', worked: []}), /Picked over/);
   assert.match(regionCue({id: 'old_road'}), /travel/);
   assert.doesNotMatch(regionCue({id: 'deep_woods'}), /\d+%|x\d/);
 });

@@ -11,10 +11,21 @@ export const ENEMY = Object.freeze({paint: [
   ' /       \\ ', ' (\\ ^^^ /) ', '  ;;;;;;;  ', ' ;;o;;;o;; ', '/;;;vvv;;;\\',
   " \\;V;;;V;/ ", "  ''   ''  "]});
 /** Enemy art by catalog sprite key (catalog.EnemyDef.sprite); unknown keys draw ENEMY. */
-export const ENEMY_SPRITES = Object.freeze({boar: ENEMY});
+/** River lurker: low and wide, splayed legs, eyes on top - a different silhouette from the boar. */
+export const LURKER = Object.freeze({paint: [
+  '  y     y  ', ' lylllllyl ', 'llnnnnnnnll', 'r lllllll r', 'rr  l l  rr'], glyph: [
+  '  o     o  ', ' (O=====O) ', '<:vvvvvvv:>', '/ ;;;;;;; \\', '<<  ^ ^  >>']});
+/** Restless bones: an upright skeleton with cold eyes and a rusted blade - the only
+ * two-legged enemy, so it reads as a person-shaped threat at a glance. */
+export const SKELETON = Object.freeze({paint: ["   ggggg   ", "   gigig   ", "    ggg  j ", "  ggogogg j", "  g gog gj ", "   gg gg   ", "   gg gg   "],
+  glyph: ["   .---.   ", "   |o:o|   ", "    \\=/  / ", "  /=)=(=\\ |", "  ' =|= '| ", "   /| |\\   ", "   =' '=   "]});
+/** Pale wisp: a small cold light with trailing wisps; it floats, so it bobs and glows. */
+export const WISP = Object.freeze({paint: ["   uuu   ", "  uqqqu  ", " uqqqqqu ", "  uqqqu  ", "   vuv   ", "  v v v  "],
+  glyph: ["   .-.   ", "  (o o)  ", " ( ~~~ ) ", "  \\___/  ", "   )|(   ", "  ' ' '  "]});
+export const ENEMY_SPRITES = Object.freeze({boar: ENEMY, lurker: LURKER, skeleton: SKELETON, wisp: WISP});
 
 /** Enemy at tile center (x, y). `hit` = ms since last HP loss; `dying` = 0..1 progress. */
-export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying = null, maxHp = 3, reducedMotion = false, ghost = false} = {}) {
+export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying = null, maxHp = 3, reducedMotion = false, ghost = false, reflection = false} = {}) {
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
   const sprite = ENEMY_SPRITES[target.sprite] || ENEMY;
@@ -22,7 +33,8 @@ export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying =
   const seed = visualHash(target.x, target.y, 77);
   const breathe = reducedMotion ? 0 : Math.floor((clock + seed % 1000) / 500) % 2;
   const shake = !reducedMotion && hit < 160 ? (Math.floor(hit / 40) % 2 ? 2 : -2) : 0;
-  const left = x - width / 2 + shake, top = y + ACTOR_FOOT - height + breathe;
+  const float = sprite === WISP ? (reducedMotion ? -8 : -8 + Math.round(3 * Math.sin((clock + seed % 900) / 260))) : 0;
+  const left = x - width / 2 + shake, top = y + ACTOR_FOOT - height + breathe + float;
   if (dying !== null) {
     paintSprite(ctx, sprite, left, top - Math.round(dying * 6), {dissolve: dying, alpha: 1 - dying * .6, seed});
     return {left, top, width, height};
@@ -33,10 +45,16 @@ export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying =
     drawHealth(ctx, x, top - 7, target.hp, Math.max(maxHp, target.hp));
     return {left, top, width, height};
   }
-  drawShadow(ctx, x, y, 17);
+  if (reflection) { paintSprite(ctx, sprite, left, top, {seed}); return {left, top, width, height}; }
+  if (sprite === WISP) {   // a soft cold halo instead of a shadow on the ground
+    const glow = ctx.createRadialGradient(x, top + height / 2, 2, x, top + height / 2, 26);
+    glow.addColorStop(0, '#cfe6ff55'); glow.addColorStop(1, '#cfe6ff00');
+    ctx.fillStyle = glow; ctx.fillRect(x - 26, top + height / 2 - 26, 52, 52);
+    drawShadow(ctx, x, y, 7);
+  } else drawShadow(ctx, x, y, 17);
   paintSprite(ctx, sprite, left, top, {flash: hit < 110, seed});
   // Breath and horn glints distinguish a living boar from a static encounter prop.
-  if (hit >= 110) {
+  if (hit >= 110 && sprite === ENEMY) {
     ctx.fillStyle = '#fff0c2';
     ctx.fillRect(left + 5, top + 8, 2, 3);
     ctx.fillRect(left + width - 7, top + 8, 2, 3);
@@ -47,6 +65,12 @@ export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying =
       ctx.fillRect(x + 5, top + 31, 3, 2);
       ctx.restore();
     }
+  }
+  if (hit >= 110 && sprite === SKELETON) {   // cold eye-light, flickering
+    ctx.save(); ctx.globalAlpha = reducedMotion ? .8 : .55 + .45 * Math.abs(Math.sin((clock + seed % 700) / 230));
+    ctx.fillStyle = '#bff3ff';
+    ctx.fillRect(left + 4 * 4 + 1, top + 7 + 3, 2, 2); ctx.fillRect(left + 6 * 4 + 1, top + 7 + 3, 2, 2);
+    ctx.restore();
   }
   drawHealth(ctx, x, top - 7, target.hp, Math.max(maxHp, target.hp));
   return {left, top, width, height};
@@ -62,8 +86,9 @@ export function drawHealth(ctx, cx, y, hp, maxHp) {
   }
 }
 
-/** One-cell cardinal reach and the server-selected target, shown during Active play. */
-export function drawUnarmedReach(ctx, x, y, target = null, attacking = false) {
+/** The blow's reach (one cell for fists; a weapon adds marks along the four lines it can
+ * strike) and the server-selected target, shown during Active play. */
+export function drawUnarmedReach(ctx, x, y, target = null, attacking = false, reach = 1) {
   const foot = y + ACTOR_FOOT - 2;
   ctx.save();
   ctx.lineWidth = 1.5;
@@ -77,6 +102,10 @@ export function drawUnarmedReach(ctx, x, y, target = null, attacking = false) {
   ctx.lineTo(x - TILE_W, foot);
   ctx.closePath();
   ctx.fill(); ctx.stroke();
+  for (let step = 2; step <= reach; step++) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    ctx.fillStyle = target ? '#f2cb79' : '#a8b88b';
+    ctx.fillRect(Math.round(x + dx * step * TILE_W) - 2, Math.round(foot + dy * step * TILE_H) - 2, 4, 4);
+  }
   if (target) {
     const [tx, ty] = target;
     ctx.globalAlpha = 1;
@@ -129,6 +158,21 @@ export function drawFloat(ctx, x, y, text, age, {color = '#ffd36a', duration = 6
   const ty = Math.round(y - age / 30);
   ctx.lineWidth = 3; ctx.strokeStyle = OUTLINE; ctx.strokeText(text, x, ty);
   ctx.fillStyle = color; ctx.fillText(text, x, ty);
+  ctx.restore();
+}
+/** A rare drop's reveal: a ring and eight rays in the rarity color, around (x, y). */
+export function drawReveal(ctx, x, y, color, age, reducedMotion = false, duration = 700) {
+  if (age < 0 || age >= duration) return;
+  const t = age / duration;
+  ctx.save(); ctx.globalAlpha = Math.max(0, 1 - t);
+  ctx.strokeStyle = color; ctx.lineWidth = 2;
+  const r = reducedMotion ? 16 : 6 + t * 22;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = color;
+  for (let i = 0; i < 8; i++) {
+    const a = i * Math.PI / 4;
+    ctx.fillRect(Math.round(x + Math.cos(a) * (r + 5)) - 1, Math.round(y + Math.sin(a) * (r + 5)) - 1, 3, 3);
+  }
   ctx.restore();
 }
 export const drawDamage = (ctx, x, y, amount, age) => drawFloat(ctx, x, y, '-' + amount, age);

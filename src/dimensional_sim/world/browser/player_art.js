@@ -158,11 +158,73 @@ export function pixelPlayerStamp(player, compact = false, reducedMotion = false)
   return canvas;
 }
 
-/** (x, y) is the tile-center position of the player in world pixels. `activity` is
+/** Held weapons (snapshot `expedition.weapon`: {item, attack, reach, shape}). Drawn in
+ * whole art pixels with the actor outline. At rest the weapon is carried upright in one
+ * hand; an attack thrusts it along the facing (staff, spear) or swings it (axe). The reach
+ * shown matches the server's: a thrust reaches `reach` cells. Presentation only. */
+export const WEAPON_LOOKS = Object.freeze({
+  walking_staff: {shaft: '#9b7944', shaftLight: '#c39a62', length: 26, tip: null, head: null},
+  spear: {shaft: '#8f6c41', shaftLight: '#b59050', length: 30, tip: ['#d9ddd0', '#8d9585'], head: null},
+  axe: {shaft: '#7a5532', shaftLight: '#a9834f', length: 18, tip: null, head: ['#b9bfae', '#6d7468']},
+});
+function pixelLine(ctx, x0, y0, x1, y1, color, light = null) {
+  x0 = snap(x0); y0 = snap(y0); x1 = snap(x1); y1 = snap(y1);
+  const steps = Math.max(1, Math.abs(x1 - x0) / PIXEL, Math.abs(y1 - y0) / PIXEL);
+  const cells = [];
+  for (let i = 0; i <= steps; i++) cells.push([snap(x0 + (x1 - x0) * i / steps), snap(y0 + (y1 - y0) * i / steps)]);
+  ctx.fillStyle = OUTLINE;
+  for (const [cx, cy] of cells) ctx.fillRect(cx - 1, cy - 1, PIXEL + 2, PIXEL + 2);
+  cells.forEach(([cx, cy], i) => { ctx.fillStyle = light && i % 3 === 0 ? light : color; ctx.fillRect(cx, cy, PIXEL, PIXEL); });
+}
+function pixelBlock(ctx, cx, cy, w, h, color, edge) {
+  cx = snap(cx - w / 2); cy = snap(cy - h / 2);
+  ctx.fillStyle = OUTLINE; ctx.fillRect(cx - 1, cy - 1, w + 2, h + 2);
+  ctx.fillStyle = color; ctx.fillRect(cx, cy, w, h);
+  ctx.fillStyle = edge; ctx.fillRect(cx, cy + h - PIXEL, w, PIXEL);
+}
+/** Where the weapon's grip and far end are, by facing and attack phase (null = carried). */
+export function weaponPose(weapon, facing, x, y, phase, clock = 0, walking = false) {
+  const look = WEAPON_LOOKS[weapon.item];
+  const foot = y + ACTOR_FOOT;
+  if (phase === null) {   // carried upright in the leading hand
+    const side = {south: 8, north: -8, east: 5, west: -5}[facing] ?? 8;
+    const sway = walking ? Math.round(Math.sin(clock / 120)) * PIXEL : 0;
+    const gx = x + side, gy = foot - 14;
+    return {grip: [gx, gy], from: [gx + sway, gy + 8], to: [gx + 2 + sway, gy - look.length + 8],
+            behind: facing === 'north', angle: -Math.PI / 2};
+  }
+  const a = FACING_ANGLE[facing] ?? Math.PI / 2;
+  const sx = x + Math.cos(a) * 4, sy = foot - 20 + Math.sin(a) * 3;
+  if (weapon.shape === 'swing') {   // raised behind the shoulder, chopped down through the facing
+    const turn = {windup: -1.5, strike: 0.15, recover: 0.8}[phase] ?? -1.5;
+    const b = a + turn;
+    return {grip: [sx, sy], from: [sx, sy], to: [sx + Math.cos(b) * look.length, sy + Math.sin(b) * look.length * .8],
+            behind: facing === 'north' && phase !== 'strike', angle: b};
+  }
+  const push = {windup: -4, strike: Math.max(10, weapon.reach * TILE_W * .55), recover: 8}[phase] ?? -4;
+  const cx = Math.cos(a), cy = Math.sin(a) * .8;
+  return {grip: [sx + cx * (push - 2), sy + cy * (push - 2)], from: [sx + cx * (push - 12), sy + cy * (push - 12)],
+          to: [sx + cx * (push + look.length - 12), sy + cy * (push + look.length - 12)],
+          behind: facing === 'north' && phase !== 'strike', angle: a};
+}
+export function drawWeapon(ctx, weapon, pose) {
+  const look = WEAPON_LOOKS[weapon?.item];
+  if (!look) return;
+  const [fx, fy] = pose.from, [tx, ty] = pose.to;
+  pixelLine(ctx, fx, fy, tx, ty, look.shaft, look.shaftLight);
+  if (look.tip) {   // a narrow iron point past the end of the shaft
+    const ux = Math.cos(pose.angle), uy = Math.sin(pose.angle);
+    pixelLine(ctx, tx, ty, tx + ux * 8, ty + uy * 8, look.tip[0], look.tip[1]);
+  }
+  if (look.head) {   // a blade across the end of the handle
+    const px = -Math.sin(pose.angle), py = Math.cos(pose.angle);
+    pixelBlock(ctx, tx + px * 4, ty + py * 4, 8, 8, look.head[0], look.head[1]);
+  }
+}
 
 /** (x, y) is the tile-center position of the player in world pixels. `activity` is
  * the server's current encounter activity (or null); `clock` animates its pose. */
-export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null, clock = 0, reducedMotion = false} = {}) {
+export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null, clock = 0, reducedMotion = false, weapon = null} = {}) {
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
   const pose = activity && player.animation !== 'attack' ? (activity.pose ?? POSE[activity.kind]) : null;
@@ -170,7 +232,8 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
   const {width, height} = pixelPlayerFrame(compact);
   // Only climbing moves the whole body; walk frames carry their own motion in whole art pixels.
   const bob = pose === 'climb' ? -Math.round(Math.abs(Math.sin(clock / 260)) * 6) : 0;
-  const reach = punchReach(player, phase);
+  const armed = !!WEAPON_LOOKS[weapon?.item];
+  const reach = armed ? null : punchReach(player, phase);
   const angle = FACING_ANGLE[player.facing] ?? Math.PI / 2;
   const lunge = reach !== null && phase === 'strike' ? 2 : 0;
   const lx = Math.round(Math.cos(angle) * lunge), ly = Math.round(Math.sin(angle) * lunge);
@@ -198,12 +261,23 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
     ray.addColorStop(0, '#fff3c400'); ray.addColorStop(.5, '#fff3c4'); ray.addColorStop(1, '#fff3c400');
     ctx.fillStyle = ray; ctx.fillRect(x - 6, top - 40, 12, height + 40); ctx.restore();
   }
+  // A weapon is carried in every standing pose (walking, idle, fighting); work poses set it down.
+  const held = armed && !compact && pose !== 'climb'
+    ? weaponPose(weapon, player.facing, x, y, player.animation === 'attack' ? (phase || 'windup') : null,
+      reducedMotion ? 0 : clock, player.animation === 'walk') : null;
+  if (held?.behind) drawWeapon(ctx, weapon, held);
   const hands = pose === 'crouch' ? workingHands(activity, player.facing, x, y, clock, reducedMotion) : null;
   if (hands?.behind) for (const arm of hands.arms) drawFist(ctx, ...arm);   // seen from behind
   const stamp = pixelPlayerStamp(player, compact, reducedMotion);
   if (stamp) { ctx.imageSmoothingEnabled = false; ctx.drawImage(stamp, left, top); }
   else paintPixelPlayer(ctx, player, left, top, {compact, reducedMotion});
   if (fist && !fistBehind) drawFist(ctx, ...fist);
+  if (held && !held.behind) drawWeapon(ctx, weapon, held);
+  if (held && player.animation === 'attack') {   // the arm follows the grip
+    const [shoulderX, shoulderY] = SHOULDER[player.facing] || SHOULDER.south;
+    const scale = PIXEL / 3;
+    drawFist(ctx, x + Math.round(shoulderX * scale), y + ACTOR_FOOT + Math.round(shoulderY * scale), ...held.grip);
+  }
   if (hands && !hands.behind) for (const arm of hands.arms) drawFist(ctx, ...arm);
   if (pose && activity.kind !== 'rest' && activity.kind !== 'kneel')
     drawActionInteraction(ctx, activity, x, y, clock, reducedMotion, {armDrawn: !!hands});

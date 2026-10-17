@@ -4,7 +4,8 @@
 - Regular XP per attribute (resets) speeds actions (`progression.speed_permille`).
 - Gear (equipped in `weapon` / `body` slots, current life only): staff (+1 punch), wrap (-30% boar damage).
 - Discoveries during a life become permanent: `deer_sign` (tracks), `primitive_crafting` (5 branch gathers),
-  `walking_staff` recipe (10 branch gathers). Leads (deer trail, deer) are temporary.
+  `padded_jerkin` recipe (an abandoned camp's bedroll), `studded_wrap` recipe (a watchtower's armory).
+  Leads (deer trail, deer) are temporary.
 - Frontier: the auto-pilot explores only rings where one boar fight costs <= 60% health
   (`tuning.COMFORT_DAMAGE_PERCENT`); damage, endurance, gear and boons push it outward. Starving adds one
   ring. Deeper rings = more ash at rebirth and stronger XP sources (boars).

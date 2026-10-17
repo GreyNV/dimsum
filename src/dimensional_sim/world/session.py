@@ -9,18 +9,18 @@ import time
 from .animation import rotate
 from .autopilot import INVENTORY_SLOTS, Expedition
 from . import details
-from .catalog import BOONS, BY_ID, ENEMIES, ITEMS, REGIONS, UNLOCKS
+from .catalog import BOONS, BY_ID, ENEMIES, ITEMS, REGIONS, UNLOCKS, rarity_glint
 from .models import ChunkKey, chunk_ident, integer
 from .progression import attribute_report
 from .runtime import InputCommand
 from .seeds import derive_seed
-from .tuning import UNARMED_REACH
 
 TICK_MS = 20
 INPUT_LEASE = 0.3
 MANUAL_HOLD = 2.5  # seconds of manual control before auto-pilot resumes
 LOG_ENTRIES = 6
 ITEM_COLORS = {item.id: item.color for item in ITEMS.values()}   # reward popups and HUD text
+ITEM_GLINTS = {item.id: glint for item in ITEMS.values() if (glint := rarity_glint(item.rarity))}  # reveal burst
 
 
 def _tile_tints(world, key, asset):
@@ -85,7 +85,7 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual",
         if rows is not None:
             fog[f"{key.x}:{key.y}"] = rows
     return {**frame_extra, "world_seed": str(game.world.world_seed), "clock_ms": game.elapsed_ms,
-        "movement_interval_ms": game.movement_interval_ms,
+        "movement_interval_ms": game.step_interval_ms,
         "player": {"x": px, "y": py, "facing": p.facing, "animation": p.animation,
                    "animation_ms": p.animation_elapsed_ms * rate // 100, "active": frame.active},
         "targets": targets,
@@ -127,14 +127,19 @@ def _expedition_view(e, control, *, debug, detail):
             "punch_damage": e.punch_damage(), "report": e.report,
             "anchor": {"x": e.anchor[0], "y": e.anchor[1]},
             "skills": sorted(e.skills), "control": control,
-            "attack_radius": UNARMED_REACH,
+            "attack_radius": e.attack().reach,
+            "weapon": _weapon_view(e),
             "auto_target": unarmed_target[1] if unarmed_target else None,
             "skill_slots": [{"name": "Return to anchor", "state":
                              "locked" if not e.has_ability("return_to_anchor") else
                              "disabled" if in_anchor or e.in_prologue else
                              "cooldown" if e.total_ms < e.return_ready_ms else "ready",
                              "remaining_ms": max(0, e.return_ready_ms - e.total_ms)},
-                            {"name": "Empty", "state": "locked"}, {"name": "Empty", "state": "locked"}],
+                            {"name": "Make campfire", "state":
+                             "disabled" if in_anchor or e.in_prologue or not e.can_make_fire() else "ready"},
+                            {"name": "Empty", "state": "locked"}],
+            "campfire": None if in_anchor or e.campfire is None or e.campfire["dimension"] != e.dimension
+            else {"x": e.campfire["fire_x"], "y": e.campfire["fire_y"]},
             "prologue": e.prologue(),
             "region": _region_view(e),
             "meta": _meta_view(e),
@@ -144,7 +149,10 @@ def _expedition_view(e, control, *, debug, detail):
             "detail": details.detail(e) if detail else None,
             "bounty": [{"id": i, "name": BY_ID[i].name, "spawned": n, "limit": limit}
                        for i, n, limit in e.bounty()],
-            "opponent": e.opponent(), "item_colors": ITEM_COLORS}
+            "opponent": e.opponent(), "item_colors": ITEM_COLORS,
+            "load": {"percent": e.load_percent(), "carried": e.carried_units()},
+            "camp": e.camp_view(),
+            "item_glints": ITEM_GLINTS}
 
 
 def _meta_view(e):
@@ -166,9 +174,24 @@ def _meta_view(e):
             "boon_next": None if e.boon_next is None else BOONS[e.boon_next].name}
 
 
+def _weapon_view(expedition):
+    """What the avatar holds, for the client's overlay and animation (fists: no item)."""
+    attack = expedition.attack()
+    item = expedition.equipped.get("weapon")
+    return {"item": item, "attack": attack.id, "reach": attack.reach, "shape": attack.shape}
+
+
 def _region_view(expedition):
-    region = expedition.region(expedition.game.player.chunk)
-    return None if region is None else {"id": region.id, "name": region.name}
+    key = expedition.game.player.chunk
+    region = expedition.region(key)
+    site = expedition.game.world.site_for(key)
+    condition = expedition.site_condition(key)
+    return None if region is None else {"id": region.id, "name": region.name,
+                                        "site": None if site is None else site.site.name,
+                                        "condition": None if condition is None or condition.id == "quiet"
+                                        else {"name": condition.name, "text": condition.text},
+                                        "worked": expedition.worked_here(),
+                                        "shimmer": expedition.rarity_percent(key) > 100}
 
 
 def validate_input(data):

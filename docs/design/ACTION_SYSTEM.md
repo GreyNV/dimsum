@@ -65,7 +65,7 @@ be turned away by its spawn window (screening log says why).
 |---|---|---|---|
 | Discovery | an outcome fired (log line `Learned ...`, `Discovered ... recipe`) | log | log only |
 | Knowledge | permanent understanding (`deer_sign`, `primitive_crafting`) | `knowledge` | yes |
-| Recipe | permanent craft permission (`walking_staff`) | `recipes` | yes |
+| Recipe | permanent craft permission (`padded_jerkin`, `studded_wrap`) | `recipes` | yes |
 | Unlock | bought permission for actions to join future buckets | `unlocked` | yes |
 | Lead | one temporary opportunity in this world/life (`follow_deer_tracks`, `hunt_deer`) | `leads`, `lead_history` | no |
 | Spawn | a runtime rolled spot in a chunk this life | `spot_plans`, `completed`, `admitted` | no |

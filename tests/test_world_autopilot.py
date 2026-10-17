@@ -52,7 +52,7 @@ def first_death(e, step=1000):
 
 class CatalogTests(unittest.TestCase):
     def test_first_biome_has_distinct_location_set(self):
-        locations = {"abandoned_camp", "moonlit_pool", "fallen_watchtower", "mushroom_ring"}
+        locations = {"old_carvings", "moonlit_pool", "wayside_shrine", "mushroom_ring"}
         self.assertTrue(locations <= set(BY_ID))
         self.assertEqual(len({BY_ID[i].name for i in locations}), len(locations))
         w = world()
@@ -79,7 +79,8 @@ class CatalogTests(unittest.TestCase):
                 bad()
         # Food spots: berries and boars from the start; trees and mushrooms once unlocked.
         food_sources = {e.id for e in DARK_FOREST if any(ITEMS[l.item].kind == "food" for l in e.loot)}
-        self.assertEqual(food_sources, {"bramble_berries", "gnarled_tree", "bramble_boar", "mushroom_ring"})
+        self.assertEqual(food_sources, {"bramble_berries", "gnarled_tree", "bramble_boar", "mushroom_ring",
+                                        "reed_bed", "fishing_pool", "river_lurker"})
 
     def test_loot_is_deterministic_and_in_range(self):
         entry = BY_ID["bramble_berries"]
@@ -120,8 +121,10 @@ class ProgressionTests(unittest.TestCase):
         self.assertEqual(scaled_ms(2400, 1600), 1500)
         self.assertEqual(scaled_ms(1, 5000), 1)
         row = attribute_report({a: 0 for a in BY_ID["bramble_boar"].attribute.split()} | {
-            "strength": 250, "endurance": 0, "agility": 0, "intelligence": 0, "perception": 0, "willpower": 0},
-            {"strength": 0, "endurance": 0, "agility": 0, "intelligence": 0, "perception": 0, "willpower": 0})["strength"]
+            "strength": 250, "endurance": 0, "agility": 0, "intelligence": 0, "perception": 0, "willpower": 0,
+            "building": 0},
+            {"strength": 0, "endurance": 0, "agility": 0, "intelligence": 0, "perception": 0, "willpower": 0,
+             "building": 0})["strength"]
         self.assertEqual((row["level"], row["into"], row["next"]), (2, 35, 132))
 
     def test_higher_levels_finish_encounters_faster(self):
@@ -440,7 +443,8 @@ class SpawnWindowTests(unittest.TestCase):
         e.budget["bramble_berries"] = 0
         self.assertFalse(e._admit("test:cap", "bramble_berries"), "scarce food is turned away when capped")
         respawned = [d for d in decisions if d[3] and d[1] is not None]
-        self.assertGreater(len(respawned), sum(budgets[0].values()), "finished spots free their slot")
+        seen = {d[0] for d in respawned}   # encounters this route met (river ones need a river)
+        self.assertGreater(len(respawned), sum(budgets[0][k] for k in seen), "finished spots free their slot")
 
     def test_screened_boars_never_reward(self):
         e = expedition()

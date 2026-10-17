@@ -47,11 +47,11 @@ class ActionAvailabilityTests(unittest.TestCase):
 
         expedition = Expedition(Exploration(new_world(284)))
         before = {row["id"] for row in multipliers(expedition)["actions"]}
-        self.assertNotIn("craft_staff", before)
+        self.assertNotIn("craft_jerkin", before)
         expedition.knowledge.add("primitive_crafting")
-        expedition.recipes.add("walking_staff")
+        expedition.recipes.add("padded_jerkin")
         after = {row["id"] for row in multipliers(expedition)["actions"]}
-        self.assertIn("craft_staff", after)
+        self.assertIn("craft_jerkin", after)
         self.assertNotIn("hunt_deer", {row["id"] for row in rolls(expedition)["loot"]})
         expedition.knowledge.add("deer_sign")
         self.assertIn("hunt_deer", {row["id"] for row in rolls(expedition)["loot"]})
@@ -81,12 +81,12 @@ class ActionAvailabilityTests(unittest.TestCase):
         self.assertFalse(known(observation, frozenset()))
         self.assertFalse(known(observation, Context()))
         self.assertTrue(known(observation, Context(knowledge=frozenset({"read_tracks"}))))
-        recipe = replace(BY_ID["craft_staff"], recipe="walking_staff", requirements=())
-        self.assertFalse(known(recipe, Context(inventory={"stick": 3})))
-        self.assertTrue(known(recipe, Context(recipes=frozenset({"walking_staff"}))))
-        ctx = Context(placement="self", trigger="need", recipes=frozenset({"walking_staff"}))
+        recipe = replace(BY_ID["craft_jerkin"], requirements=())
+        self.assertFalse(known(recipe, Context(inventory={"cloth_scrap": 3, "rope": 1})))
+        self.assertTrue(known(recipe, Context(recipes=frozenset({"padded_jerkin"}))))
+        ctx = Context(placement="self", trigger="need", recipes=frozenset({"padded_jerkin"}))
         self.assertEqual(bucket_reasons(recipe, ctx), [])
-        self.assertTrue(any("needs 3 stick" in reason for reason in context_reasons(recipe, ctx)))
+        self.assertTrue(any("needs 3 cloth scrap" in reason for reason in context_reasons(recipe, ctx)))
 
     def test_declarative_progress_requirements_combine_without_special_cases(self):
         action = replace(BY_ID["bramble_berries"], requirements=(
@@ -104,7 +104,7 @@ class ActionAvailabilityTests(unittest.TestCase):
         self.assertEqual(bucket_reasons(action, ctx), [])
 
     def test_temporary_lead_needs_its_current_world_token(self):
-        lead = replace(BY_ID["bramble_berries"], placement="lead", window=None)
+        lead = replace(BY_ID["bramble_berries"], placement="lead", window=None, ecology=None)
         self.assertIn("no active temporary lead", bucket_reasons(lead, Context(placement="lead")))
         self.assertEqual(bucket_reasons(lead, Context(placement="lead",
                                                       active_leads=frozenset({"bramble_berries"}))), [])
@@ -156,10 +156,12 @@ class LifecycleStateTests(unittest.TestCase):
         live = Context(placement="lead", knowledge=frozenset({"deer_sign"}), active_leads=frozenset({"hunt_deer"}))
         self.assertEqual(explain("hunt_deer", live)["state"], "TEMPORARY_LEAD")
         recipe = Context(placement="self", trigger="need", knowledge=frozenset({"primitive_crafting"}),
-                         recipes=frozenset({"walking_staff"}), inventory={"stick": 1})
-        self.assertEqual(explain("craft_staff", recipe)["state"], "RECIPE")
-        self.assertEqual(explain("craft_staff", replace(recipe, inventory={"stick": 3}))["state"], "AVAILABLE")
-        self.assertEqual(explain("craft_staff", Context(placement="self", trigger="need"))["state"], "UNKNOWN")
+                         recipes=frozenset({"padded_jerkin"}), inventory={"cloth_scrap": 1},
+                         at_camp=True, buildings=frozenset({"crafting_station"}))
+        self.assertEqual(explain("craft_jerkin", recipe)["state"], "RECIPE")
+        self.assertEqual(explain("craft_jerkin", replace(recipe, inventory={"cloth_scrap": 3, "rope": 1}))["state"],
+                         "AVAILABLE")
+        self.assertEqual(explain("craft_jerkin", Context(placement="self", trigger="need"))["state"], "UNKNOWN")
         self.assertEqual(explain("hunt_deer", replace(live, resolved=True))["state"], "RESOLVED")
 
     def test_live_debug_distinguishes_a_roll_rejected_by_spawn_window(self):

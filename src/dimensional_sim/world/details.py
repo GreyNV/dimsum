@@ -6,15 +6,17 @@ WHY: players and designers need to see, at a glance, what drives the numbers.
 NEVER: change state or roll anything here.
 TESTS: tests/test_world_pages.py.
 """
-from .actions import Context, describe_bucket, known
+from .actions import Context, describe_bucket, known, spot_tiers
 from .autopilot import INVENTORY_SLOTS, POINT, REGEN, REST_REGEN
 from . import effects
-from .catalog import ACTIONS, BOONS, BY_ID, ENEMIES, ITEMS, MASTERY_THRESHOLDS, REGIONS, UNLOCKS
+from .catalog import (ACTIONS, BOONS, BY_ID, ENEMIES, ITEMS, JOURNAL_FAVOR_MASTERY, JOURNAL_GUARANTEE_MASTERY,
+                      MASTERY_THRESHOLDS, RARITY, REGIONS, SITES, UNLOCKS)
+from .drops import SCALE, table_chances, tier_chances
 from .encounters import spawn_window
 from .journal import achievements
 from .models import ChunkKey
 from .progression import attribute_report, scaled_ms, speed_permille
-from .tuning import PITY_CHUNKS, SPOTS_PER_CHUNK
+from .tuning import CARRY_FREE, CARRY_MAX_PERCENT, CARRY_PERCENT_PER_ITEM, PITY_CHUNKS, SPOTS_PER_CHUNK
 
 
 def _pts(micro):
@@ -45,6 +47,10 @@ def character(e):
         "inventory_slots": [len(e.inventory), INVENTORY_SLOTS],
         "currencies": {"ash": e.ash, "blessing": e.blessing},
         "unlocked": [UNLOCKS[u].name for u in sorted(e.unlocked)],
+        "camp": e.camp_view(),
+        "load": {"percent": e.load_percent(), "carried": e.carried_units(), "free": CARRY_FREE,
+                 "per_item": CARRY_PERCENT_PER_ITEM, "max": CARRY_MAX_PERCENT,
+                 "relief_permille": (e.speed("endurance") + e.speed("strength")) // 2},
     }
 
 
@@ -52,7 +58,7 @@ def stats(e):
     report = attribute_report(e.regular, e.dimensional)
     rows = []
     for name, row in report.items():
-        rows.append({**row, "name": name,
+        rows.append({**row, "name": name, "used": bool(row["xp"] or row["dim_xp"]),
                      "speed_regular_only": speed_permille(e.regular[name], 0),
                      "speed_dimensional_only": speed_permille(0, e.dimensional[name]),
                      "life_gain": e.life_gain[name]})
@@ -98,33 +104,50 @@ def rolls(e):
                         "known": known(action, known_ctx)})
     loot = []
     for a in ACTIONS:
-        if a.loot and known(a, known_ctx):
-            loot.append({"id": a.id, "name": a.name,
-                         "drops": [{"item": ITEMS[l.item].name, "min": l.low, "max": l.high, "chance": l.chance}
-                                   for l in a.loot]})
+        if (a.loot or a.drops) and known(a, known_ctx):
+            drops = [{"item": ITEMS[l.item].name, "min": l.low, "max": l.high, "chance": l.chance,
+                      "roll": "fixed"} for l in a.loot]
+            bonus = table_chances(a.drops) if a.drops else {}
+            drops += [{"item": ITEMS[item].name, "min": low, "max": high, "chance": bp / 100,
+                       "roll": RARITY[ITEMS[item].rarity].name, "color": ITEMS[item].color}
+                      for item, (low, high, bp) in sorted(bonus.items(), key=lambda kv: -kv[1][2])]
+            loot.append({"id": a.id, "name": a.name, "drops": drops})
+    tiers = spot_tiers(e.spot_context(e.game.player.chunk))
+    chances = tier_chances({t: odds for t, (_, odds) in tiers.items()}, set(tiers))
+    tier_rows = [{"tier": t, "name": RARITY[t].name, "permille": chances[t] * 1000 // SCALE,
+                  "actions": len(tiers[t][0])} for t in RARITY if t in chances]
     return {"life": e.life, "windows": windows, "spots_per_chunk": [min(SPOTS_PER_CHUNK), max(SPOTS_PER_CHUNK)],
+            "tiers": tier_rows,
             "pity": [{"category": c, "drought": e.drought[c], "after": PITY_CHUNKS[c]} for c in PITY_CHUNKS],
             "stats": dict(e.stats), "loot": loot}
 
 
 def journal(e):
+    """Lifetime record plus every known encounter with its tier, grade, odds here and Journal
+    control state (favor/suppress at grade 2, a regional guarantee at grade 3)."""
     j = e.journal
     current = {row["id"]: row["share_permille"] for row in describe_bucket(e.spot_context(e.game.player.chunk))}
-    mastery = []
-    for ident, level in sorted(e.mastery.items()):
-        if level < 1:
+    known_ctx = _known_context(e)
+    encounters = []
+    for action in ACTIONS:
+        if action.placement not in ("spot", "lead", "site") or not known(action, known_ctx):
             continue
-        action = BY_ID[ident]
+        ident, level = action.id, e.mastery.get(action.id, 0)
         locations = sorted(chunk_id for chunk_id, plan in e.spot_plans.items()
                            if any(row[0] == ident for row in plan))
-        regions = [region.name for region in REGIONS.values() if region.biome in action.biomes
-                   and (action.regions is None or region.id in action.regions)
+        regions = [{"id": region.id, "name": region.name} for region in REGIONS.values()
+                   if region.biome in action.biomes and (action.regions is None or region.id in action.regions)
                    and region.multiplier(ident) > 0]
-        mastery.append({"id": ident, "name": action.name, "level": level,
-                        "done": j["actions"].get(ident, 0),
-                        "next": MASTERY_THRESHOLDS[level] if level < len(MASTERY_THRESHOLDS) else None,
-                        "regions": regions, "current_share_permille": current.get(ident, 0),
-                        "locations": locations, "mode": e.journal_favor.get(ident, "normal")})
+        encounters.append({"id": ident, "name": action.name, "interaction": action.interaction, "rarity": action.rarity,
+                           "placement": action.placement, "level": level,
+                           "site": SITES[action.site].name if action.site else None,
+                           "done": j["actions"].get(ident, 0),
+                           "next": MASTERY_THRESHOLDS[level] if action.placement == "spot"
+                           and level < len(MASTERY_THRESHOLDS) else None,   # only wild spots earn grades
+                           "regions": regions, "current_share_permille": current.get(ident, 0),
+                           "locations": locations, "mode": e.journal_favor.get(ident, "normal"),
+                           "can_favor": action.placement == "spot" and level >= JOURNAL_FAVOR_MASTERY,
+                           "can_guarantee": action.placement == "spot" and level >= JOURNAL_GUARANTEE_MASTERY})
     return {"actions": sorted(([BY_ID[a].name, BY_ID[a].category, n] for a, n in j["actions"].items()),
                               key=lambda r: (-r[2], r[0])),
             "items": sorted(([ITEMS[i].name, n] for i, n in j["items"].items()), key=lambda r: (-r[1], r[0])),
@@ -133,7 +156,10 @@ def journal(e):
             "achievements": achievements(e),
             "knowledge": sorted(e.knowledge), "recipes": sorted(e.recipes),
             "disabled": sorted(e.journal_disabled), "favor": dict(e.journal_favor),
-            "mastery": mastery, "leads": [dict(row) for row in e.leads],
+            "encounters": encounters,
+            "guarantee": {"id": e.journal_guarantee, "region": e.journal_guarantee_region,
+                          "used": e.guarantee_used},
+            "leads": [dict(row) for row in e.leads],
             "lead_history": [dict(row) for row in e.lead_history[-20:]]}
 
 

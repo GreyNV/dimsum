@@ -20,7 +20,15 @@ export const ROLE = Object.freeze({
   // Enemy (bramble boar): wine fur, bone horns, ember eyes.
   f: {fill: '#7e3447', ink: '#4c1b2a'}, d: {fill: '#56202f', ink: '#2f0f18'},
   h: {fill: '#d9c8a4', ink: '#8d7a5a'}, e: {fill: '#2a0b10', ink: '#ffd45e'},
-  m: {fill: '#24090e', ink: '#f1e6cc'}, w: {fill: '#ece0c2', ink: '#a8977a'}
+  m: {fill: '#24090e', ink: '#f1e6cc'}, w: {fill: '#ece0c2', ink: '#a8977a'},
+  // Enemy (river lurker): wet green-blue hide, pale belly, yellow eyes on top of the head.
+  l: {fill: '#2f5f57', ink: '#16352f'}, n: {fill: '#9fbf8a', ink: '#5c7a4a'},
+  y: {fill: '#e8d84a', ink: '#2a2a10'}, r: {fill: '#1b3d37', ink: '#7fc9b8'},
+  // Enemy (restless bones): old bone, dark gaps between the ribs, cold eye-light, a rusted blade.
+  g: {fill: '#d8d2bc', ink: '#5e584a'}, o: {fill: '#3a362e', ink: '#b9b29a'},
+  i: {fill: '#14100c', ink: '#8fe3ff'}, j: {fill: '#7a4a2a', ink: '#d09060'},
+  // Enemy (pale wisp): a bright core, a blue halo, fading tendrils.
+  q: {fill: '#eaf6ff', ink: '#7fa8d8'}, u: {fill: '#7e9ad0', ink: '#e2eeff'}, v: {fill: '#3e4f86', ink: '#a9bcf2'}
 });
 const FLASH = '#fff4dc';
 
@@ -52,6 +60,7 @@ export function paintSprite(ctx, sprite, x, y, {flash = false, alpha = 1, dissol
     if (role === ' ' || !keep(r, c)) return;
     ctx.fillStyle = flash ? FLASH : ROLE[role].fill;
     ctx.fillRect(x + c * CELL_W, y + r * CELL_H, CELL_W, CELL_H);
+    if (!flash) litCell(ctx, paint, r, c, x + c * CELL_W, y + r * CELL_H);
   }));
   if (!flash) paint.forEach((row, r) => [...row].forEach((role, c) => {
     const ch = glyph[r][c];
@@ -60,6 +69,19 @@ export function paintSprite(ctx, sprite, x, y, {flash = false, alpha = 1, dissol
     ctx.fillText(ch, x + c * CELL_W, y + r * CELL_H);
   }));
   ctx.globalAlpha = 1;
+}
+
+/** Light from the upper left on a cell sprite (the same light as the lit trees and rocks):
+ * cells darken toward the lower right, and cells on the lit rim (nothing above or to the
+ * left) catch a thin highlight. Drawn over a cell's fill, under its glyph. */
+export function litCell(ctx, paint, r, c, x, y) {
+  const rows = paint.length, cols = paint[0].length;
+  const dark = .3 * (.65 * r / Math.max(1, rows - 1) + .35 * c / Math.max(1, cols - 1));
+  ctx.fillStyle = `rgba(4, 6, 4, ${dark.toFixed(3)})`;
+  ctx.fillRect(x, y, CELL_W, CELL_H);
+  ctx.fillStyle = 'rgba(255, 248, 214, .2)';
+  if (r === 0 || paint[r - 1][c] === ' ') ctx.fillRect(x, y, CELL_W, 1);
+  if (c === 0 || paint[r][c - 1] === ' ') ctx.fillRect(x, y, 1, CELL_H);
 }
 
 export function drawShadow(ctx, x, y, rx) {
@@ -76,6 +98,7 @@ export function paintParts(ctx, sprite, roles, left, top, alpha = 1) {
   sprite.paint.forEach((row, r) => [...row].forEach((role, c) => {
     if (role === ' ') return;
     ctx.fillStyle = roles[role].fill; ctx.fillRect(left + c * CELL_W, top + r * CELL_H, CELL_W, CELL_H);
+    litCell(ctx, sprite.paint, r, c, left + c * CELL_W, top + r * CELL_H);
     const ch = sprite.glyph[r][c];
     if (ch !== ' ') { ctx.fillStyle = roles[role].ink; ctx.fillText(ch, left + c * CELL_W, top + r * CELL_H); }
   }));

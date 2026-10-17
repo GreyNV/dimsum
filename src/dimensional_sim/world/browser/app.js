@@ -1,16 +1,19 @@
 /** Browser adapter: snapshots in, character art out. Python owns all game rules. */
 import {TILE_W, TILE_H, ZOOM, clamp, residentBounds, cameraView, follow, retainResident, tileAt, visualHash, stickDirection, Controls} from './view.js';
 import {PALETTE, OBJECT_PAD, paintChunk, drawTree} from './art.js';
-import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawUnarmedReach, drawDamage, drawFloat, drawSpot, drawSpotCompletion, drawCamp, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
-import {PAGES, needsDetail, pageModel, PANELS, COLLAPSE_KEY, loadCollapsed, toggleCollapsed, defaultCollapsed} from './pages.js';
+import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawUnarmedReach, drawDamage, drawFloat, drawReveal, drawSpot, drawSpotCompletion, drawCamp, drawBuildings, drawCampfire, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
+import {PAGES, needsDetail, pageModel, PANELS, COLLAPSE_KEY, loadCollapsed, toggleCollapsed, defaultCollapsed, subtabsOf} from './pages.js';
 import {debugText, ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
 import {regionCue, skillSlots, worldMode} from './world_ui.js';
 import {$, el, readUi, writeUi} from './dom.js';
 import {hosted, request, releaseInput} from './transport.js';
 import {drawMinimap, visibleAt} from './minimap.js';
 import {anchorAction, renderAnchor} from './anchor_ui.js';
-import {buildTabs, renderSection} from './page_ui.js';
+import {buildTabs, journalAction, renderSection, renderSubtabs} from './page_ui.js';
 import {drawEyelids, drawVignette, tintPicture} from './scene_fx.js';
+import {drawMotes, drawReflection, drawWaterGlints, isWater} from './nature_art.js';
+import {ACTOR_FOOT} from './sprites.js';
+import {SOUND_KEY, SoundEngine, VOLUMES, loadSettings, soundEvents, surfaceOf} from './sound.js';
 
 const canvas = $('scene'), ctx = canvas.getContext('2d'), mini = $('minimap'), map = mini.getContext('2d');
 const chunks = new Map(), pictures = new Map(), controls = new Controls();
@@ -35,12 +38,33 @@ let lastRewardSeq = null, spotsSeen = new Map(), reportSeen = null, reportTimer 
 /* Prologue: where the old man stands, and his walk away once he has spoken (cosmetic). */
 let elder = null, elderLeaving = null;
 const ELDER_LEAVE_MS = 2200;
+/* Synthesized sound (sound.js): events from snapshot diffs, ambience from the scene. */
+const sound = new SoundEngine({settings: loadSettings(readUi(SOUND_KEY))});
+let soundScene = {water: 0, fire: 0}, lastVolume = sound.settings.volume || 2;
+function setSound(settings) {
+  if (settings.volume > 0) lastVolume = settings.volume;
+  sound.apply(settings); writeUi(SOUND_KEY, JSON.stringify(sound.settings));
+  if (page === 'settings') renderPage(true);
+}
+/** How close water and fire are to the avatar (0..1), for the ambience beds. */
+function listen(next) {
+  const all = [...chunks.values()], {x, y} = next.player;
+  let water = 0;
+  for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+    const glyph = tileAt(all, x + dx, y + dy)?.glyph;
+    if (glyph === 'w' || glyph === '%') water += 1 / (1 + Math.abs(dx) + Math.abs(dy));
+  }
+  const fires = [next.expedition?.campfire, next.expedition?.anchor].filter(Boolean);
+  const fire = Math.max(0, ...fires.map(f => 1 - (Math.abs(f.x - x) + Math.abs(f.y - y)) / 7));
+  return {water: Math.min(1, water / 4), fire};
+}
 const SEEN_REPORT_KEY = 'dimsum.report.seen';
 const seenReport = () => readUi(SEEN_REPORT_KEY);
 const markReport = (worldSeed, report) => writeUi(SEEN_REPORT_KEY, reportStorageKey(worldSeed, report));
 /* Pages (tabs) and collapsible HUD panels. The detail block is requested at most twice a
  * second while a page that needs it is open, so ordinary polling stays small. */
 let page = 'world', lastDetail = null, lastDetailAt = 0, pageSignature = '', armed = null, armTimer = 0;
+const subpage = {};   // last subtab per page; the first subtab is each page's main view
 const closedSections = new Set();
 const isMobile = () => matchMedia('(max-width: 720px)').matches;
 let collapsed = loadCollapsed(readUi(COLLAPSE_KEY), isMobile());
@@ -89,7 +113,7 @@ function updateActivity() {
   const near = state.targets.find(t => t.hp > 0 && Math.abs(t.x - state.player.x) + Math.abs(t.y - state.player.y) <= 2);
   const surface = near ? `${near.name || 'Something'} nearby - ${near.hp} HP` : tile?.glyph === '%' ? 'Fording the river' : tile?.glyph === 'H' ? 'On an old bridge' : tile?.blocked ? 'Obstructed ground' : tile?.glyph === '=' ? 'On the old forest trail' : 'Among the trees';
   const auto = activityText(state, paused);
-  const text = auto ?? (paused ? 'Paused - the forest can wait' : state.player.animation === 'attack' ? 'Fists up' : surface);
+  const text = auto ?? (paused ? 'Paused - the forest can wait' : state.player.animation === 'attack' ? (state.expedition?.weapon?.item ? 'Weapon up' : 'Fists up') : surface);
   if ($('activity').textContent !== text) $('activity').textContent = text;
 }
 function changeZoom(delta) {
@@ -102,6 +126,9 @@ function adopt(next, sentControl = null) {
     pictures.delete(chunk.id);   // painted lazily: visible now, others one per frame
   }
   retainResident(chunks, next.resident); retainResident(pictures, next.resident);
+  if (state && !window.DIMSUM_FASTFORWARD)
+    for (const event of soundEvents(state, next, (x, y) => surfaceOf(tileAt([...chunks.values()], x, y)?.glyph))) sound.play(event);
+  soundScene = listen(next);
   observeCombat(next);
   observeExpedition(next);
   if (next.expedition?.anchor_space && !state?.expedition?.anchor_space) {
@@ -144,7 +171,10 @@ function adopt(next, sentControl = null) {
   }
   const here = [...chunks.values()].find(c => c.x === Math.floor(next.player.x / c.width) && c.y === Math.floor(next.player.y / c.height));
   const biome = (here?.biome || 'Unknown').replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
-  const region = next.expedition?.region?.name || biome;
+  const site = next.expedition?.region?.site;
+  const condition = next.expedition?.region?.condition;
+  const region = site ? `${site}${condition ? ` (${condition.name.toLowerCase()})` : ''} · ${next.expedition.region.name}`
+    : next.expedition?.region?.name || biome;
   if ($('biome').textContent !== region) $('biome').textContent = region;
   const line = `Dimensional Summoner - ${biome}`;
   if ($('biome-line').textContent !== line) $('biome-line').textContent = line;
@@ -167,7 +197,9 @@ function observeCombat(next) {
         && !window.DIMSUM_FASTFORWARD) {
       lunges.set(target.id, {at: now});
       const lost = Math.round(((state?.expedition?.vitals?.health ?? 0) - (next.expedition?.vitals?.health ?? 0)) / 100);
-      rewards.push({text: lost > 0 ? `-${lost} health` : 'Gored!', color: '#ff7a63', at: now});
+      const fed = Math.round(((state?.expedition?.vitals?.hunger ?? 0) - (next.expedition?.vitals?.hunger ?? 0)) / 100);
+      if (lost <= 0 && fed > 0) rewards.push({text: `-${fed} hunger`, color: '#b9cfff', at: now});
+      else rewards.push({text: lost > 0 ? `-${lost} health` : 'Gored!', color: '#ff7a63', at: now});
     }
     strikesSeen.set(target.id, target.strikes || 0);
   }
@@ -185,7 +217,8 @@ function observeExpedition(next) {
   // No reward popups while host.js fast-forwards offline time: they would pile up unreadably.
   if (lastRewardSeq !== null && next.expedition.life === state?.expedition?.life && !window.DIMSUM_FASTFORWARD)
     for (const entry of newRewards(next, lastRewardSeq))
-      rewardTexts(entry, next.expedition.item_colors).forEach((r, i) => rewards.push({...r, at: now + i * 180}));
+      rewardTexts(entry, next.expedition.item_colors, next.expedition.item_glints)
+        .forEach((r, i) => rewards.push({...r, at: now + i * 180}));
   lastRewardSeq = Math.max(lastRewardSeq ?? 0, seq);
   const prologue = next.expedition.prologue;
   if (prologue) { elder = {...prologue.elder}; elderLeaving = null; }
@@ -276,6 +309,16 @@ function enemyXY(t, now, dt = 0) {
   }
   return {x, y};
 }
+/** Global coordinates of a chunk's water tiles, cached on its painted picture. */
+function waterTiles(chunk) {
+  const picture=pictures.get(chunk.id);
+  if(picture.water) return picture.water;
+  picture.water=[];
+  chunk.tiles.forEach((row,y)=>[...row].forEach((glyph,x)=>{
+    if(isWater(glyph)) picture.water.push([chunk.x*chunk.width+x,chunk.y*chunk.height+y]);
+  }));
+  return picture.water;
+}
 function render(now) {
   const dt=Math.min(100,now-lastFrame || 16); lastFrame=now;
   ctx.setTransform(dpr,0,0,dpr,0,0); ctx.fillStyle=PALETTE.void; ctx.fillRect(0,0,width,height);
@@ -342,13 +385,38 @@ function render(now) {
       }
       ctx.globalAlpha=1;
     }
+    if(!reducedMotion) for(const chunk of revealed) drawWaterGlints(ctx, waterTiles(chunk), state.clock_ms);
+    // The avatar mirrored in water just south of it (under the objects layer's canopies).
+    const pool=[];
+    for(let dy=1;dy<=2;dy++) for(let dx=-1;dx<=1;dx++) {
+      const tile=tileAt(resident,state.player.x+dx,state.player.y+dy);
+      if(tile && isWater(tile.glyph)) pool.push([(state.player.x+dx)*TILE_W,(state.player.y+dy)*TILE_H,TILE_W,TILE_H]);
+    }
+    if(pool.length && !state.expedition?.prologue) drawReflection(ctx,pool,actor.y+ACTOR_FOOT,c=>drawPlayer(c,state.player,actor.x,actor.y,
+      attackPhase(state.player),{clock:state.clock_ms,reducedMotion,weapon:state.expedition?.weapon}),.38);
+    // Enemies standing by water are mirrored in it too.
+    for(const t of state.targets) {
+      if(t.hp<=0 || !inSight(t.x,t.y)) continue;
+      const wet=[];
+      for(let dy=1;dy<=2;dy++) for(let dx=-1;dx<=1;dx++) {
+        const tile=tileAt(resident,t.x+dx,t.y+dy);
+        if(tile && isWater(tile.glyph)) wet.push([(t.x+dx)*TILE_W,(t.y+dy)*TILE_H,TILE_W,TILE_H]);
+      }
+      if(!wet.length) continue;
+      const at=enemyXY(t,now);
+      drawReflection(ctx,wet,at.y+ACTOR_FOOT,c=>drawEnemy(c,t,at.x,at.y,{clock:state.clock_ms,reducedMotion,reflection:true}),.32);
+    }
     for(const chunk of revealed) ctx.drawImage(pictures.get(chunk.id).objects,chunk.x*chunk.width*TILE_W-OBJECT_PAD,chunk.y*chunk.height*TILE_H-OBJECT_PAD);
     ctx.restore();
     const anchor = state.expedition?.anchor;
     if (anchor && inSight(anchor.x,anchor.y)) {
       drawAmbushSite(ctx, (anchor.x+.5)*TILE_W, (anchor.y+.5)*TILE_H);
       drawCamp(ctx, (anchor.x+.5)*TILE_W, (anchor.y+.5)*TILE_H, {clock: state.clock_ms, reducedMotion});
+      drawBuildings(ctx, (anchor.x+.5)*TILE_W, (anchor.y+.5)*TILE_H, state.expedition?.camp?.buildings, {clock: state.clock_ms});
     }
+    const fire = state.expedition?.campfire;
+    if (fire && inSight(fire.x, fire.y))
+      drawCampfire(ctx, (fire.x+.5)*TILE_W, (fire.y+.5)*TILE_H, {clock: state.clock_ms, reducedMotion});
     const goal = state.expedition?.goal;
     for (const spot of state.spots || []) if(inSight(spot.x,spot.y)) drawSpot(ctx, spot, (spot.x+.5)*TILE_W, (spot.y+.5)*TILE_H,
       {clock: state.clock_ms, goal: !!goal && goal.x === spot.x && goal.y === spot.y});
@@ -379,7 +447,7 @@ function render(now) {
     actors.sort((a,b)=>a.row-b.row || (a.kind==='player')-(b.kind==='player'));
     for(const item of actors) {
       if(item.kind==='player') drawPlayer(ctx,state.player,actor.x,actor.y,attackPhase(state.player),
-        {activity, clock:state.clock_ms, reducedMotion});
+        {activity, clock:state.clock_ms, reducedMotion, weapon: state.expedition?.weapon});
       else if(item.kind==='elder') drawElder(ctx,(item.tx+.5)*TILE_W+item.shift,(item.ty+.5)*TILE_H,
         {clock:state.clock_ms,facing:item.facing,alpha:item.alpha,talking:item.talking,reducedMotion});
       else {
@@ -398,7 +466,7 @@ function render(now) {
     if (state.expedition?.control === 'manual' && !prologue) {
       const target = state.targets.find(t=>t.id===state.expedition.auto_target && t.hp>0 && inSight(t.x,t.y));
       drawUnarmedReach(ctx,actor.x,actor.y,target ? [(target.x+.5)*TILE_W,(target.y+.5)*TILE_H] : null,
-        state.player.animation === 'attack');
+        state.player.animation === 'attack', state.expedition?.attack_radius || 1);
     }
     // Combat marks draw above canopies so a swing is never hidden by leaves.
     if(swing.slashAt!==null) {
@@ -413,6 +481,9 @@ function render(now) {
         const at=enemyXY(t,now); drawDamage(ctx,at.x,at.y-44,hit.amount,reducedMotion?0:now-hit.at);
       }
     }
+    if(!reducedMotion) drawMotes(ctx,view.x-width/view.scale/2,view.y-height/view.scale/2,
+      view.x+width/view.scale/2,view.y+height/view.scale/2,state.clock_ms,
+      ...(state.expedition?.region?.shimmer ? [2.4, ['#b493ff', '#efe4ff']] : []));
     // Mask actor art and effects that cross from a revealed tile into hidden ground.
     ctx.fillStyle='#101b17';
     for(const chunk of visible) {
@@ -432,8 +503,9 @@ function render(now) {
       const age = now - rewards[i].at;
       if (age > 1600) { rewards.splice(i, 1); continue; }
       if (age < 0) continue;
+      if (rewards[i].glint) drawReveal(ctx, actor.x, actor.y - 30, rewards[i].glint, age, reducedMotion);
       drawFloat(ctx, actor.x, actor.y - 62 - (i % 4) * 11, rewards[i].text, reducedMotion ? 0 : age,
-        {color: rewards[i].color, duration: 1600, size: 9});
+        {color: rewards[i].color, duration: 1600, size: rewards[i].glint ? 11 : 9});
     }
     ctx.setTransform(dpr,0,0,dpr,0,0);
     drawEyelids(ctx, prologueView(prologue), width, height, reducedMotion);
@@ -442,6 +514,8 @@ function render(now) {
     $('zoom-out').disabled=zoom<=ZOOM.min; $('zoom-in').disabled=zoom>=ZOOM.max;
     if(mapDirty && state) { drawMinimap(map, state, chunks, dpr); mapDirty = false; }
   }
+  if(state) sound.update({now, paused, work: state.expedition?.activity?.kind ?? null, ...soundScene,
+    outdoors: !state.expedition?.anchor_space && !state.expedition?.prologue});
   if(!stopped) requestAnimationFrame(render);
 }
 const directions={KeyW:'north',ArrowUp:'north',KeyD:'east',ArrowRight:'east',KeyS:'south',ArrowDown:'south',KeyA:'west',ArrowLeft:'west'};
@@ -454,6 +528,11 @@ addEventListener('keydown', event=>{
   else if(event.code==='KeyE' && !event.repeat) { event.preventDefault(); if(!paused && manualAllowed()) pendingInteract = true; }
   else if(event.code==='KeyP' && !event.repeat) { event.preventDefault(); setPause(!paused); }
   else if(event.code==='Backquote' && !event.repeat) { event.preventDefault(); toggleDebug(); }
+  else if(event.code==='KeyM' && !event.repeat) {
+    event.preventDefault();
+    setSound({...sound.settings, volume: sound.settings.volume ? 0 : lastVolume});
+    status(sound.settings.volume ? `Sound ${sound.label.toLowerCase()}` : 'Sound off');
+  }
   else if(event.code==='Escape' && page !== 'world') { event.preventDefault(); openPage('world'); }
   else if(/^Digit[1-9]$/.test(event.code) && !event.repeat) {
     const selected = PAGES[Number(event.code.slice(5)) - 1];
@@ -468,6 +547,13 @@ addEventListener('keyup',event=>{
 });
 // Locally a hidden tab pauses the shared server. Hosted, the idle world keeps going.
 addEventListener('blur',()=>{ if(hosted) controls.reset(); else setPause(true); });
+// Browsers only start audio from a gesture; UI buttons click softly.
+for (const name of ['pointerdown','keydown']) addEventListener(name,()=>sound.unlock(),{capture:true});
+document.addEventListener('click',event=>{
+  const button = event.target.closest?.('button');
+  if (button && !button.disabled) sound.play(button.dataset.page || button.dataset.subpage ? 'tab' : 'click');
+});
+document.addEventListener('visibilitychange',()=>sound.suspend(document.hidden));
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){ if(hosted) controls.reset(); else setPause(true); } });
 addEventListener('pagehide',()=>{
   stopped=true; controls.reset();
@@ -498,13 +584,14 @@ document.addEventListener('dblclick',event=>event.preventDefault());
 $('report-close').addEventListener('click',()=>{hud.hideReport();setPause(false);canvas.focus();});
 // One anchor action per request: later clicks wait until the server has answered.
 for (const id of ['anchor-begin', 'anchor-shop']) $(id).addEventListener('click', event => {
-  const action = anchorAction(event.target, state?.expedition);
+  const action = anchorAction(event.target);
   if (action && !pendingAction) pendingAction = action;
 });
 $('skill-bar').addEventListener('click', event => {
   const slot = event.target.closest('button[data-skill-slot]');
-  if (slot?.dataset.skillSlot === '0' && slot.dataset.state === 'ready' && !pendingAction)
-    pendingAction = {type: 'return'};
+  if (slot?.dataset.state !== 'ready' || pendingAction) return;
+  if (slot.dataset.skillSlot === '0') pendingAction = {type: 'return'};
+  else if (slot.dataset.skillSlot === '1') pendingAction = {type: 'campfire'};
 });
 $('resume').addEventListener('click',()=>{setPause(false);canvas.focus();});
 $('zoom-in').addEventListener('click',()=>changeZoom(.1));
@@ -554,14 +641,16 @@ function openPage(id) {
 }
 function renderPage(force = false) {
   if (page === 'world') return;
-  const model = pageModel(page, {world_seed: state?.world_seed, expedition: {detail: lastDetail}}, window.DIMSUM_HOST || null);
+  const model = pageModel(page, {world_seed: state?.world_seed, expedition: {detail: lastDetail}},
+    window.DIMSUM_HOST || null, subpage[page], {sound: {label: sound.label, ambience: sound.settings.ambience}});
   const signature = JSON.stringify([model, armed]);
   if (!force && signature === pageSignature) return;
   pageSignature = signature;
   $('page-title').textContent = model.title;
-  const body = $('page-body'), scroll = body.scrollTop;
+  renderSubtabs($('page-subtabs'), model.subtabs || [], model.sub);
+  const body = $('page-body'), scroll = body.scrollTop, key = model.sub ? `${page}/${model.sub}` : page;
   body.replaceChildren(...(model.loading ? [el('p', 'page-loading', 'Reading the expedition...')]
-    : model.sections.map(section => renderSection(section, {page, closed: closedSections, armed}))));
+    : model.sections.map(section => renderSection(section, {page: key, closed: closedSections, armed}))));
   body.scrollTop = scroll;
 }
 $('tabs').addEventListener('click', event => {
@@ -569,11 +658,20 @@ $('tabs').addEventListener('click', event => {
   if (id) openPage(id === page && id !== 'world' ? 'world' : id);
 });
 $('page-close').addEventListener('click', () => openPage('world'));
+$('page-subtabs').addEventListener('click', event => {
+  const id = event.target.closest('button[data-subpage]')?.dataset.subpage;
+  if (!id || !subtabsOf(page).some(t => t.id === id) || subpage[page] === id) return;
+  subpage[page] = id; armed = null; $('page-body').scrollTop = 0; renderPage(true);
+});
 $('page-body').addEventListener('click', event => {
+  const journal = journalAction(event.target);
+  if (journal) { if (!pendingAction) { pendingAction = journal; lastDetailAt = 0; } return; }
   const act = event.target.closest('button[data-act]')?.dataset.act;
   if (!act) return;
   if (act === 'layout') { collapsed = defaultCollapsed(isMobile()); writeUi(COLLAPSE_KEY, JSON.stringify(collapsed)); applyCollapsed(); return; }
   if (act === 'debug') { toggleDebug(); return; }
+  if (act === 'sound-volume') { setSound({...sound.settings, volume: (sound.settings.volume + 1) % VOLUMES.length}); return; }
+  if (act === 'sound-ambience') { setSound({...sound.settings, ambience: !sound.settings.ambience}); return; }
   const host = window.DIMSUM_HOST;
   if (!host) return;
   clearTimeout(armTimer);

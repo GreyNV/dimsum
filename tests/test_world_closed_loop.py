@@ -8,7 +8,8 @@ from dataclasses import replace
 from dimensional_sim.world import autopilot as ap
 from dimensional_sim.world import economy
 from dimensional_sim.world.actions import Context, bucket, describe_bucket, explain
-from dimensional_sim.world.autopilot import Expedition
+from dimensional_sim.world.autopilot import SCHEMA_VERSION, saves, Expedition
+from camp_fixture import to_camp
 from dimensional_sim.world.catalog import (ACTIONS, BOONS, BY_ID, ENEMIES, ITEMS, REGIONS, UNLOCKS, ActionDef,
                                            validate_catalog)
 from dimensional_sim.world.encounters import chunk_spots, forced_spot
@@ -59,8 +60,9 @@ class CatalogTests(unittest.TestCase):
             with self.subTest(item=item.id):
                 self.assertGreater(item.ash_value, 0, "every item is worth something at the anchor")
                 in_run = {"food": item.food > 0, "material": item.id in crafted_from,
-                          "gear": any(a.effect == item.id for a in ACTIONS)}[item.kind]
-                self.assertTrue(in_run, "every item has an in-run use: eat, craft or wear")
+                          "gear": any(a.effect == item.id for a in ACTIONS),
+                          "treasure": item.ash_value >= 5}[item.kind]
+                self.assertTrue(in_run, "every item has an in-run use (eat, craft, wear) or is a treasure worth carrying")
         self.assertEqual({u.currency for u in UNLOCKS.values()} | {"blessing", "ash"},
                          {"ash", "blessing"}, "ash and blessing both have sinks")
 
@@ -106,12 +108,20 @@ class ActionBucketTests(unittest.TestCase):
         self.assertGreater(glade["forest_spring"], thicket["forest_spring"])
 
     def test_self_bucket_checks_ingredients_gear_and_live_play(self):
-        ctx = Context(placement="self", trigger="need", inventory={"stick": 2},
-                      knowledge=frozenset({"primitive_crafting"}), recipes=frozenset({"walking_staff"}))
-        self.assertIn("needs 3 stick", explain("craft_staff", ctx)["reasons"][0])
-        ok = replace(ctx, inventory={"stick": 3})
-        self.assertTrue(explain("craft_staff", ok)["eligible"])
-        self.assertFalse(explain("craft_staff", replace(ok, gear=frozenset({"walking_staff"})))["eligible"])
+        away = Context(placement="self", trigger="need", inventory={"cloth_scrap": 3, "rope": 1},
+                       knowledge=frozenset({"primitive_crafting"}), recipes=frozenset({"padded_jerkin"}))
+        self.assertEqual(explain("craft_jerkin", away)["reasons"], ["only at the anchor camp"])
+        self.assertEqual(explain("craft_jerkin", replace(away, at_camp=True))["reasons"],
+                         ["needs a crafting station at the camp"])
+        ctx = replace(away, inventory={"cloth_scrap": 2, "rope": 1}, at_camp=True,
+                      buildings=frozenset({"crafting_station"}))
+        self.assertIn("needs 3 cloth scrap", explain("craft_jerkin", ctx)["reasons"][0])
+        ok = replace(ctx, inventory={"cloth_scrap": 3, "rope": 1})
+        self.assertTrue(explain("craft_jerkin", ok)["eligible"])
+        self.assertFalse(explain("craft_jerkin", replace(ok, gear=frozenset({"padded_jerkin"})))["eligible"])
+        worn = explain("craft_jerkin", replace(ok, gear=frozenset({"hide_wrap"})))
+        self.assertFalse(worn["eligible"], "never swap worn gear for a craft that does not consume it")
+        self.assertIn("body slot already holds hide wrap", worn["reasons"][0])
         after = Context(placement="self", trigger="after_location", visible=False)
         self.assertNotIn("pray", [a.id for a, _ in bucket(after)])
         self.assertIn("pray", [a.id for a, _ in bucket(replace(after, visible=True))])
@@ -163,7 +173,7 @@ class PlayableWorldTests(unittest.TestCase):
 
     def test_new_run_reaches_eating_and_the_anchor_under_risk(self):
         e = fresh(2)
-        self.assertNotIn("walking_staff", e.recipes, "crafting is discovered, not a starting capability")
+        self.assertFalse(e.recipes, "crafting is discovered, not a starting capability")
         while e.anchor_ms is None and e.total_ms < 60 * 60_000:
             e.advance(2000)
         self.assertIsNotNone(e.anchor_ms, "a life ends within 60 minutes")
@@ -175,24 +185,31 @@ class PlayableWorldTests(unittest.TestCase):
 
 
 class CraftingTests(unittest.TestCase):
-    def test_staff_raises_damage_and_frontier_wrap_softens_hits(self):
+    def test_jerkin_softens_hits_and_studding_upgrades_the_worn_wrap(self):
         e = past_prologue(fresh())
-        damage, frontier = e.punch_damage(), e.frontier()
-        e.inventory = {"stick": 3}
-        e.knowledge.add("primitive_crafting")
-        e.recipes.add("walking_staff")
-        e._start_self(BY_ID["craft_staff"])
-        e.advance(e.task["duration_ms"])
-        self.assertEqual(e.inventory, {"walking_staff": 1})
-        self.assertEqual(e.punch_damage(), damage + 1)
-        self.assertGreaterEqual(e.frontier(), frontier)
+        frontier = e.frontier()
         hit = boar_hit(e, ChunkKey("forest", 2, 0))
-        e.inventory["hide_wrap"] = 1
-        e.equipped = equip_item(e.equipped, e.inventory, "hide_wrap")
-        self.assertEqual(boar_hit(e, ChunkKey("forest", 2, 0)), hit * 70 // 100)
+        to_camp(e)
+        e.inventory = {"cloth_scrap": 3, "rope": 1}
+        e.knowledge.add("primitive_crafting")
+        e.recipes.update({"padded_jerkin", "studded_wrap"})
+        e._start_self(BY_ID["craft_jerkin"])
+        e.advance(e.task["duration_ms"])
+        self.assertEqual(e.inventory, {"padded_jerkin": 1})
+        self.assertEqual(e.equipped, {"body": "padded_jerkin"})
+        self.assertEqual(boar_hit(e, ChunkKey("forest", 2, 0)), hit * 80 // 100)
+        self.assertGreaterEqual(e.frontier(), frontier)
+        e.inventory = {"hide_wrap": 1, "iron_nails": 3}
+        e.equipped = equip_item({}, e.inventory, "hide_wrap")
+        self.assertEqual(e._need_action().id, "craft_studded")
+        e._start_self(BY_ID["craft_studded"])
+        e.advance(e.task["duration_ms"])
+        self.assertEqual((e.inventory, e.equipped), ({"studded_wrap": 1}, {"body": "studded_wrap"}))
+        self.assertEqual(boar_hit(e, ChunkKey("forest", 2, 0)), hit * 55 // 100)
 
     def test_snare_turns_materials_into_food_only_when_needed(self):
         e = past_prologue(fresh())
+        to_camp(e)
         e.inventory = {"stick": 2, "bramble_thorn": 1}
         self.assertIsNone(e._need_action(), "snares need the unlock")
         e.unlocked.add("snares")
@@ -208,9 +225,9 @@ class CraftingTests(unittest.TestCase):
 
     def test_interrupted_or_starved_craft_gives_nothing(self):
         e = past_prologue(fresh())
-        e.inventory = {"stick": 1}
-        e._complete_self(BY_ID["craft_staff"])
-        self.assertEqual(e.inventory, {"stick": 1})
+        e.inventory = {"cloth_scrap": 1}
+        e._complete_self(BY_ID["craft_jerkin"])
+        self.assertEqual(e.inventory, {"cloth_scrap": 1})
 
 
 class EconomyTests(unittest.TestCase):
@@ -295,9 +312,25 @@ class EconomyTests(unittest.TestCase):
         self.assertIn("bramble_berries", e.forced["forest:0:0"])
         self.assertEqual(dump(Expedition.from_dict(json.loads(dump(e)))), dump(e))
 
+    def test_journal_controls_work_during_a_life_and_shape_unrolled_chunks(self):
+        e = past_prologue(fresh())
+        with self.assertRaisesRegex(ValueError, "mastery 2"):
+            e.anchor_action({"type": "journal_favor", "id": "bramble_berries", "mode": "favor"})
+        e.mastery["bramble_berries"] = 3
+        e.anchor_action({"type": "journal_favor", "id": "bramble_berries", "mode": "suppress"})
+        e.anchor_action({"type": "journal_guarantee", "id": "bramble_berries", "region": "old_road"})
+        self.assertEqual(e.journal_favor, {"bramble_berries": "suppress"})
+        self.assertEqual((e.journal_guarantee, e.journal_guarantee_region), ("bramble_berries", "old_road"))
+        self.assertFalse(e.anchor_wait, "mid-life controls never hold a future anchor open")
+        with self.assertRaisesRegex(ValueError, "anchor space"):
+            e.anchor_action({"type": "unlock", "id": "climbing"})
+        self.assertEqual(dump(Expedition.from_dict(json.loads(dump(e)))), dump(e))
+
     def test_schema_nine_combines_prestige_balances(self):
         data = fresh().to_dict()
         self.assertTrue(data["spot_plans"])
+        for key in (*saves.V13_FIELDS, *saves.V14_FIELDS, *saves.V15_FIELDS, *saves.V16_FIELDS):
+            del data[key]
         data["schema_version"] = 9
         data["encounters"] = "encounters-v8"
         data["dust"], data["ash"] = 7, 3
@@ -308,7 +341,33 @@ class EconomyTests(unittest.TestCase):
         self.assertEqual(restored.ash, 10)
         self.assertEqual(restored.converted, {})
         self.assertEqual(restored.spot_plans, {})
-        self.assertEqual(restored.to_dict()["schema_version"], 10)
+        self.assertEqual(restored.to_dict()["schema_version"], SCHEMA_VERSION)
+
+    def test_schema_ten_and_eleven_saves_reroll_spots_and_drop_removed_content(self):
+        e = fresh()
+        e.recipes.add("padded_jerkin")
+        gone = (*saves.V13_FIELDS, *saves.V14_FIELDS, *saves.V15_FIELDS, *saves.V16_FIELDS)
+        data = {k: v for k, v in e.to_dict().items() if k not in gone}
+        self.assertTrue(data["spot_plans"])
+        old = json.loads(json.dumps({**data, "recipes": ["walking_staff", "padded_jerkin"],
+                                     "inventory": [["walking_staff", 1], ["stick", 2]],
+                                     "equipped": {"weapon": "walking_staff"},
+                                     "converted": {"walking_staff": 1, "stick": 4},
+                                     "mastery": {"abandoned_camp": 2, "bramble_berries": 1},
+                                     "journal_favor": {"abandoned_camp": "favor"},
+                                     "journal": {**data["journal"], "actions": {"craft_staff": 2, "bramble_berries": 5},
+                                                 "items": {"walking_staff": 2, "stick": 9}}}))
+        for version, label in ((11, "encounters-v10"), (10, "encounters-v9")):
+            restored = Expedition.from_dict({**old, "schema_version": version, "encounters": label})
+            saved = restored.to_dict()
+            self.assertEqual((saved["schema_version"], saved["spot_plans"]), (SCHEMA_VERSION, {}))
+            self.assertEqual(restored.inventory, {"stick": 2})
+            self.assertEqual((restored.equipped, restored.recipes), ({}, {"padded_jerkin"}))
+            self.assertEqual((restored.mastery, restored.journal_favor, restored.converted),
+                             ({"bramble_berries": 1}, {}, {"stick": 4}))
+            self.assertEqual(restored.journal["actions"], {"bramble_berries": 5})
+        with self.assertRaises(ValueError):
+            Expedition.from_dict({**old, "schema_version": 11, "encounters": "encounters-v8"})
 
     def test_repeated_spot_actions_earn_all_three_mastery_grades(self):
         e = fresh()

@@ -33,6 +33,9 @@ world/catalog.py: ALL content as validated data: biomes (danger curve), enemies,
   recipes/knowledge/lead outcomes, unlocks (actions or abilities), boons, regions, category styles and art keys.
   How to add content without engine edits: docs/design/CONTENT_SYSTEMS.md.
 world/effects.py: gear/boon Effects combined per stat (no item or boon is named in engine code).
+world/drops.py: cascading rarity rolls (rare -> uncommon -> common) for encounter spots and DropTable bonus drops.
+world/sites.py: landmark sites (generator v5): which chunk holds one, its clearing and structures; site actions roll inside it.
+world/autopilot/camp.py: the anchor camp: buildings (bound with ash to persist), the storage chest, camp work trips, carry load.
 world/equipment.py: current-life weapon/body slots. Leads, knowledge and Journal roll controls live in autopilot state.
 world/actions.py: action bucket (known -> eligible -> weighted) and explain(); regions.py: chunk regions.
 world/economy.py: dimensional ash/blessing rules and anchor purchases; tuning.py: balance numbers.

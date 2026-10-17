@@ -14,9 +14,10 @@ from .models import (
 )
 from .seeds import canonical_json, content_digest, derive_seed
 
-GENERATOR_VERSION = 4   # v3: tile-level organic region borders (regions.RegionField), game trails
+GENERATOR_VERSION = 5   # v3: tile-level organic region borders (regions.RegionField), game trails
                         # v4: + continuous rivers (water.WaterField), fords and bridges
-SUPPORTED_GENERATOR_VERSIONS = (1, 2, 3, 4)
+                        # v5: + landmark sites (sites.site_at, pinned catalog.SITES)
+SUPPORTED_GENERATOR_VERSIONS = (1, 2, 3, 4, 5)
 
 
 def validated_dimensions(dimensions):
@@ -85,7 +86,7 @@ class ChunkGenerator:
 
     def __init__(self, world_seed: int, dimensions: tuple, assets: tuple,
                  generator_version: int = GENERATOR_VERSION, region_catalog=None,
-                 region_version=None):
+                 region_version=None, site_catalog=None):
         integer(world_seed, "world seed", 0, 2**64 - 1)
         if type(generator_version) is not int or generator_version not in SUPPORTED_GENERATOR_VERSIONS:
             raise ValueError("unsupported generator version")
@@ -114,6 +115,17 @@ class ChunkGenerator:
                                    for key, value in sorted(definitions.items())}
             self.region_catalog_digest = content_digest(
                 [asdict(value) for value in self.region_catalog.values()])
+        self.site_catalog = None
+        self.site_catalog_digest = None
+        if self.generator_version >= 5:
+            from .catalog import SITES, SiteDef
+            definitions = SITES if site_catalog is None else site_catalog
+            if type(definitions) is not dict or any(
+                    type(key) is not str or not isinstance(value, SiteDef) or value.id != key
+                    for key, value in definitions.items()):
+                raise ValueError("invalid site catalog")
+            self.site_catalog = {key: SiteDef(**asdict(value)) for key, value in sorted(definitions.items())}
+            self.site_catalog_digest = content_digest([asdict(value) for value in self.site_catalog.values()])
         self._specs = {spec.id: spec for spec in self.dimensions}
         self._pools = {}
         for spec in self.dimensions:
@@ -181,6 +193,19 @@ class ChunkGenerator:
         from .regions import region_for
         return region_for(self.world_seed, biome, key, self.region_catalog, version=self.region_version)
 
+    def site_for(self, key):
+        """Generator v5: the SitePlacement in this chunk, or None (pure; no grid is built)."""
+        if self.generator_version < 5:
+            return None
+        spec = self._spec(key)
+        region = self.chunk_region(key)
+        if region is None:
+            return None
+        from .sites import site_at
+        biome = self.biome_for(key)
+        return site_at(self.world_seed, key, region.id, spec.width, spec.height,
+                       {k: v for k, v in self.site_catalog.items() if v.biome == biome})
+
     def biome_for(self, key):
         """Read deterministic biome metadata without composing/residing a grid."""
         return self._source(key).biome
@@ -201,9 +226,10 @@ class ChunkGenerator:
                 from .regions import region_for
                 region = region_for(self.world_seed, source.biome, key, self.region_catalog,
                                     version=self.region_version)
+            site = self.site_for(key) if self.generator_version >= 5 else None
             return Chunk(key, seed, source.id, compose_open(source, spec, key, landscape_seed,
                                                              region=region, region_grid=region_grid,
-                                                             water=water))
+                                                             water=water, site=site))
         terrain = derive_seed(seed, "terrain")
         decoration = derive_seed(seed, "decoration")
         encounter = derive_seed(seed, "encounter")
