@@ -382,14 +382,15 @@ function recordingCtx(){
     return k==='createLinearGradient'||k==='createRadialGradient'?{addColorStop(){}}:undefined;},set:()=>true});
   return ctx;
 }
+const ASCII_ACTORS=await import('../src/dimensional_sim/world/browser/ascii_actors.js');
 test('crouch is a real frame: no squash scaling, same API, hands on the 2px grid',()=>{
   for(const facing of ['south','north','east','west']) for(const [ax,ay] of [[2,3],[2,1],[3,2],[1,2]]){
     const ctx=recordingCtx(),x=60,y=70;
     const box=drawPlayer(ctx,pose(facing),x,y,null,{activity:{kind:'forage',x:ax,y:ay,progress:500},clock:300});
-    assert.deepEqual(box,{left:x-16,top:y+12-26,width:32,height:26});
+    const {heroSprite}=ASCII_ACTORS, size=spriteSize(heroSprite(facing,0,true));
+    assert.deepEqual(box,{left:x-size.width/2,top:y+12-size.height,width:size.width,height:size.height});
+    assert.ok(size.height<spriteSize(heroSprite(facing,0,false)).height,'a crouch is lower than standing');
     assert.ok(!ctx.calls.some(([k,sx,sy])=>k==='scale'&&sx!==sy),'no non-uniform squash');
-    const fills=ctx.calls.filter(([k])=>k==='fillRect').map(c=>c.slice(1));
-    assert.ok(fills.every(r=>r.every(Number.isInteger)),'whole pixels only');
   }
   const rects=[];let fill=null;
   const rec=new Proxy({},{get:(_,k)=>k==='fillRect'?(...a)=>rects.push([fill,...a]):()=>({addColorStop(){}}),set:(_,k,v)=>{if(k==='fillStyle')fill=v;return true;}});

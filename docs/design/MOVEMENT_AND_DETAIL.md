@@ -30,44 +30,23 @@ avatar snags on trees; the resolution is very low for what the technique can do.
 Tests: test_world_runtime (corner assist), test_world_browser, nature_art.test.mjs,
 browser_view.test.mjs (RES surfaces, glide).
 
-## Painted actors and props (phase 2, 2026-10-18)
-Andrew: "do the same for the actor sprites and structures - good quality art that will hook players".
-- `painted.js`: a small painting kit - shapes with boxes (E, R, P smoothed polygons, C capsules),
-  `fill` (base colour lit inside its own outline: warm sheen upper left, cool shade lower right,
-  thin dark edge), `strokes` (fur, grain, weave) - and `paintedCanvas`, which paints a pose once at
-  RES, adds one soft silhouette outline, and caches it. Soft layers (`onLayer`: ground shadows
-  under, glows after) stay out of the outline. Hit flash = the canvas washed pale (`flashCanvas`).
-- Painted: the avatar (south / north / east / west, walk strides, breathing, crouch), arms, fists
-  and weapon shafts; the five enemies (bramble boar with thorny back and ember eyes, river lurker,
-  restless bones with a rusted blade, pale wisp, side-on wolf); the old man; the anchor stone; the
-  campfire (live flames and sparks).
-- `painted_props.js`: every encounter spot (all 58 SPOTS keys), site structure (STRUCTURE_ART),
-  camp building part and ambush piece, composed from a prop kit (stones, logs, log ends, planks,
-  bushes, pools, mushrooms, prints, bones, skulls, crates, barrels, sacks, cloth, reeds, fish).
-- `fine_art.js`: any remaining cell sprite (fallbacks) is rendered from its grid as lit fine art -
-  rounded corners, height-field shading, vector glyph marks.
-- Without a DOM every builder returns null and the cell sprites remain (node tests).
-- Smoothing quality 'low' (bilinear) for these copies: at RES≈screen density it looks the same
-  as 'high' and is ~2x cheaper in software rendering (30 fps headless vs 24 before this round).
-
-Tests: tests/painted_art.test.mjs (coverage of every key, frames, no-DOM fallback, vector marks).
-
-## Scale and realism (phase 3, 2026-10-18)
-Andrew: tree sizes must vary (an actor almost as tall as a tree is funny), review enemy sizes,
-more realism in the actors.
-- Trees: `art.treeScale(kind, variant)` - oak 1.35-1.85x, pine 1.55-2.2x, birch 1.4-1.9x, dead
-  1.2-1.7x, old 1.8-2.2x of the 52x70 art, so a tree is 2-4x a person. Big stamps keep their
-  fine grain (`nature_art.withDetail`: leaf cells and bark shrink by the same factor). Roots stay
-  on the tile (`treeAt`); OBJECT_PAD 150; canopies up to five rows south / two columns aside cover
-  an actor (`occludingTreeTiles`).
-- Readability under tall canopies: trees rooted just south of the avatar fade (`canopyFade`:
-  28% / 55%), canopies over enemies and spots repaint see-through (composited off-screen at full
-  strength first, so nearer leaves still hide farther trunks), and only over the actor's box.
-  Explored trees draw whole over the fog line (the hidden-ground mask now sits under the objects).
-- The avatar re-proportioned: about six heads tall (head ~6.6 px of 40), shoulders 10, waist 20,
-  knees 30; tapered limbs hinged at joints (`T`, `limb`), knee-lift walk in front views, scissor
-  walk in profile; thinner sleeved arms, fists and weapon shafts to match. Default zoom 1.6.
-- Enemies sized against the avatar: a side-on wild boar (half a person at the shoulder, bristled
-  mane with brambles, tusks), wolf at 0.74, lurker 0.74, a person-height skeleton with a small
-  skull, wisp 0.62. Side-on enemies turn to face the avatar. The old man is the avatar's height,
-  stooped over his staff.
+## Back to ASCII (2026-10-18)
+Andrew: the painted art lost the vibe and left ASCII behind. Decision: restore the glyph look and
+keep the movement fixes and sharper rendering; rebuild detail as finer glyph art; keep the scale
+changes (trees 2-4x a person, realistic proportions) in ASCII.
+- The painted vector actors/props (painted.js, painted_props.js) and the fine-pixel renderer are
+  removed. Spots, structures, camp, campfire, buildings and the ambush are the hand-made cell
+  sprites again, rendered crisp at RES.
+- Trees and rocks are glyph art again (`nature_art.js`): one character per cell on a dark
+  backing, character and colour from the light (LEAF_GLYPHS '.,:;+*%&@', pine '^A#', stone
+  'o0O@', bark '|:!' with '/' '\' roots, birch '=' bands, dead limbs written in '/|\-' strokes),
+  on finer GLYPH_W x GLYPH_H (2.4 x 3.6) cells, crowns lit as a whole and clump by clump. Tree
+  sizes vary (`art.treeScale`); big trees shrink their cells (`withDetail`) so text stays fine.
+- Actors in fine ASCII (`ascii_actors.js`): hand-made paint + glyph rows on 2.2 x 3.6 cells (the
+  classic sprites use 4 x 7). The avatar is ten or eleven rows with a three-row head, in four
+  facings, front knee-lift and side scissor strides, and a crouch; a side-on wild boar (half a
+  person high, bramble mane, tusks), a side-on wolf, a person-height skeleton with a blade, the
+  lurker, the wisp, and the old man at the avatar's height. Side-on enemies face the avatar.
+  `sprites.paintSprite` draws any sprite with its own `cell` and `roles`.
+- Kept from the scale round: canopyFade around the avatar, see-through canopies over enemies and
+  spots, trees drawn whole past the fog line, default zoom 1.6.
