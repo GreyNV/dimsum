@@ -249,18 +249,25 @@ class Exploration:
         x, y = gx % asset.width, gy % asset.height
         return chunk.asset.collision[y][x] and chunk.asset.objects[y][x] is not None
 
-    def _step_target(self, key, x, y, direction):
-        """Where one cardinal step from (key, x, y) lands, or None if blocked (pure)."""
+    def _step_target(self, key, x, y, direction, peek=False):
+        """Where one cardinal step from (key, x, y) lands, or None if blocked (pure). With
+        `peek`, chunks are only looked at, never loaded (a chunk not resident counts as blocked)."""
         dx, dy = DELTAS[direction]
         # peek first: reading the source chunk must not reorder the world's LRU cache.
-        asset = (self.world.peek(key) or self.world.get(key)).asset
+        source = self.world.peek(key) or (None if peek else self.world.get(key))
+        if source is None:
+            return None
+        asset = source.asset
         nx, ny = x + dx, y + dy
         if 0 <= nx < asset.width and 0 <= ny < asset.height:
             return None if asset.collision[ny][nx] else (key, nx, ny)
         if not any(e.direction == direction and (x, y) == (e.x, e.y) for e in asset.exits):
             return None
         nkey = ChunkKey(key.dimension, key.x + dx, key.y + dy)
-        destination = self.world.get(nkey).asset
+        found = self.world.peek(nkey) if peek else self.world.get(nkey)
+        if found is None:
+            return None
+        destination = found.asset
         nx, ny = nx % destination.width, ny % destination.height
         return None if destination.collision[ny][nx] else (nkey, nx, ny)
 
@@ -320,29 +327,41 @@ class Exploration:
                 self._place(*landing)
                 return
 
-    def _corner_assist(self, start, direction):
+    def _corner_assist(self, start, direction, peek=False):
         """A cardinal step into a blocked cell (a tree trunk, a rock corner) eases around it:
         when the cell beside the avatar and the cell beyond the obstacle on that side are both
         open, the avatar steps diagonally past the corner instead of stopping dead. The side
-        that opens up first wins; with both open, the side whose way ahead stays clear longer,
-        then north/west. Never squeezes between two blocked cells."""
+        whose way ahead stays clear longer wins, then north/west. Paced as a diagonal step
+        (_paced_direction). Never squeezes between two blocked cells."""
         sides = ("north", "south") if direction in ("east", "west") else ("west", "east")
         options = []
         for order, side in enumerate(sides):
-            beside = self._step_target(*start, side)
+            beside = self._step_target(*start, side, peek=peek)
             if beside is None:
                 continue
-            past = self._step_target(*beside, direction)
+            past = self._step_target(*beside, direction, peek=peek)
             if past is None:
                 continue
             run, cell = 0, past
             while run < 3:
-                cell = self._step_target(*cell, direction)
+                cell = self._step_target(*cell, direction, peek=peek)
                 if cell is None:
                     break
                 run += 1
             options.append((-run, order, past))
         return min(options)[2] if options else None
+
+    def _paced_direction(self, direction):
+        """The direction a step will actually take, for pacing: a cardinal step that eases around a
+        corner (_corner_assist) is a diagonal step and takes the diagonal interval."""
+        if direction in DIAGONALS or not direction:
+            return direction
+        start = (self.player.chunk, self.player.x, self.player.y)
+        if self._step_target(*start, direction, peek=True) is not None:
+            return direction
+        if self._corner_assist(start, direction, peek=True) is None:
+            return direction
+        return next(name for name, pair in DIAGONALS.items() if direction in pair)   # any diagonal: same pace
 
     def advance(self, milliseconds, command=InputCommand()):
         integer(milliseconds, "elapsed milliseconds", 0)
@@ -388,7 +407,7 @@ class Exploration:
                     self.hit_targets.clear()
             else:
                 self._set_animation("walk" if command.move else "idle")
-                interval = self.interval_for(command.move) if command.move else 0
+                interval = self.interval_for(self._paced_direction(command.move)) if command.move else 0
                 # max(0, ...): a lighter load can shorten the interval below the time already walked
                 step = min(remaining, max(0, interval - self.move_elapsed_ms)) if command.move else remaining
                 self.player.animation_elapsed_ms += step

@@ -286,7 +286,7 @@ function repaintCanopies(tx, ty, resident, alpha = 1, box = null) {
     const lx = tile.x - chunk.x * chunk.width, ly = tile.y - chunk.y * chunk.height;
     if (chunk.tiles[ly][lx] !== 'T') continue;
     const t = treeAt(tile.x * TILE_W, tile.y * TILE_H, visualHash(tile.x, tile.y, chunk.seed), undefined, treeKind(chunk, lx, ly));
-    t.fade = actor ? canopyFade(tile.x - (actor.x / TILE_W - .5), tile.y - (actor.y / TILE_H - .5)) : 1;
+    t.fade = actor && !state?.expedition?.anchor_space ? canopyFade(tile.x - (actor.x / TILE_W - .5), tile.y - (actor.y / TILE_H - .5)) : 1;   // same rule as the ground pass
     if (t.x < bx1 && t.x + t.canvas.lw > bx0 && t.y < by1 && t.y + t.canvas.lh > by0) trees.push(t);
   }
   if (!trees.length) return;

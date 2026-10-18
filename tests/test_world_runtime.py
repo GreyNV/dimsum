@@ -372,6 +372,13 @@ class DiagonalMovementTests(unittest.TestCase):
         object.__setattr__(chunk, "asset", replace(a, collision=tuple(tuple(r) for r in rows)))
         game._move("east")
         self.assertEqual((game.player.x, game.player.y), (x + 1, y - 1), "steps around, never into, the trunk")
+        from dimensional_sim.world.runtime import DIAGONAL_PERCENT, InputCommand
+        game.player.x, game.player.y = x, y
+        diagonal = game.step_interval_ms * DIAGONAL_PERCENT // 100
+        game.advance(diagonal - 1, InputCommand("east"))
+        self.assertEqual((game.player.x, game.player.y), (x, y), "an eased step is paced as a diagonal")
+        game.advance(1, InputCommand("east"))
+        self.assertEqual((game.player.x, game.player.y), (x + 1, y - 1))
         game.player.x, game.player.y = x, y
         rows[y - 1][x] = True          # both sides shut: it stops
         rows[y - 1][x + 1] = True

@@ -88,8 +88,11 @@ function characterVectors() {
   return list;
 }
 function nearest(v, set = null) {
-  const key = (set || '') + '|' + v.map(x => Math.min(31, Math.round(x * 31))).join(',');
+  // match the quantised vector itself, so the cache never depends on which cell came first
+  const q = v.map(x => Math.max(0, Math.min(31, Math.round(x * 31))));
+  const key = (set || '') + '|' + q.join(',');
   if (cache.has(key)) return cache.get(key);
+  v = q.map(x => x / 31);
   let best = ' ', score = Infinity;
   for (const {ch, v: w} of characterVectors()) {
     if (set && !set.includes(ch)) continue;
