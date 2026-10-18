@@ -1,5 +1,5 @@
 /** Fine terrain character assets, separate from logical collision cells.
- * Canvas text only: 6x4 drawing cells per movement tile. No bitmap world assets.
+ * Canvas-drawn only (no bitmap world assets), painted RES times denser than logical size.
  * Player, enemy and combat art live in actors.js and never enter these caches.
  */
 import {TILE_W, TILE_H, CELL_W, CELL_H, visualHash} from './view.js';
@@ -98,11 +98,34 @@ export const TILE_VARIANTS = 16, TREE_VARIANTS = 8, ROCK_VARIANTS = 4;
 const STAMP_SEED = 0x5eed;
 const stamps = new Map();
 const defaultCanvas = () => document.createElement('canvas');
+/* Render resolution: every stamp and chunk surface is painted RES times denser than its
+ * logical size, so glyph texture, blades and leaves keep their fine detail when the scene
+ * is scaled up to the screen (zoom x device pixels) instead of being blown up into blocks.
+ * The app picks it from the device (setResolution); logical sizes never change. */
+export let RES = 2;
+export function setResolution(res) {
+  const next = Math.max(1, Math.min(4, Math.round(res)));
+  if (next !== RES) { RES = next; stamps.clear(); }
+  return RES;
+}
+/** A canvas `width` x `height` logical pixels, backed at RES, with the context scaled. */
+function surface(width, height, createCanvas) {
+  const canvas = createCanvas();
+  canvas.width = Math.ceil(width * RES); canvas.height = Math.ceil(height * RES);
+  canvas.lw = width; canvas.lh = height;
+  const ctx = canvas.getContext('2d');
+  if (RES !== 1) ctx.scale(RES, RES);
+  return {canvas, ctx};
+}
+/** Copy a stamp or chunk surface at its logical size. */
+export function put(ctx, canvas, x, y) {
+  ctx.drawImage(canvas, x, y, canvas.lw ?? canvas.width, canvas.lh ?? canvas.height);
+}
 function stamp(key, width, height, draw, createCanvas = defaultCanvas) {
   let canvas = stamps.get(key);
   if (!canvas) {
-    canvas = createCanvas(); canvas.width = width; canvas.height = height;
-    const ctx = canvas.getContext('2d'); setupText(ctx); draw(ctx);
+    const made = surface(width, height, createCanvas);
+    canvas = made.canvas; setupText(made.ctx); draw(made.ctx);
     stamps.set(key, canvas);
   }
   return canvas;
@@ -158,25 +181,26 @@ function rockStamp(variant, createCanvas) {
 /** Tree whose logical tile top-left is (px, py). The trunk sits over the blocking
  * cell; canopy overhang is visual. Reused to repaint canopies in front of actors. */
 export function drawTree(ctx, px, py, seed, createCanvas, kind = 'o') {
-  ctx.drawImage(treeStamp(seed % TREE_VARIANTS, createCanvas, kind), px - 14, py - 42);
+  put(ctx, treeStamp(seed % TREE_VARIANTS, createCanvas, kind), px - 14, py - 42);
 }
 /** The tree kind letter at a chunk cell (frames send chunk.trees; older frames: oak). */
 export const treeKind = (chunk, x, y) => chunk.trees?.[y]?.[x] || 'o';
-/** Two surfaces preserve global environment < objects < actors order at seams. */
+/** The chunk's ground is one cached surface; its objects (trees, rocks, structures) are a
+ * list of stamp copies [{canvas, x, y}] in chunk pixels, drawn each frame (drawObjects) -
+ * cheap, and far lighter than a second full-chunk surface at RES. */
 export function paintChunk(chunk, createCanvas = defaultCanvas) {
   const width = chunk.width * TILE_W, height = chunk.height * TILE_H;
-  const ground = createCanvas(), objects = createCanvas();
-  ground.width = width; ground.height = height;
-  objects.width = width + OBJECT_PAD * 2; objects.height = height + OBJECT_PAD * 2;
-  const g = ground.getContext('2d'), o = objects.getContext('2d');
+  const {canvas: ground, ctx: g} = surface(width, height, createCanvas);
+  const objects = [];
+  const o = {drawImage: (canvas, x, y) => objects.push({canvas, x: x - OBJECT_PAD, y: y - OBJECT_PAD})};
   let wet = false;
   for (let y = 0; y < chunk.height; y++) for (let x = 0; x < chunk.width; x++) {
     const glyph = chunk.tiles[y][x], px = x * TILE_W, py = y * TILE_H;
     const gx = chunk.x * chunk.width + x, gy = chunk.y * chunk.height + y;
     const seed = visualHash(gx, gy, chunk.seed);
-    g.drawImage(tileStamp(glyph, seed % TILE_VARIANTS, createCanvas), px, py);
+    put(g, tileStamp(glyph, seed % TILE_VARIANTS, createCanvas), px, py);
     wet ||= isWater(glyph);
-    if (glyph === 'T') drawTree(o, px + OBJECT_PAD, py + OBJECT_PAD, seed, createCanvas, treeKind(chunk, x, y));
+    if (glyph === 'T') o.drawImage(treeStamp(seed % TREE_VARIANTS, createCanvas, treeKind(chunk, x, y)), px + OBJECT_PAD - 14, py + OBJECT_PAD - 42);
     else if (glyph === '^') o.drawImage(rockStamp(seed % ROCK_VARIANTS, createCanvas), px + OBJECT_PAD - 4, py + OBJECT_PAD - 4);
     else if (STRUCTURE_ART[glyph]) {
       const {canvas, dx, dy} = structureStamp(glyph, createCanvas);
@@ -185,6 +209,10 @@ export function paintChunk(chunk, createCanvas = defaultCanvas) {
   }
   if (wet) reflect(g, chunk, createCanvas);
   return {ground, objects};
+}
+/** Draw a painted chunk's objects with the chunk's top-left at (ox, oy). */
+export function drawObjects(ctx, picture, ox, oy) {
+  for (const item of picture.objects) put(ctx, item.canvas, ox + item.x, oy + item.y);
 }
 /** Banks, then trees, rocks and structures mirrored in the water south of them. */
 function reflect(g, chunk, createCanvas) {
@@ -201,8 +229,8 @@ function reflect(g, chunk, createCanvas) {
     const seed = visualHash(chunk.x * chunk.width + x, chunk.y * chunk.height + y, chunk.seed);
     drawReflection(g, rects, py + TILE_H - 2, ctx => {
       if (glyph === 'T') drawTree(ctx, px, py, seed, createCanvas, treeKind(chunk, x, y));
-      else if (glyph === '^') ctx.drawImage(rockStamp(seed % ROCK_VARIANTS, createCanvas), px - 4, py - 4);
-      else { const {canvas, dx, dy} = structureStamp(glyph, createCanvas); ctx.drawImage(canvas, px + dx, py + dy); }
+      else if (glyph === '^') put(ctx, rockStamp(seed % ROCK_VARIANTS, createCanvas), px - 4, py - 4);
+      else { const {canvas, dx, dy} = structureStamp(glyph, createCanvas); put(ctx, canvas, px + dx, py + dy); }
     });
   }
 }

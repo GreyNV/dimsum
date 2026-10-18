@@ -1,6 +1,6 @@
 /** Browser adapter: snapshots in, character art out. Python owns all game rules. */
-import {TILE_W, TILE_H, ZOOM, clamp, residentBounds, cameraView, follow, retainResident, tileAt, visualHash, stickDirection, Controls} from './view.js';
-import {PALETTE, OBJECT_PAD, paintChunk, drawTree, treeKind} from './art.js';
+import {TILE_W, TILE_H, ZOOM, clamp, residentBounds, cameraView, follow, glide, retainResident, tileAt, visualHash, stickDirection, Controls} from './view.js';
+import {PALETTE, OBJECT_PAD, paintChunk, drawTree, treeKind, drawObjects, put, setResolution} from './art.js';
 import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawUnarmedReach, drawDamage, drawFloat, drawReveal, drawSpot, drawSpotCompletion, drawCamp, drawBuildings, drawCampfire, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
 import {PAGES, needsDetail, pageModel, PANELS, COLLAPSE_KEY, loadCollapsed, toggleCollapsed, defaultCollapsed, subtabsOf} from './pages.js';
 import {debugText, ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
@@ -23,7 +23,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 let debugOn = new URLSearchParams(location.search).has('debug');
 let state = null, paused = true, zoom = ZOOM.initial, width = 0, height = 0, dpr = 1;
 let camera = null, actor = null, lastFrame = 0, connection = 'connecting';
-let mapDirty = true, polling = false, stopped = false;
+let mapDirty = true, polling = false, stopped = false, resolution = 0;
 /* Cosmetic combat feedback derived from consecutive snapshots. Client clocks only
  * fade these marks; damage, timing and hits always come from the server. */
 const hpSeen = new Map(), hits = new Map(), deaths = new Map();
@@ -98,6 +98,9 @@ function toast(message, ms = 3200) {
 }
 function resize() {
   width = innerWidth; height = innerHeight; dpr = Math.min(devicePixelRatio || 1, 3);
+  // Paint the world as dense as the screen shows it (device pixels x a typical zoom).
+  const res = setResolution(dpr >= 1.5 ? 3 : 2);
+  if (res !== resolution) { resolution = res; pictures.clear(); }
   canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
   mini.width = Math.round(180 * dpr); mini.height = Math.round(130 * dpr);
   mapDirty = true;
@@ -268,13 +271,17 @@ function attackPhase(player) {
   if (player.animation !== 'attack') return null;
   return player.active ? 'strike' : swing.active ? 'recover' : 'windup';
 }
-function repaintCanopies(tx, ty, resident) {
+/** Canopies south of an actor are repainted over it; over the avatar they are see-through,
+ * so it never vanishes into the leaves while walking behind a tree. */
+function repaintCanopies(tx, ty, resident, alpha = 1) {
+  ctx.globalAlpha = alpha;
   for (const tile of occludingTreeTiles(tx, ty)) {
     const chunk = resident.find(c => Math.floor(tile.x / c.width) === c.x && Math.floor(tile.y / c.height) === c.y);
     if (!chunk) continue;
     const lx = tile.x - chunk.x * chunk.width, ly = tile.y - chunk.y * chunk.height;
     if (chunk.tiles[ly][lx] === 'T') drawTree(ctx, tile.x * TILE_W, tile.y * TILE_H, visualHash(tile.x, tile.y, chunk.seed), undefined, treeKind(chunk, lx, ly));
   }
+  ctx.globalAlpha = 1;
 }
 /** Exactly one request in flight. Server fixed ticks and input lease own timing. */
 async function poll() {
@@ -347,8 +354,8 @@ function render(now) {
   }
   if (state && actor && camera) {
     const tx=(state.player.x+.5)*TILE_W, ty=(state.player.y+.5)*TILE_H;
-    actor.x=reducedMotion ? tx : follow(actor.x,tx,dt,55);
-    actor.y=reducedMotion ? ty : follow(actor.y,ty,dt,55);
+    if (reducedMotion) { actor.x=tx; actor.y=ty; }
+    else Object.assign(actor, glide(actor, {x:tx, y:ty}, dt, state.movement_interval_ms));
     camera.x=reducedMotion ? actor.x : follow(camera.x,actor.x,dt,140);
     camera.y=reducedMotion ? actor.y : follow(camera.y,actor.y,dt,140);
     const resident=[...chunks.values()].sort((a,b)=>a.y-b.y || a.x-b.x);
@@ -387,7 +394,7 @@ function render(now) {
       }
     }
     ctx.clip();
-    for(const chunk of revealed) ctx.drawImage(pictures.get(chunk.id).ground,chunk.x*chunk.width*TILE_W,chunk.y*chunk.height*TILE_H);
+    for(const chunk of revealed) put(ctx,pictures.get(chunk.id).ground,chunk.x*chunk.width*TILE_W,chunk.y*chunk.height*TILE_H);
     // Region tint: a flat, low-alpha wash per chunk so regions read at a glance (VISUAL_STYLE.md effects pass).
     // Organic regions (generator v3) send one tint code per tile; the wash is cached per chunk.
     for(const chunk of revealed) if(chunk.tint) {
@@ -421,7 +428,7 @@ function render(now) {
       const at=enemyXY(t,now);
       drawReflection(ctx,wet,at.y+ACTOR_FOOT,c=>drawEnemy(c,t,at.x,at.y,{clock:state.clock_ms,reducedMotion,reflection:true}),.32);
     }
-    for(const chunk of revealed) ctx.drawImage(pictures.get(chunk.id).objects,chunk.x*chunk.width*TILE_W-OBJECT_PAD,chunk.y*chunk.height*TILE_H-OBJECT_PAD);
+    for(const chunk of revealed) drawObjects(ctx,pictures.get(chunk.id),chunk.x*chunk.width*TILE_W,chunk.y*chunk.height*TILE_H);
     ctx.restore();
     const anchor = state.expedition?.anchor;
     if (anchor && inSight(anchor.x,anchor.y)) {
@@ -477,7 +484,7 @@ function render(now) {
         drawEnemy(ctx,t,at.x,at.y,{clock:state.clock_ms,reducedMotion,
           hit:hit?now-hit.at:Infinity,dying:t.hp===0&&death?Math.min(1,(now-death.at)/600):null});
       }
-      repaintCanopies(item.tx,item.ty,revealed);
+      repaintCanopies(item.tx,item.ty,revealed,item.kind==='player' ? .45 : 1);
     }
     for(const t of state.targets) if(inSight(t.x,t.y) && hiddenBehind(t,state.player)) {
       const hit=hits.get(t.id);

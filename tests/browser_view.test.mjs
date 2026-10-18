@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {visualHash, residentBounds, cameraView, follow, retainResident, tileAt, stickDirection, Controls, TILE_W, TILE_H} from '../src/dimensional_sim/world/browser/view.js';
-import {groundMarks, paintChunk, TREE, terrainColor, OBJECT_PAD, clearStamps, stampCount, TILE_VARIANTS, TREE_VARIANTS, ROCK_VARIANTS} from '../src/dimensional_sim/world/browser/art.js';
+import {groundMarks, paintChunk, RES, TREE, terrainColor, OBJECT_PAD, clearStamps, stampCount, TILE_VARIANTS, TREE_VARIANTS, ROCK_VARIANTS} from '../src/dimensional_sim/world/browser/art.js';
 import {ENEMY, ROLE, spriteSize, paintSprite, punchReach, hiddenBehind, occludingTreeTiles, SPOTS, POSE, drawSpot, CAMP, ELDER} from '../src/dimensional_sim/world/browser/actors.js';
 import {activityText, newRewards, ATTRIBUTES, usedAttributes, rewardTexts, reportIsFresh, reportStorageKey, ExpeditionHud, prologueView, shopSections, debugText} from '../src/dimensional_sim/world/browser/hud.js';
 import {anchorAction} from '../src/dimensional_sim/world/browser/anchor_ui.js';
@@ -108,19 +108,20 @@ test('character art is multi-cell; cached ground and objects paint separately wi
   const factory=()=> {
     const log=[];logs.push(log);
     const canvas={width:0,height:0,log,getContext:()=>({set font(v){},set textBaseline(v){},set textAlign(v){},set fillStyle(v){},
-      fillRect:(...a)=>log.push(['rect',...a]),fillText:(...a)=>log.push(['text',...a]),drawImage:(img,...a)=>log.push(['image',img,...a])})};
+      scale(){},fillRect:(...a)=>log.push(['rect',...a]),fillText:(...a)=>log.push(['text',...a]),drawImage:(img,...a)=>log.push(['image',img,...a])})};
     return canvas;
   };
   clearStamps();
   const asset=chunk();asset.tiles[0]='T^' + '.'.repeat(30);
   const pictures=paintChunk(asset,factory);
-  assert.equal(pictures.ground.width,32*TILE_W);
-  assert.equal(pictures.objects.height,16*TILE_H+OBJECT_PAD*2);
-  const groundLog=pictures.ground.log, objectLog=pictures.objects.log;
+  assert.equal(pictures.ground.width,32*TILE_W*RES,'painted RES times denser');
+  assert.equal(pictures.ground.lw,32*TILE_W,'logical size kept');
+  const groundLog=pictures.ground.log, objectLog=pictures.objects.map(o=>['image',o.canvas,o.x,o.y]);
   assert.equal(groundLog.filter(e=>e[0]==='image').length,32*16,'one stamp copy per tile');
-  assert.equal(objectLog.filter(e=>e[0]==='image').length,2,'tree and rock stamps');
+  assert.equal(objectLog.length,2,'tree and rock stamps');
+  assert.ok(pictures.objects.every(o=>o.x>=-OBJECT_PAD&&o.y>=-OBJECT_PAD),'objects overhang at most OBJECT_PAD');
   assert.ok(groundLog.every(e=>e[0]==='image'),'no per-glyph text on the chunk surface');
-  const stamped=logs.filter(l=>l!==groundLog&&l!==objectLog);
+  const stamped=logs.filter(l=>l!==groundLog);
   assert.ok(stamped.some(l=>l.some(e=>e[0]==='text')),'stamps carry the character art');
   assert.ok(stampCount()<=TILE_VARIANTS*3+TREE_VARIANTS+ROCK_VARIANTS);
   const again=paintChunk(asset,factory);
@@ -128,7 +129,7 @@ test('character art is multi-cell; cached ground and objects paint separately wi
   assert.deepEqual(again.ground.log.map(e=>e[1]),groundLog.map(e=>e[1]),'same variant per coordinate');
   assert.notEqual(terrainColor('='),terrainColor('T'));
   const site=chunk();site.tiles[0]='AM' + '.'.repeat(30);
-  assert.equal(paintChunk(site,factory).objects.log.filter(e=>e[0]==='image').length,2,'tent and masonry are drawn');
+  assert.equal(paintChunk(site,factory).objects.length,2,'tent and masonry are drawn');
   assert.notEqual(terrainColor('A'),terrainColor('.'));assert.notEqual(terrainColor('M'),terrainColor('.'));
 });
 
@@ -174,7 +175,7 @@ test('west view mirrors east; walking changes legs; attack poses differ by phase
   assert.equal(punchReach(pose('east','idle'),'strike'),null,'no weapon or fist when not attacking');
 });
 test('flash paints a silhouette without glyph texture; dissolve removes cells stably',()=>{
-  const log=[], ctx={fillRect:(...a)=>log.push(['rect',...a]),fillText:(...a)=>log.push(['text',...a]),set fillStyle(v){},set globalAlpha(v){}};
+  const log=[], ctx={scale(){},fillRect:(...a)=>log.push(['rect',...a]),fillText:(...a)=>log.push(['text',...a]),set fillStyle(v){},set globalAlpha(v){}};
   paintSprite(ctx,ENEMY,0,0,{flash:true});
   assert.equal(log.filter(e=>e[0]==='text').length,0);
   const count=opts=>{const l=[];paintSprite({...ctx,fillRect:()=>l.push(1),fillText:()=>{}},ENEMY,0,0,opts);return l.length;};
@@ -497,4 +498,18 @@ test('the night darkens with the clock and the HUD names day and night', async (
   const {treeKind} = await import('../src/dimensional_sim/world/browser/art.js');
   assert.equal(treeKind({trees: ['.p.']}, 1, 0), 'p');
   assert.equal(treeKind({}, 1, 0), 'o', 'older frames draw oaks');
+});
+
+test('the avatar glides at an even pace, one tile per step interval, and hurries when far behind', async () => {
+  const {glide} = await import('../src/dimensional_sim/world/browser/view.js');
+  const tile = (TILE_W + TILE_H) / 2;
+  let p = {x: 0, y: 0};
+  const target = {x: TILE_W, y: 0}, xs = [];
+  for (let t = 0; t < 9; t++) { p = glide(p, target, 20, 200); xs.push(p.x); }
+  const steps = xs.map((x, i) => x - (xs[i - 1] ?? 0));
+  assert.ok(steps.every(d => Math.abs(d - steps[0]) < 1e-9), 'constant speed, no ease-in-out pulse per tile');
+  assert.ok(Math.abs(steps[0] - tile / 10) < 1e-9);
+  assert.deepEqual(glide({x: 0, y: 0}, target, 1000, 200), target, 'never overshoots');
+  const far = glide({x: 0, y: 0}, {x: tile * 5, y: 0}, 20, 200).x, near = glide({x: 0, y: 0}, {x: tile, y: 0}, 20, 200).x;
+  assert.ok(far > near * 3, 'catches up when a burst of steps lands');
 });

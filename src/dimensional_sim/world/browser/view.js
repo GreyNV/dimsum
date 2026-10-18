@@ -50,6 +50,18 @@ export function cameraView(camera, width, height, requestedScale, bounds) {
 export function follow(current, target, dt, duration = 85) {
   return current + (target - current) * (1 - Math.exp(-Math.max(0, dt) / duration));
 }
+/** Walk `current` ({x, y}) toward `target` at an even pace: one tile per step interval, so a
+ * held direction reads as one continuous walk instead of a hop-and-pause per tile. Falls
+ * further behind (a burst of steps in one frame, a slow poll) and it hurries to catch up. */
+export function glide(current, target, dt, intervalMs, tile = (TILE_W + TILE_H) / 2) {
+  const dx = target.x - current.x, dy = target.y - current.y, dist = Math.hypot(dx, dy);
+  if (dist < .01) return {x: target.x, y: target.y};
+  const pace = tile / Math.max(40, intervalMs || 200);
+  const hurry = dist > tile * 1.25 ? dist / (tile * 1.25) : 1;
+  const travel = pace * hurry * Math.max(0, dt);
+  if (travel >= dist) return {x: target.x, y: target.y};
+  return {x: current.x + dx / dist * travel, y: current.y + dy / dist * travel};
+}
 export function retainResident(cache, resident) {
   const ids = new Set(resident);
   for (const id of cache.keys()) if (!ids.has(id)) cache.delete(id);

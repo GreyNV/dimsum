@@ -101,7 +101,11 @@ class OpenWorldTests(unittest.TestCase):
                         if a.collision[yy + dy][xx + dx]:
                             g.player.x, g.player.y = xx, yy
                             g.advance(120, InputCommand(move))
-                            self.assertEqual((g.player.x, g.player.y), (xx, yy))
+                            # stays, or eases diagonally around the obstacle - never into it
+                            self.assertFalse(a.collision[g.player.y][g.player.x])
+                            self.assertIn((g.player.x - xx) * dx + (g.player.y - yy) * dy, (0, 1))
+                            if (g.player.x, g.player.y) != (xx, yy):
+                                self.assertEqual(abs(g.player.x - xx) + abs(g.player.y - yy), 2)
                             tested = True
                             break
                     if tested: break

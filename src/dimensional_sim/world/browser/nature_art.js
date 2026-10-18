@@ -51,10 +51,20 @@ export function drawBlades(ctx, blades) {
 }
 
 // --- trees -------------------------------------------------------------------
-export const LEAF = Object.freeze(['#16250f', '#1f3415', '#2b461b', '#395c22', '#4b732a', '#628c33', '#80a53f', '#a6c05a', '#cbd884']);
-export const LEAF_GLYPHS = Object.freeze(['.', ',', ':', ';', '+', '*', '%', '&', '@']);
-const BARK = ['#2e2317', '#4a3826', '#6c5435', '#937246', '#b59050'];
+/* Fine lit art. Stamps are painted RES times denser than their logical size (art.js), so a
+ * crown is built from 2x2 px leaf cells - four times the old 4x6 glyph grid - and every cell
+ * is shaded twice: once by the whole crown (a big lit ball) and once by its own leaf clump (a
+ * small lit ball), which is what makes a canopy read as many bunches of leaves instead of one
+ * flat blob. Sub-cell specks (1 px) and a dark rim do the rest. */
+export const LEAF = Object.freeze(['#0f1a0b', '#16250f', '#1f3415', '#2b461b', '#395c22', '#4b732a', '#628c33', '#80a53f', '#a6c05a', '#cbd884']);
+const OLD_BARK = ['#110d08', '#1e170f', '#2e2317', '#43331f', '#5e4a2e', '#7a6040'];
+const BARK = ['#1e170f', '#2e2317', '#4a3826', '#6c5435', '#937246', '#b59050'];
 export const TREE_W = 52, TREE_H = 70;
+export const LEAF_STEP = 2;
+const clamp01 = v => Math.max(0, Math.min(.999, v));
+/* Half-pixel cells are drawn a little oversize so they overlap their neighbours: at any
+ * render resolution no seam of background shows between them. */
+const HALF = .5, HALF_DRAW = .85;
 /** Canopy circles for a tree variant (pixel space of the 52x70 stamp). */
 export function canopyShape(variant) {
   const h = i => visualHash(variant, i, 0x7ee);
@@ -63,141 +73,179 @@ export function canopyShape(variant) {
     [38 + j(7, 2), 31 + j(8, 2), 11 + h(9) % 3], [24 + j(10, 4), 12 + j(11, 2), 11 + h(12) % 3],
     ...(h(13) % 2 ? [[34 + j(14, 2), 17 + j(15, 2), 9]] : [])];
 }
-/** Glyph cells of a canopy: [{x, y, glyph, color, light}] on the 4x6 px grid (pure).
- * `circles` and `palette` default to the round broadleaf (oak) crown. */
-export function canopyCells(variant, circles = canopyShape(variant), palette = LEAF, bottom = 50) {
-  const cells = [];
-  for (let y = 0; y < bottom; y += 6) for (let x = 0; x < TREE_W; x += 4) {
-    const n = visualHash(x, y, variant * 7 + 1);
-    // ragged rim: each cell tests a slightly larger or smaller crown
-    const grow = (unit(visualHash(x, y, variant + 3)) - .45) * 7;
-    let light = blobLight(circles.map(([cx, cy, r]) => [cx, cy, r + grow]), x + 2, y + 3);
-    if (light === null) continue;
-    // leaf clumps: low-frequency patches lighter or darker, plus a darker underside
-    const clump = unit(visualHash(Math.floor(x / 10), Math.floor(y / 11), variant + 99)) - .5;
-    light = Math.max(0, Math.min(.999, light * 1.3 - .12 + clump * .3 + (unit(n) - .5) * .16 - Math.max(0, y - 30) * .012));
-    cells.push({x, y, glyph: ramp(LEAF_GLYPHS, light), color: ramp(palette, light), light});
+/** Leaf clumps scattered over a crown: small circles [cx, cy, r] whose centres lie inside it. */
+export function leafClumps(variant, circles, size = 5, count = 34) {
+  const out = [];
+  for (let i = 0; out.length < count && i < count * 6; i++) {
+    const h = visualHash(variant, i, 0xc1a);
+    const x = (h % 1000) / 1000 * TREE_W, y = ((h >>> 10) % 1000) / 1000 * 56;
+    if (blobLight(circles, x, y) === null) continue;
+    out.push([x, y, size * (.75 + ((h >>> 20) % 50) / 100)]);
   }
+  return out;
+}
+/** Fine leaf cells of a crown: [{x, y, v, color}] on the LEAF_STEP grid (pure).
+ * The silhouette is the union of the clumps (a bumpy, leafy rim) inside the crown circles. */
+export function leafCells(variant, circles = canopyShape(variant), palette = LEAF, bottom = 52, size = 5) {
+  const clumps = leafClumps(variant, circles, size, Math.round(circles.reduce((n, [, , r]) => n + r * r, 0) / (size * size) * .9));
+  const cells = [];
+  for (let y = 0; y < bottom; y += LEAF_STEP) for (let x = 0; x < TREE_W; x += LEAF_STEP) {
+    const px = x + LEAF_STEP / 2, py = y + LEAF_STEP / 2;
+    const whole = blobLight(circles, px, py);
+    const local = blobLight(clumps, px, py);
+    if (local === null && (whole === null || blobLight(circles.map(([cx, cy, r]) => [cx, cy, r - size * .9]), px, py) === null)) continue;
+    const n = unit(visualHash(x, y, variant * 7 + 1));
+    const base = whole ?? .15;
+    // clumps lit on their own; the gaps between them sink into shade; the underside darkens
+    const v = local === null ? base * .38 : base * .56 + local * .42 - .17;
+    cells.push({x, y, v: clamp01(v + (n - .5) * .1 - Math.max(0, y - 34) * .01), color: null});
+  }
+  for (const c of cells) c.color = ramp(palette, c.v);
   return cells;
 }
-const DARK_LEAF = '#0b1408', DARK_BARK = '#140e08';
-function treeShadow(ctx, half0 = 16) {   // stepped ellipse of translucent rows at the roots
-  for (let r = 0; r < 6; r++) {
-    const half = Math.round(half0 * Math.sqrt(1 - ((r - 2.5) / 3) ** 2));
-    ctx.fillStyle = '#04080466'; ctx.fillRect(29 - half, 59 + r, half * 2, 1);
+const DARK_LEAF = '#081006', DARK_BARK = '#140e08', RIM = '#040803';
+function treeShadow(ctx, half0 = 16) {   // a soft ellipse of translucent rows at the roots
+  for (let r = 0; r < 12; r++) {
+    const half = half0 * Math.sqrt(Math.max(0, 1 - ((r - 5.5) / 6) ** 2));
+    ctx.fillStyle = '#04080440'; ctx.fillRect(28 - half, 58 + r * .5, half * 2, .5);
   }
 }
-/** Trunk between x0 and x1 from `top` to the roots: dark backing, lit west edge, flared base. */
-function trunk(ctx, variant, x0 = 20, x1 = 32, top = 40, bark = BARK, marks = null, backing = DARK_BARK) {
-  ctx.fillStyle = '#050403'; ctx.fillRect(x0 - 1, top - 1, x1 - x0 + 2, 63 - top);
-  ctx.fillStyle = backing; ctx.fillRect(x0, top, x1 - x0, 62 - top); ctx.fillRect(x0 - 3, 58, x1 - x0 + 6, 5);
-  for (let y = top; y < 62; y += 6) for (let x = x0; x < x1; x += 4) {
-    const side = (x - x0) / Math.max(4, x1 - x0 - 4), n = visualHash(x, y, variant + 5);
-    ctx.fillStyle = marks && n % 4 === 0 ? marks : ramp(bark, Math.max(0, .95 - side * .75 + (unit(n) - .5) * .2));
-    ctx.fillText(y >= 56 ? (x < x0 + 4 ? '/' : x >= x1 - 4 ? '\\' : '|') : marks && n % 4 === 0 ? '=' : n % 3 ? '|' : ':', x, y);
+/** Bark from x0 to x1, `top` to the roots: column-shaded with fine grain, knots, root flare.
+ * `bands` (birch) lays dark horizontal marks; `moss` greens the shaded side. */
+function trunk(ctx, variant, x0 = 21, x1 = 31, top = 40, bark = BARK, {bands = null, moss = null, backing = DARK_BARK} = {}) {
+  const w = x1 - x0, h = i => visualHash(variant, i, 0xba4c);
+  ctx.fillStyle = RIM;
+  ctx.fillRect(x0 - 1, top - 1, w + 2, 63 - top);
+  for (let k = 0; k < 4; k++) ctx.fillRect(x0 - 2 - k, 59 + k * .75, w + 4 + k * 2, 4 - k * .75);
+  for (let y = top; y < 62; y += HALF) {
+    const flare = y > 57 ? (y - 57) * .9 : 0;
+    for (let x = x0 - flare; x < x1 + flare; x += HALF) {
+      const side = (x - x0 + flare) / (w + flare * 2), n = visualHash(Math.round(x * 2), Math.round(y * 2), variant + 5);
+      const grain = unit(visualHash(Math.round(x * 2), Math.floor(y / 3), variant + 9)) - .5;
+      let v = .92 - side * .8 + grain * .35 + (unit(n) - .5) * .1;
+      let color = ramp(bark, clamp01(v));
+      if (moss && side > .55 && unit(visualHash(Math.round(x), Math.round(y / 2), variant + 31)) > .45) color = moss;
+      // birch: dark lenticels - short horizontal dashes, a few per hand-width of bark
+      if (bands) { const row = visualHash(Math.floor(y), 0, variant + 77); if (row % 5 === 0 && Math.abs(x - (x0 + row % w + .5)) < 1 + (row >>> 8) % 3) color = bands; }
+      ctx.fillStyle = color; ctx.fillRect(x, y, HALF_DRAW, HALF_DRAW);
+    }
+  }
+  if (!bands) {   // a knot or two
+    for (let i = 0; i < 1 + h(1) % 2; i++) {
+      const kx = x0 + 2 + h(2 + i) % Math.max(1, w - 4), ky = top + 3 + h(5 + i) % Math.max(1, 52 - top);
+      ctx.fillStyle = backing; ctx.fillRect(kx, ky, 2, 1.5); ctx.fillStyle = ramp(bark, .7); ctx.fillRect(kx, ky - .5, 2, .5);
+    }
   }
 }
-/** A crown of glyph cells: a dark silhouette (one cell of outline) under lit glyphs. */
-function crown(ctx, cells, dark = DARK_LEAF) {
-  ctx.fillStyle = '#050a04';
-  for (const c of cells) ctx.fillRect(c.x - 1, c.y - 1, 6, 8);
-  ctx.fillStyle = dark;
-  for (const c of cells) ctx.fillRect(c.x, c.y, 4, 6);
+/** A crown of fine cells: dark rim, shade-lit fill, then 1 px specks of light and shadow. */
+function crown(ctx, cells, palette = LEAF, seed = 0) {
+  const s = LEAF_STEP;
+  ctx.fillStyle = RIM;
+  for (const c of cells) ctx.fillRect(c.x - 1, c.y - 1, s + 2, s + 2);
+  for (const c of cells) { ctx.fillStyle = c.color; ctx.fillRect(c.x, c.y, s, s); }
   for (const c of cells) {
-    if (c.light < .12) continue;
-    ctx.fillStyle = c.color; ctx.fillText(c.glyph, c.x, c.y - 1);
+    const h = visualHash(c.x, c.y, seed + 0x5ec);
+    if (h % 3 === 0) { ctx.fillStyle = ramp(palette, clamp01(c.v + .14)); ctx.fillRect(c.x + (h >>> 4 & 1), c.y + (h >>> 5 & 1), 1, 1); }
+    else if (h % 5 === 1) { ctx.fillStyle = ramp(palette, clamp01(c.v - .2)); ctx.fillRect(c.x + (h >>> 6 & 1), c.y + (h >>> 7 & 1), 1, 1); }
+    if (c.v > .82 && h % 4 === 2) { ctx.fillStyle = palette[palette.length - 1]; ctx.fillRect(c.x + .5, c.y, .5, .5); }   // sun on a leaf edge
   }
 }
-/** Oak: the round broadleaf crown (the original tree). */
+/** Oak: the round broadleaf crown of many lit leaf clumps. */
 export function drawLitTree(ctx, variant) {
   treeShadow(ctx);
   trunk(ctx, variant);
-  crown(ctx, canopyCells(variant));
+  crown(ctx, leafCells(variant), LEAF, variant);
 }
 
 // Tree kinds (catalog.TREE_KINDS; the frame sends one letter per tree cell: chunk.trees).
-const PINE = ['#0a1712', '#10231a', '#173323', '#1f442e', '#2a573a', '#376b47', '#4a8257', '#669a6b', '#8db58a'];
-const BIRCH_LEAF = ['#1c2a10', '#2a3d16', '#3b561d', '#4f7024', '#668b2c', '#82a636', '#a2bf4a', '#c5d667', '#e4e89a'];
-const BIRCH_BARK = ['#6f6a5c', '#a39e8d', '#c9c5b4', '#e2dfd2', '#f4f2e8'];
-const MOSS = ['#101d0d', '#172b12', '#203b17', '#2c4e1c', '#3b6422', '#4f7b2a', '#6a9535', '#8bae48', '#b0c768'];
-const DEAD_BARK = ['#2a2620', '#463f35', '#625a4c', '#837a68', '#a49a84'];
-const STRAND = '#6a9535';
+const PINE = ['#07120d', '#0a1712', '#10231a', '#173323', '#1f442e', '#2a573a', '#376b47', '#4a8257', '#669a6b', '#8db58a'];
+const BIRCH_LEAF = ['#141f0b', '#1c2a10', '#2a3d16', '#3b561d', '#4f7024', '#668b2c', '#82a636', '#a2bf4a', '#c5d667', '#e4e89a'];
+const BIRCH_BARK = ['#5a5649', '#8b8676', '#b3ae9c', '#d3cfbf', '#e9e6da', '#f7f5ec'];
+const MOSS = ['#0b150a', '#101d0d', '#172b12', '#203b17', '#2c4e1c', '#3b6422', '#4f7b2a', '#6a9535', '#8bae48', '#b0c768'];
+const DEAD_BARK = ['#1f1c18', '#2a2620', '#463f35', '#625a4c', '#837a68', '#a49a84'];
 
-/** Pine: stacked tiers narrowing to a point, dark and cool, on a slim trunk (pure cells). */
+/** Pine: stacked drooping tiers narrowing to a point, needles streaked by the light (pure). */
 export function pineCells(variant) {
   const h = i => visualHash(variant, i, 0x917e);
   const tiers = 4 + h(1) % 2, sway = (h(2) % 5) - 2, cells = [];
-  for (let y = 2; y < 52; y += 6) {
-    const t = (y - 2) / 50, tier = (t * tiers) % 1;          // 0 at a tier's tip .. 1 at its brim
-    const half = 3 + t * 15 + tier * 6;
-    for (let x = 0; x < TREE_W; x += 4) {
-      const dx = x + 2 - (26 + sway * t);
-      if (Math.abs(dx) > half) continue;
-      const n = visualHash(x, y, variant + 41);
-      const light = Math.max(0, Math.min(.999, .62 - dx / half * .38 - tier * .22 + (unit(n) - .5) * .18));
-      cells.push({x, y, glyph: ramp(['.', ',', '^', '^', 'A', 'A', '%', '#', '@'], light), color: ramp(PINE, light), light});
+  for (let y = 2; y < 54; y += LEAF_STEP) {
+    const t = (y - 2) / 52, tier = (t * tiers) % 1;          // 0 at a tier's tip .. 1 at its brim
+    const half = 2 + t * 14 + tier * 7;
+    for (let x = 0; x < TREE_W; x += LEAF_STEP) {
+      const dx = x + 1 - (26 + sway * t);
+      // ragged brim: needle tips hang lower at random columns
+      const jag = unit(visualHash(x, Math.floor(t * tiers), variant + 13)) * 3 * tier;
+      if (Math.abs(dx) > half + jag - 1) continue;
+      const n = visualHash(x, y, variant + 41), streak = unit(visualHash(x + y, Math.floor(y / 3), variant + 3)) - .5;
+      const v = clamp01(.58 - dx / half * .4 - tier * .3 + streak * .18 + (unit(n) - .5) * .1);
+      cells.push({x, y, v, color: ramp(PINE, v)});
     }
   }
   return cells;
 }
 function drawPine(ctx, variant) {
   treeShadow(ctx, 12);
-  trunk(ctx, variant, 22, 30, 48);
-  crown(ctx, pineCells(variant), '#08130d');
+  trunk(ctx, variant, 23, 29, 48);
+  crown(ctx, pineCells(variant), PINE, variant);
 }
-/** Birch: a pale, black-banded trunk and a small light crown held high. */
+/** Birch: a pale, black-banded trunk and a small light crown of fluttering clumps held high. */
 function drawBirch(ctx, variant) {
   treeShadow(ctx, 11);
-  trunk(ctx, variant, 22, 30, 30, BIRCH_BARK, '#1b1a17', '#b9b4a2');
+  trunk(ctx, variant, 23, 29, 30, BIRCH_BARK, {bands: '#1b1a17', backing: '#b9b4a2'});
   const h = i => visualHash(variant, i, 0xb12c);
   const circles = [[26 + (h(1) % 5) - 2, 18, 12 + h(2) % 3], [18, 25, 8], [34, 24, 8 + h(3) % 2], [26, 8 + h(4) % 3, 8]];
-  crown(ctx, canopyCells(variant + 300, circles, BIRCH_LEAF, 38), '#111b08');
+  crown(ctx, leafCells(variant + 300, circles, BIRCH_LEAF, 38, 3.5), BIRCH_LEAF, variant + 300);
 }
 /** Dead tree: bare grey limbs forking up and out from a weathered trunk; a crow's nest or a
- * last dry leaf now and then. Limbs are thin pixel strokes with a dark edge, lit from the west. */
+ * last dry leaf now and then. Limbs taper in half-pixel strokes with a dark edge, lit from the west. */
 function drawDead(ctx, variant) {
   treeShadow(ctx, 12);
-  trunk(ctx, variant, 22, 30, 30 + visualHash(variant, 0, 0xdead) % 6, DEAD_BARK, null, '#3a342b');
+  const top = 30 + visualHash(variant, 0, 0xdead) % 6;
+  trunk(ctx, variant, 22, 30, top, DEAD_BARK, {backing: '#3a342b'});
   const h = i => visualHash(variant, i, 0xdead);
   const parts = [], buds = [];   // all dark edges first, then the lit wood, so limbs read as solid
   const limb = (x, y, angle, length, width, depth, salt) => {
-    const steps = Math.max(2, Math.round(length / 2));
-    for (let s = 0; s < steps; s++)
-      parts.push([Math.round(x + Math.cos(angle) * s * 2), Math.round(y - Math.sin(angle) * s * 2), width,
-        ramp(DEAD_BARK, Math.cos(angle) < 0 ? .85 : .5)]);
-    const ex = x + Math.cos(angle) * steps * 2, ey = y - Math.sin(angle) * steps * 2;
+    const steps = Math.max(3, Math.round(length));
+    for (let s = 0; s < steps; s++) {
+      const w = width * (1 - s / steps * .45);
+      parts.push([x + Math.cos(angle) * s, y - Math.sin(angle) * s, w, ramp(DEAD_BARK, Math.cos(angle) < 0 ? .88 : .55)]);
+    }
+    const ex = x + Math.cos(angle) * steps, ey = y - Math.sin(angle) * steps;
     if (depth > 0) for (let k = 0; k < 2; k++) {   // fork in two, thinner and shorter
       const turn = (k ? 1 : -1) * (.35 + (h(salt + k) % 30) / 100);
-      limb(ex, ey, angle + turn, length * (.55 + (h(salt + k + 5) % 20) / 100), Math.max(1, width - 1), depth - 1, salt * 3 + k + 11);
+      limb(ex, ey, angle + turn, length * (.55 + (h(salt + k + 5) % 20) / 100), Math.max(.5, width * .62), depth - 1, salt * 3 + k + 11);
     }
-    else if (h(salt) % 7 === 0) buds.push([Math.round(ex), Math.round(ey) + 1]);
+    else if (h(salt) % 7 === 0) buds.push([ex, ey + 1]);
   };
-  const top = 30 + h(0) % 6, limbs = 2 + h(1) % 2;
+  const limbs = 2 + h(1) % 2;
   for (let i = 0; i < limbs; i++) {
     const angle = Math.PI / 2 + (i - (limbs - 1) / 2) * (.55 + (h(2 + i) % 25) / 100);
-    limb(26, top + 2 + i * 3, angle, 14 + h(5 + i) % 8, 3, 2, 17 + i * 31);
+    limb(26, top + 2 + i * 3, angle, 14 + h(5 + i) % 8, 3, 3, 17 + i * 31);
   }
   ctx.fillStyle = '#0a0806';
-  for (const [x, y, w] of parts) ctx.fillRect(x - 1, y - 1, w + 2, w + 2);
-  for (const [x, y, w, color] of parts) { ctx.fillStyle = color; ctx.fillRect(x, y, w, w); }
-  ctx.fillStyle = '#9b7944';
-  for (const [x, y] of buds) ctx.fillRect(x, y, 2, 2);
-  if (h(9) % 4 === 0) {   // a crow's nest in a fork
-    ctx.fillStyle = '#0a0806'; ctx.fillRect(25, top - 9, 9, 5);
-    ctx.fillStyle = '#5a4128'; ctx.fillText('~', 26, top - 10); ctx.fillText('~', 29, top - 10);
+  for (const [x, y, w] of parts) ctx.fillRect(x - w / 2 - .5, y - .5, w + 1, w + 1);
+  for (const [x, y, w, color] of parts) { ctx.fillStyle = color; ctx.fillRect(x - w / 2, y, w, w); }
+  for (const [x, y, w] of parts) if (w > 1.2) { ctx.fillStyle = DEAD_BARK[5]; ctx.fillRect(x - w / 2, y, .5, w); }   // lit west edge
+  for (const [x, y] of buds) { ctx.fillStyle = '#5a4128'; ctx.fillRect(x - .5, y, 2, 1.5); ctx.fillStyle = '#c39a62'; ctx.fillRect(x - .5, y, 1, .5); }
+  if (h(9) % 4 === 0) {   // a crow's nest in a fork: woven twigs
+    ctx.fillStyle = '#0a0806'; ctx.fillRect(23, top - 9, 9, 4);
+    for (let i = 0; i < 14; i++) { ctx.fillStyle = i % 3 ? '#5a4128' : '#8a6a44'; ctx.fillRect(23.5 + (h(40 + i) % 16) / 2, top - 8.5 + (h(60 + i) % 6) / 2, 1.5, .5); }
   }
 }
-/** Old mossy tree: a huge low crown in moss greens, a thick trunk, strands hanging down. */
+/** Old mossy tree: a huge low crown of big moss clumps, a thick trunk, strands hanging down. */
 function drawOld(ctx, variant) {
   treeShadow(ctx, 20);
-  trunk(ctx, variant, 17, 35, 38, BARK, '#3b6422');
+  trunk(ctx, variant, 17, 35, 38, OLD_BARK, {moss: '#2c4e1c'});
   const h = i => visualHash(variant, i, 0x01d);
   const circles = [[26, 22, 20 + h(1) % 3], [10, 30, 11], [42, 30, 11], [18, 12, 12], [34, 12 + h(2) % 3, 12]];
-  const cells = canopyCells(variant + 700, circles, MOSS, 44);
-  crown(ctx, cells, '#0a1408');
-  for (let i = 0; i < 6; i++) {   // hanging moss below the crown's rim
-    const x = 6 + (h(10 + i) % 40), top = 34 + h(20 + i) % 6, len = 2 + h(30 + i) % 3;
-    for (let k = 0; k < len; k++) { ctx.fillStyle = k === len - 1 ? '#8bae48' : STRAND; ctx.fillText(k % 2 ? ':' : '|', x, top + k * 5); }
+  crown(ctx, leafCells(variant + 700, circles, MOSS, 46, 6.5), MOSS, variant + 700);
+  for (let i = 0; i < 11; i++) {   // hanging moss below the crown's rim, swaying a little
+    const x = 5 + (h(10 + i) % 42), top = 34 + h(20 + i) % 7, len = 5 + h(30 + i) % 9;
+    for (let k = 0; k < len; k += .5) {
+      const sx = x + Math.sin(k * .5 + i) * .5;
+      ctx.fillStyle = '#081006'; ctx.fillRect(sx - .5, top + k, 1.5, .5);
+      ctx.fillStyle = k > len - 1.5 ? '#b0c768' : k % 2 < 1 ? '#6a9535' : '#4f7b2a'; ctx.fillRect(sx, top + k, .5, .5);
+    }
   }
 }
 /** Tree art by catalog tree kind letter (session.TREE_LETTERS); unknown letters draw an oak. */
@@ -205,22 +253,27 @@ export const TREE_ART = Object.freeze({o: drawLitTree, p: drawPine, b: drawBirch
 export const TREE_KIND_LETTERS = Object.freeze({oak: 'o', pine: 'p', birch: 'b', dead: 'd', old: 'm'});
 
 // --- rocks -------------------------------------------------------------------
-const STONE = ['#252a25', '#363d36', '#4b544b', '#646f63', '#828c7f', '#a3ab9b', '#c8ccbb'];
-const STONE_GLYPHS = ['.', ':', ';', 'o', 'O', '0', '@'];
+const STONE = ['#1b1f1b', '#252a25', '#363d36', '#4b544b', '#646f63', '#828c7f', '#a3ab9b', '#c8ccbb'];
+/** A boulder in half-pixel cells: lit like a ball but broken into flat facets, with cracks,
+ * lichen and a mossy cap. */
 export function drawLitRock(ctx, variant) {
   const h = i => visualHash(variant, i, 0x70c);
   const circles = [[15 + h(1) % 3, 17, 10 + h(2) % 3], [9 + h(3) % 3, 20, 6], [22, 20, 6 + h(4) % 3]];
-  for (let r = 0; r < 3; r++) { ctx.fillStyle = '#04080466'; ctx.fillRect(3 - r, 24 + r, 27 + r * 2, 1); }
+  for (let r = 0; r < 6; r++) { ctx.fillStyle = '#04080440'; ctx.fillRect(3 - r * .5, 24 + r * .5, 27 + r, .5); }
   const cells = [];
-  for (let y = 4; y < 26; y += 6) for (let x = 0; x < 32; x += 4) {
-    const light = blobLight(circles, x + 2, y + 3, .8);
-    if (light !== null) cells.push({x, y, v: Math.max(0, Math.min(.999, light + (unit(visualHash(x, y, variant)) - .5) * .15))});
+  for (let y = 2; y < 27; y += HALF) for (let x = 0; x < 32; x += HALF) {
+    const light = blobLight(circles, x + .25, y + .25, .8);
+    if (light === null) continue;
+    const facet = unit(visualHash(Math.floor(x / 4 + y / 7), Math.floor(y / 3.5 - x / 9), variant + 1)) - .5;
+    const crack = Math.abs(((x * .7 + y * 1.3 + h(7) % 9) % 9) - 4.5) < .3 && unit(visualHash(Math.floor(x), Math.floor(y / 2), variant)) > .5;
+    cells.push({x, y, v: clamp01(Math.round((light + facet * .22) * 6) / 6 + (unit(visualHash(x * 2, y * 2, variant)) - .5) * .06), crack});
   }
-  ctx.fillStyle = '#050a04';
-  for (const c of cells) ctx.fillRect(c.x - 1, c.y - 1, 6, 8);
+  ctx.fillStyle = RIM;
+  for (const c of cells) ctx.fillRect(c.x - .75, c.y - .75, 2, 2);
   for (const c of cells) {
-    ctx.fillStyle = ramp(STONE, c.v * .45); ctx.fillRect(c.x, c.y, 4, 6);
-    ctx.fillStyle = ramp(STONE, c.v); ctx.fillText(ramp(STONE_GLYPHS, c.v), c.x, c.y - 1);
+    const n = visualHash(c.x * 2, c.y * 2, variant + 3);
+    ctx.fillStyle = c.crack ? STONE[1] : c.v > .55 && c.y < 13 && n % 3 === 0 ? '#4f6b34' : n % 41 === 0 ? '#9c9a6a' : ramp(STONE, c.v);
+    ctx.fillRect(c.x, c.y, HALF_DRAW, HALF_DRAW);
   }
 }
 

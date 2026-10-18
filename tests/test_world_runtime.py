@@ -344,12 +344,40 @@ class DiagonalMovementTests(unittest.TestCase):
         chunk = game.world.peek(game.player.chunk)
         object.__setattr__(chunk, "asset", patched)
         game._move("northeast")
+        self.assertEqual((game.player.x, game.player.y), (x + 1, y - 1), "passes a lone trunk's corner")
+        game.player.x, game.player.y = x, y
+        rows[y - 1][x + 1] = True      # now a wall along the north: slide east
+        object.__setattr__(chunk, "asset", replace(a, collision=tuple(tuple(r) for r in rows)))
+        game._move("northeast")
         self.assertEqual((game.player.x, game.player.y), (x + 1, y), "slides east instead of squeezing past")
         rows[y][x + 2] = True
         rows[y - 1][x + 1] = True
         object.__setattr__(chunk, "asset", replace(a, collision=tuple(tuple(r) for r in rows)))
         game._move("northeast")
         self.assertEqual((game.player.x, game.player.y), (x + 1, y), "fully blocked: stays")
+
+    def test_a_blocked_step_eases_around_a_lone_trunk(self):
+        from dataclasses import replace
+        game = self.open_game()
+        x, y = game.player.x, game.player.y
+        a = game.current_chunk().asset
+        chunk = game.world.peek(game.player.chunk)
+        rows = [list(r) for r in a.collision]
+        for yy in range(y - 2, y + 3):
+            for xx in range(x - 1, x + 5):
+                if 0 <= yy < a.height and 0 <= xx < a.width:
+                    rows[yy][xx] = False
+        rows[y][x + 1] = True          # a trunk straight ahead
+        rows[y + 1][x + 1] = True      # and a bush south of it: only the north side is open
+        object.__setattr__(chunk, "asset", replace(a, collision=tuple(tuple(r) for r in rows)))
+        game._move("east")
+        self.assertEqual((game.player.x, game.player.y), (x + 1, y - 1), "steps around, never into, the trunk")
+        game.player.x, game.player.y = x, y
+        rows[y - 1][x] = True          # both sides shut: it stops
+        rows[y - 1][x + 1] = True
+        object.__setattr__(chunk, "asset", replace(a, collision=tuple(tuple(r) for r in rows)))
+        game._move("east")
+        self.assertEqual((game.player.x, game.player.y), (x, y))
 
     def test_input_accepts_diagonals_and_saves_them(self):
         import json

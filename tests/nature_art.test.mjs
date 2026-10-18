@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {TILE_W, TILE_H} from '../src/dimensional_sim/world/browser/view.js';
-import {LEAF, LEAF_GLYPHS, TREE_W, blobLight, canopyCells, grassBlades, ripples, drawReflection, drawShores}
+import {LEAF, LEAF_STEP, TREE_W, blobLight, leafCells, leafClumps, canopyShape, grassBlades, ripples, drawReflection, drawShores}
   from '../src/dimensional_sim/world/browser/nature_art.js';
 
 test('lit shapes: the upper left is brighter than the lower right, outside is null', () => {
@@ -10,19 +10,20 @@ test('lit shapes: the upper left is brighter than the lower right, outside is nu
   assert.equal(blobLight(ball, 40, 40), null);
 });
 
-test('canopies are deterministic, inside the stamp, and draw from the ramps', () => {
+test('canopies are fine leaf cells: deterministic, inside the stamp, lit clump by clump', () => {
   for (let v = 0; v < 8; v++) {
-    const cells = canopyCells(v);
-    assert.deepEqual(cells, canopyCells(v));
-    assert.ok(cells.length > 40, `variant ${v} has a full crown`);
+    const cells = leafCells(v);
+    assert.deepEqual(cells, leafCells(v));
+    assert.ok(cells.length > 300, `variant ${v} has a dense crown (${cells.length} cells)`);
     for (const c of cells) {
-      assert.ok(c.x >= 0 && c.x < TREE_W && c.y >= 0 && c.y < 50);
-      assert.ok(LEAF_GLYPHS.includes(c.glyph) && LEAF.includes(c.color));
+      assert.ok(c.x >= 0 && c.x < TREE_W && c.y >= 0 && c.y < 52 && c.x % LEAF_STEP === 0);
+      assert.ok(LEAF.includes(c.color));
     }
-    const lights = cells.map(c => c.light);
+    const lights = cells.map(c => c.v);
     assert.ok(Math.max(...lights) - Math.min(...lights) > .5, 'real light and shade');
+    assert.ok(leafClumps(v, canopyShape(v)).length > 20, 'many leaf clumps');
   }
-  assert.notDeepEqual(canopyCells(0), canopyCells(1));
+  assert.notDeepEqual(leafCells(0), leafCells(1));
 });
 
 test('grass blades and ripples stay inside their tile and are stable', () => {
@@ -61,7 +62,7 @@ test('every tree kind draws its own stamp and pines stay inside the stamp', asyn
     const cells = pineCells(v);
     assert.deepEqual(cells, pineCells(v), 'deterministic');
     assert.ok(cells.length > 40);
-    for (const c of cells) assert.ok(c.x >= 0 && c.x < TREE_W && c.y >= 0 && c.y < 52);
+    for (const c of cells) assert.ok(c.x >= 0 && c.x < TREE_W && c.y >= 0 && c.y < 54);
     const top = Math.min(...cells.map(c => c.y)), widthAt = y => cells.filter(c => c.y === y).length;
     assert.ok(widthAt(top) < widthAt(top + 36), 'a pine narrows to its tip');
   }

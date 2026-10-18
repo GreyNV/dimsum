@@ -14,8 +14,9 @@ from .animation import (animations_from_dict, animations_to_dict, default_animat
 from .models import Cell, ChunkKey, DELTAS, DIRECTIONS, fields, identifier, integer
 
 # Manual movement also accepts the four diagonals. A diagonal is two cardinal half-steps taken
-# together; it never cuts a corner between two blocked cells and slides along a wall when only
-# one half-step is open. It takes DIAGONAL_PERCENT of the cardinal interval (about sqrt 2), so
+# together; it never cuts a corner between two blocked cells, passes the corner of a lone
+# obstacle (a trunk) and slides along a wall. A blocked cardinal step eases around a lone
+# obstacle the same way (_corner_assist), so the avatar does not snag on every tree. It takes DIAGONAL_PERCENT of the cardinal interval (about sqrt 2), so
 # speed over ground stays even. Facing stays cardinal (the sprite has four facings).
 DIAGONALS = {"northeast": ("north", "east"), "southeast": ("south", "east"),
              "southwest": ("south", "west"), "northwest": ("north", "west")}
@@ -294,6 +295,8 @@ class Exploration:
         start = (self.player.chunk, self.player.x, self.player.y)
         if direction not in DIAGONALS:
             landing = self._step_target(*start, direction)
+            if landing is None:
+                landing = self._corner_assist(start, direction)
             if landing is not None:
                 self._place(*landing)
             return
@@ -305,11 +308,41 @@ class Exploration:
             if landing is not None and landing == self._step_target(*via_v, horizontal):
                 self._place(*landing)
                 return
+        # One half-step blocked by a lone obstacle (a trunk): pass its corner diagonally.
+        if (via_h is None) != (via_v is None):
+            landing = self._step_target(*via_v, horizontal) if via_h is None else self._step_target(*via_h, vertical)
+            if landing is not None:
+                self._place(*landing)
+                return
         # Corner blocked: slide along whichever half-step is open (horizontal first).
         for landing in (via_h, via_v):
             if landing is not None:
                 self._place(*landing)
                 return
+
+    def _corner_assist(self, start, direction):
+        """A cardinal step into a blocked cell (a tree trunk, a rock corner) eases around it:
+        when the cell beside the avatar and the cell beyond the obstacle on that side are both
+        open, the avatar steps diagonally past the corner instead of stopping dead. The side
+        that opens up first wins; with both open, the side whose way ahead stays clear longer,
+        then north/west. Never squeezes between two blocked cells."""
+        sides = ("north", "south") if direction in ("east", "west") else ("west", "east")
+        options = []
+        for order, side in enumerate(sides):
+            beside = self._step_target(*start, side)
+            if beside is None:
+                continue
+            past = self._step_target(*beside, direction)
+            if past is None:
+                continue
+            run, cell = 0, past
+            while run < 3:
+                cell = self._step_target(*cell, direction)
+                if cell is None:
+                    break
+                run += 1
+            options.append((-run, order, past))
+        return min(options)[2] if options else None
 
     def advance(self, milliseconds, command=InputCommand()):
         integer(milliseconds, "elapsed milliseconds", 0)
