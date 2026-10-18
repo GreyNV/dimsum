@@ -3,7 +3,7 @@
 import {TILE_W, TILE_H, visualHash} from './view.js';
 import {setupText} from './art.js';
 import {ACTOR_FOOT, FACING_ANGLE, OUTLINE, drawShadow, paintSprite, spriteSize} from './sprites.js';
-import {ENEMY_FINE, enemySprite} from './ascii_actors.js';
+import {ENEMY_FRAMES, SIDE_ON, drawPainted, enemyCanvas, flashCanvas} from './painted.js';
 
 // 11 columns x 7 rows = 44x49 px.
 export const ENEMY = Object.freeze({paint: [
@@ -44,14 +44,15 @@ export const ENEMY_SPRITES = Object.freeze({boar: ENEMY, lurker: LURKER, skeleto
 export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying = null, maxHp = 3, reducedMotion = false, ghost = false, reflection = false, west = false} = {}) {
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
-  // fine ASCII sprites sized against the avatar (ascii_actors.js); side-on ones face the avatar
-  const kind = ENEMY_FINE[target.sprite] ? target.sprite : 'boar';
-  const sprite = enemySprite(kind, west);
+  const sprite = ENEMY_SPRITES[target.sprite] || ENEMY;
   const {width, height} = spriteSize(sprite);
   const seed = visualHash(target.x, target.y, 77);
   const breathe = reducedMotion ? 0 : Math.floor((clock + seed % 1000) / 500) % 2;
   const shake = !reducedMotion && hit < 160 ? (Math.floor(hit / 40) % 2 ? 2 : -2) : 0;
-  const float = kind === 'wisp' ? (reducedMotion ? -8 : -8 + Math.round(3 * Math.sin((clock + seed % 900) / 260))) : 0;
+  const float = sprite === WISP ? (reducedMotion ? -8 : -8 + Math.round(3 * Math.sin((clock + seed % 900) / 260))) : 0;
+  const kind = ENEMY_FRAMES[target.sprite] ? target.sprite : 'boar';
+  const painted = enemyCanvas(kind, breathe, west);
+  if (painted) return drawPaintedEnemy(ctx, target, painted, kind, x, y, {clock, hit, dying, maxHp, reducedMotion, ghost, reflection, shake, float: kind === 'wisp' ? float * .7 : float, seed, breathe, west});
   const left = x - width / 2 + shake, top = y + ACTOR_FOOT - height + breathe + float;
   if (dying !== null) {
     paintSprite(ctx, sprite, left, top - Math.round(dying * 6), {dissolve: dying, alpha: 1 - dying * .6, seed});
@@ -64,29 +65,74 @@ export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying =
     return {left, top, width, height};
   }
   if (reflection) { paintSprite(ctx, sprite, left, top, {seed}); return {left, top, width, height}; }
-  if (kind === 'wisp') {   // a soft cold halo instead of a shadow on the ground
+  if (sprite === WISP) {   // a soft cold halo instead of a shadow on the ground
     const glow = ctx.createRadialGradient(x, top + height / 2, 2, x, top + height / 2, 26);
     glow.addColorStop(0, '#cfe6ff55'); glow.addColorStop(1, '#cfe6ff00');
     ctx.fillStyle = glow; ctx.fillRect(x - 26, top + height / 2 - 26, 52, 52);
     drawShadow(ctx, x, y, 7);
-  } else drawShadow(ctx, x, y, kind === 'skeleton' ? 7 : kind === 'lurker' ? 16 : 14);
+  } else drawShadow(ctx, x, y, 17);
   paintSprite(ctx, sprite, left, top, {flash: hit < 110, seed});
-  // Living eyes: an ember glint in the boar's eye, cold light in the bones' sockets.
-  const [cw, ch] = sprite.cell || [4, 7];
-  const glint = (c, r, color, r0 = 1.2) => {
-    const gx = left + (c + .5) * cw, gy = top + (r + .5) * ch;
-    const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, r0 * 2);
-    g.addColorStop(0, color); g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g; ctx.fillRect(gx - r0 * 2, gy - r0 * 2, r0 * 4, r0 * 4);
-  };
-  if (hit >= 110 && kind === 'boar') {
-    ctx.save(); ctx.globalAlpha = reducedMotion ? .7 : .55 + .3 * Math.sin((clock + seed % 500) / 190);
-    glint(west ? sprite.paint[0].length - 15 : 14, 3, 'rgba(255, 190, 80, .9)');
+  // Breath and horn glints distinguish a living boar from a static encounter prop.
+  if (hit >= 110 && sprite === ENEMY) {
+    ctx.fillStyle = '#fff0c2';
+    ctx.fillRect(left + 5, top + 8, 2, 3);
+    ctx.fillRect(left + width - 7, top + 8, 2, 3);
+    if (!reducedMotion) {
+      ctx.save(); ctx.globalAlpha = .25 + .25 * Math.sin((clock + seed % 500) / 190);
+      ctx.fillStyle = '#f1d2be';
+      ctx.fillRect(x - 7, top + 31, 3, 2);
+      ctx.fillRect(x + 5, top + 31, 3, 2);
+      ctx.restore();
+    }
+  }
+  if (hit >= 110 && sprite === SKELETON) {   // cold eye-light, flickering
+    ctx.save(); ctx.globalAlpha = reducedMotion ? .8 : .55 + .45 * Math.abs(Math.sin((clock + seed % 700) / 230));
+    ctx.fillStyle = '#bff3ff';
+    ctx.fillRect(left + 4 * 4 + 1, top + 7 + 3, 2, 2); ctx.fillRect(left + 6 * 4 + 1, top + 7 + 3, 2, 2);
     ctx.restore();
   }
-  if (hit >= 110 && kind === 'skeleton') {
+  drawHealth(ctx, x, top - 7, target.hp, Math.max(maxHp, target.hp));
+  return {left, top, width, height};
+}
+
+/** The painted enemy (painted.js): same placement, flash, ghost, reflection and dying rules. */
+function drawPaintedEnemy(ctx, target, painted, kind, x, y, {clock, hit, dying, maxHp, reducedMotion, ghost, reflection, shake, float, seed, breathe, west}) {
+  const [width, height] = ENEMY_FRAMES[kind];
+  const left = x - width / 2 + shake, top = y + ACTOR_FOOT - height + float;
+  const key = `enemy|${kind}|${breathe}|${west && SIDE_ON.has(kind) ? 'w' : 'e'}`;
+  if (dying !== null) {   // sinks a little and fades as it dissolves
+    drawPainted(ctx, painted, left, top - Math.round(dying * 6), 1 - dying);
+    return {left, top, width, height};
+  }
+  const flash = hit < 110 ? flashCanvas(painted, key) : painted;
+  if (ghost) {
+    drawPainted(ctx, flash, left, top, .42);
+    drawHealth(ctx, x, top - 7, target.hp, Math.max(maxHp, target.hp));
+    return {left, top, width, height};
+  }
+  if (reflection) { drawPainted(ctx, painted, left, top); return {left, top, width, height}; }
+  if (kind === 'wisp') {   // a soft cold halo instead of a shadow on the ground
+    const glow = ctx.createRadialGradient(x, top + 9, 1, x, top + 9, 17);
+    glow.addColorStop(0, '#cfe6ff55'); glow.addColorStop(1, '#cfe6ff00');
+    ctx.fillStyle = glow; ctx.fillRect(x - 17, top - 8, 34, 34);
+    drawShadow(ctx, x, y, 4);
+  } else drawShadow(ctx, x, y, kind === 'wolf' ? 15 : kind === 'lurker' ? 16 : kind === 'skeleton' ? 7 : 15);
+  drawPainted(ctx, flash, left, top);
+  if (hit >= 110 && !reducedMotion && kind === 'boar') {   // breath puffs from the snout
+    ctx.save(); ctx.globalAlpha = .18 + .18 * Math.sin((clock + seed % 500) / 190);
+    ctx.fillStyle = '#f1e2d6';
+    const nose = west ? left + 1 : left + width - 1;
+    ctx.beginPath(); ctx.ellipse(nose + (west ? -1.6 : 1.6), top + 13.4, 1.4, .8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  if (hit >= 110 && kind === 'skeleton') {   // cold eye-light, flickering
     ctx.save(); ctx.globalAlpha = reducedMotion ? .8 : .55 + .45 * Math.abs(Math.sin((clock + seed % 700) / 230));
-    glint(3, 1, 'rgba(160, 235, 255, .9)', 1); glint(5, 1, 'rgba(160, 235, 255, .9)', 1);
+    for (const s of [-1, 1]) {
+      const ex = left + 12 + s * 1.1, ey = top + 3.6;
+      const g = ctx.createRadialGradient(ex, ey, 0, ex, ey, 1.3);
+      g.addColorStop(0, '#e8fbff'); g.addColorStop(.45, '#8fe3ff'); g.addColorStop(1, 'rgba(143,227,255,0)');
+      ctx.fillStyle = g; ctx.fillRect(ex - 1.3, ey - 1.3, 2.6, 2.6);
+    }
     ctx.restore();
   }
   drawHealth(ctx, x, top - 7, target.hp, Math.max(maxHp, target.hp));

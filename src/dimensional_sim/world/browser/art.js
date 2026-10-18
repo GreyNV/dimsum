@@ -4,6 +4,9 @@
  */
 import {TILE_W, TILE_H, CELL_W, CELL_H, visualHash} from './view.js';
 import {paintParts} from './sprites.js';
+import {paintedResolution} from './painted.js';
+import {asciify, asciiReady} from './ascii_art.js';
+import {structureCanvas} from './painted_props.js';
 import {SHALLOW_BG, WATER_BG, blooms, drawBlooms, drawFlagstones, drawPath, drawPlanks, drawRubble, drawScorch, drawBlades, drawReflection, drawShores, isWater, drawLitRock, drawRipples, grassBlades, ripples, TREE_ART, withDetail} from './nature_art.js';
 export const PALETTE = Object.freeze({
   void: '#11180f', floor: '#172011', path: '#242418',
@@ -106,7 +109,7 @@ export let RES = 2;
 export function setResolution(res) {
   const next = Math.max(1, Math.min(4, Math.round(res)));
   if (next !== RES) { RES = next; stamps.clear(); }
-
+  paintedResolution(RES);
   return RES;
 }
 /** A canvas `width` x `height` logical pixels, backed at RES, with the context scaled. */
@@ -122,17 +125,23 @@ function surface(width, height, createCanvas) {
 export function put(ctx, canvas, x, y) {
   ctx.drawImage(canvas, x, y, canvas.lw ?? canvas.width, canvas.lh ?? canvas.height);
 }
-function stamp(key, width, height, draw, createCanvas = defaultCanvas) {
+function stamp(key, width, height, draw, createCanvas = defaultCanvas, {ascii = false} = {}) {
   let canvas = stamps.get(key);
   if (!canvas) {
     const made = surface(width, height, createCanvas);
     canvas = made.canvas; setupText(made.ctx); draw(made.ctx);
+    // trees and rocks are shaded as pictures, then shown as text (ascii_art.js)
+    if (ascii && createCanvas === defaultCanvas && asciiReady()) canvas = Object.assign(asciify(canvas, width, height, RES, ascii === true ? {lift: 1.3, whiten: .06} : ascii), {lw: width, lh: height});
     stamps.set(key, canvas);
   }
   return canvas;
 }
 export function clearStamps() { stamps.clear(); }
 export function stampCount() { return stamps.size; }
+/* Ground in text too: blades become strokes, earth and stone sparse dots, over a near-black base,
+ * with light read on one fixed scale so neighbouring tiles match. Cells divide the 24 x 28 tile. */
+const GROUND_ASCII = {cell: [1.5, 28 / 11], ground: false, absolute: [.04, .3], base: '#0b1009', lift: 1.45, edges: false, whiten: 0,
+  glyphs: " .'`,:;-!|/\\"};
 function tileStamp(glyph, variant, createCanvas) {
   const terrain = '=;o~x:w%H*F'.includes(glyph) ? glyph : '.';
   return stamp(`tile:${terrain}:${variant}`, TILE_W, TILE_H, ctx => {
@@ -155,7 +164,7 @@ function tileStamp(glyph, variant, createCanvas) {
     }
     if (grassy) drawBlades(ctx, grassBlades(terrain === '*' ? '.' : terrain, variant, STAMP_SEED));
     if (terrain === '*') drawBlooms(ctx, blooms(variant, STAMP_SEED));
-  }, createCanvas);
+  }, createCanvas, {ascii: GROUND_ASCII});
 }
 /* Trees come in sizes: each kind has its own range (pines and old trees tower, dead trees and
  * birches stay slimmer), picked per variant, so a forest is never a row of identical lollipops
@@ -170,7 +179,7 @@ function treeStamp(variant, createCanvas, kind = 'o') {
   return stamp(`tree:${known}:${variant}`, 52 * scale, 70 * scale, ctx => {
     ctx.scale(scale, scale);
     withDetail(scale, () => draw(ctx, variant));
-  }, createCanvas);
+  }, createCanvas, {ascii: true});
 }
 /** Where a tree stamp goes for the tile whose top-left is (px, py): the roots (stamp 26, 62)
  * on the tile's lower middle. */
@@ -180,6 +189,8 @@ export function treeAt(px, py, seed, createCanvas = defaultCanvas, kind = 'o') {
 }
 /** {canvas, dx, dy}: the stamp and its offset from the tile's top-left corner. */
 function structureStamp(glyph, createCanvas) {
+  const painted = createCanvas === defaultCanvas ? structureCanvas(glyph) : null;
+  if (painted?.canvas) return {canvas: painted.canvas, dx: 12 - painted.w / 2 - painted.canvas.pad, dy: 24 - painted.h - painted.canvas.pad};
   const art = STRUCTURE_ART[glyph], cols = art.paint[0].length, rows = art.paint.length;
   const width = Math.max(32, cols * CELL_W + 2), height = Math.max(28, rows * CELL_H + 2);
   const canvas = stamp(`site:${glyph}`, width, height, ctx => {
@@ -194,7 +205,7 @@ function structureStamp(glyph, createCanvas) {
   return {canvas, dx: -4 - Math.round((width - 32) / 2), dy: -4 - (height - 28)};
 }
 function rockStamp(variant, createCanvas) {
-  return stamp(`rock:${variant}`, 32, 28, ctx => drawLitRock(ctx, variant), createCanvas);
+  return stamp(`rock:${variant}`, 32, 28, ctx => drawLitRock(ctx, variant), createCanvas, {ascii: true});
 }
 /** Tree whose logical tile top-left is (px, py). The trunk sits over the blocking
  * cell; canopy overhang is visual. Reused to repaint canopies in front of actors. */

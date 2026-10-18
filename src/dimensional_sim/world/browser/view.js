@@ -4,7 +4,7 @@ export const TILE_H = 28;
 export const CELL_W = 4;
 export const CELL_H = 7;
 /** Default zoom frames a fight legibly; players can zoom out to survey terrain. */
-export const ZOOM = Object.freeze({min: .7, initial: 1.6, max: 3});
+export const ZOOM = Object.freeze({min: .8, initial: 2.4, max: 3.6});
 export const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 /** Eight movement directions (screen y grows south), in 45-degree sectors from east. */
 export const MOVES = Object.freeze(['east', 'southeast', 'south', 'southwest', 'west', 'northwest', 'north', 'northeast']);

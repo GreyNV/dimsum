@@ -30,6 +30,20 @@ avatar snags on trees; the resolution is very low for what the technique can do.
 Tests: test_world_runtime (corner assist), test_world_browser, nature_art.test.mjs,
 browser_view.test.mjs (RES surfaces, glide).
 
+## ASCII shader (2026-10-18, after Andrew's reference video "ASCII MMORPG")
+Reference: a lit 3D scene read back as text - dense small glyphs on near-black, letters for the
+mid tones and highlights, stroke glyphs along edges, colour from the scene, grass as green strokes.
+- `ascii_art.asciify`: every painted actor/prop (painted.js), tree and rock stamp, and every ground
+  tile is shaded as a hidden picture, then read in 1.4 x 2.5 px character cells. Silhouette edges
+  (Sobel on coverage) and strong light steps become '|' '-' '_' '/' '\'; other cells take a glyph
+  of matching measured ink (GLYPHS ramp, stable variety among equal weights); colour = the cell's
+  colour lifted toward the light (actors whiten more). No solid backing - a soft blurred dark ground
+  under figures keeps them readable. Ground tiles use stroke/dot glyphs only on a near-black base,
+  light read on one fixed scale so tiles match.
+- The painted actors and props (realistic proportions, varied tree sizes) are the source pictures.
+- Default zoom 2.4 so figures are big enough to read as text.
+- Still vector, to convert next: fists, weapon shafts, punch lines, flames.
+
 ## Back to ASCII (2026-10-18)
 Andrew: the painted art lost the vibe and left ASCII behind. Decision: restore the glyph look and
 keep the movement fixes and sharper rendering; rebuild detail as finer glyph art; keep the scale

@@ -37,22 +37,13 @@ const FLASH = '#fff4dc';
 const MIRROR = {'/': '\\', '\\': '/', '(': ')', ')': '(', '<': '>', '>': '<', '[': ']', ']': '['};
 const mirrorRow = row => [...row].reverse().map(c => MIRROR[c] ?? c).join('');
 
-export const mirrorSprite = s => ({...s, paint: s.paint.map(mirrorRow), glyph: s.glyph.map(mirrorRow)});
+export const mirrorSprite = s => ({paint: s.paint.map(mirrorRow), glyph: s.glyph.map(mirrorRow)});
 
 /** Unit direction angle per facing (east = 0, clockwise on screen). */
 export const FACING_ANGLE = Object.freeze({east: 0, south: Math.PI / 2, west: Math.PI, north: -Math.PI / 2});
 
-/** A sprite's cell size: the classic 4x7 cells, or its own `cell` [w, h] (the fine ASCII
- * sprites, ascii_actors.js). Glyphs are set at the cell height. */
-export const cellOf = sprite => sprite.cell || [CELL_W, CELL_H];
-function cellFont(ctx, sprite) {
-  if (!sprite.cell) return;
-  ctx.font = `${sprite.cell[1] * 1.06}px Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace`;
-  ctx.textBaseline = 'top'; ctx.textAlign = 'left';
-}
 export function spriteSize(sprite) {
-  const [cw, ch] = cellOf(sprite);
-  return {width: sprite.paint[0].length * cw, height: sprite.paint.length * ch};
+  return {width: sprite.paint[0].length * CELL_W, height: sprite.paint.length * CELL_H};
 }
 
 /**
@@ -60,44 +51,39 @@ export function spriteSize(sprite) {
  * texture. `dissolve` (0..1) removes cells in a stable per-cell order.
  */
 export function paintSprite(ctx, sprite, x, y, {flash = false, alpha = 1, dissolve = 0, seed = 0} = {}) {
-  const {paint, glyph} = sprite, roles = sprite.roles || ROLE, [cw, ch] = cellOf(sprite);
-  const edge = sprite.cell ? .7 : 1;
+  const {paint, glyph} = sprite;
   const keep = (r, c) => dissolve <= 0 || visualHash(c, r, seed) % 1000 >= dissolve * 1000;
-  const font = ctx.font;
-  cellFont(ctx, sprite);
   ctx.globalAlpha = alpha;
   ctx.fillStyle = OUTLINE;
   paint.forEach((row, r) => [...row].forEach((role, c) => {
-    if (role !== ' ' && keep(r, c)) ctx.fillRect(x + c * cw - edge, y + r * ch - edge, cw + edge * 2, ch + edge * 2);
+    if (role !== ' ' && keep(r, c)) ctx.fillRect(x + c * CELL_W - 1, y + r * CELL_H - 1, CELL_W + 2, CELL_H + 2);
   }));
   paint.forEach((row, r) => [...row].forEach((role, c) => {
     if (role === ' ' || !keep(r, c)) return;
-    ctx.fillStyle = flash ? FLASH : roles[role].fill;
-    ctx.fillRect(x + c * cw, y + r * ch, cw + .02, ch + .02);
-    if (!flash) litCell(ctx, paint, r, c, x + c * cw, y + r * ch, cw, ch);
+    ctx.fillStyle = flash ? FLASH : ROLE[role].fill;
+    ctx.fillRect(x + c * CELL_W, y + r * CELL_H, CELL_W, CELL_H);
+    if (!flash) litCell(ctx, paint, r, c, x + c * CELL_W, y + r * CELL_H);
   }));
   if (!flash) paint.forEach((row, r) => [...row].forEach((role, c) => {
-    const g = glyph[r][c];
-    if (role === ' ' || g === ' ' || !keep(r, c)) return;
-    ctx.fillStyle = roles[role].ink;
-    ctx.fillText(g, x + c * cw, y + r * ch - (sprite.cell ? ch * .06 : 0));
+    const ch = glyph[r][c];
+    if (role === ' ' || ch === ' ' || !keep(r, c)) return;
+    ctx.fillStyle = ROLE[role].ink;
+    ctx.fillText(ch, x + c * CELL_W, y + r * CELL_H);
   }));
   ctx.globalAlpha = 1;
-  if (sprite.cell) ctx.font = font;
 }
 
 /** Light from the upper left on a cell sprite (the same light as the lit trees and rocks):
  * cells darken toward the lower right, and cells on the lit rim (nothing above or to the
  * left) catch a thin highlight. Drawn over a cell's fill, under its glyph. */
-export function litCell(ctx, paint, r, c, x, y, cw = CELL_W, ch = CELL_H) {
+export function litCell(ctx, paint, r, c, x, y) {
   const rows = paint.length, cols = paint[0].length;
   const dark = .3 * (.65 * r / Math.max(1, rows - 1) + .35 * c / Math.max(1, cols - 1));
   ctx.fillStyle = `rgba(4, 6, 4, ${dark.toFixed(3)})`;
-  ctx.fillRect(x, y, cw, ch);
+  ctx.fillRect(x, y, CELL_W, CELL_H);
   ctx.fillStyle = 'rgba(255, 248, 214, .2)';
-  const t = cw < CELL_W ? .5 : 1;
-  if (r === 0 || paint[r - 1][c] === ' ') ctx.fillRect(x, y, cw, t);
-  if (c === 0 || paint[r][c - 1] === ' ') ctx.fillRect(x, y, t, ch);
+  if (r === 0 || paint[r - 1][c] === ' ') ctx.fillRect(x, y, CELL_W, 1);
+  if (c === 0 || paint[r][c - 1] === ' ') ctx.fillRect(x, y, 1, CELL_H);
 }
 
 export function drawShadow(ctx, x, y, rx) {

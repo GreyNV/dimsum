@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {TILE_W, TILE_H} from '../src/dimensional_sim/world/browser/view.js';
-import {LEAF, LEAF_GLYPHS, GLYPH_W, GLYPH_H, TREE_W, blobLight, canopyCells, leafClumps, canopyShape, grassBlades, ripples, drawReflection, drawShores}
+import {LEAF, LEAF_STEP, TREE_W, blobLight, leafCells, leafClumps, canopyShape, grassBlades, ripples, drawReflection, drawShores}
   from '../src/dimensional_sim/world/browser/nature_art.js';
 
 test('lit shapes: the upper left is brighter than the lower right, outside is null', () => {
@@ -10,21 +10,20 @@ test('lit shapes: the upper left is brighter than the lower right, outside is nu
   assert.equal(blobLight(ball, 40, 40), null);
 });
 
-test('canopies are glyph cells: deterministic, inside the stamp, lit clump by clump', () => {
+test('canopies are fine leaf cells: deterministic, inside the stamp, lit clump by clump', () => {
   for (let v = 0; v < 8; v++) {
-    const cells = canopyCells(v, canopyShape(v), LEAF, 50, 5, [GLYPH_W, GLYPH_H]);
-    assert.deepEqual(cells, canopyCells(v, canopyShape(v), LEAF, 50, 5, [GLYPH_W, GLYPH_H]));
-    assert.ok(cells.length > 120, `variant ${v} has a dense crown (${cells.length} cells)`);
+    const cells = leafCells(v);
+    assert.deepEqual(cells, leafCells(v));
+    assert.ok(cells.length > 300, `variant ${v} has a dense crown (${cells.length} cells)`);
     for (const c of cells) {
-      assert.ok(c.x >= 0 && c.x < TREE_W && c.y >= 0 && c.y < 50);
-      assert.ok(LEAF_GLYPHS.includes(c.glyph) && LEAF.includes(c.color), 'a leaf glyph in a leaf colour');
+      assert.ok(c.x >= 0 && c.x < TREE_W && c.y >= 0 && c.y < 52 && c.x % LEAF_STEP === 0);
+      assert.ok(LEAF.includes(c.color));
     }
-    const lights = cells.map(c => c.light);
+    const lights = cells.map(c => c.v);
     assert.ok(Math.max(...lights) - Math.min(...lights) > .5, 'real light and shade');
     assert.ok(leafClumps(v, canopyShape(v)).length > 20, 'many leaf clumps');
   }
-  assert.ok(GLYPH_W < 4 && GLYPH_H < 6, 'finer than the old 4x6 cells');
-  assert.notDeepEqual(canopyCells(0), canopyCells(1));
+  assert.notDeepEqual(leafCells(0), leafCells(1));
 });
 
 test('grass blades and ripples stay inside their tile and are stable', () => {
@@ -69,5 +68,5 @@ test('every tree kind draws its own stamp and pines stay inside the stamp', asyn
   }
   const calls = [];
   const ctx = new Proxy({}, {get: (_, k) => k === 'fillText' || k === 'fillRect' ? (...a) => calls.push(k) : undefined, set: () => true});
-  for (const draw of Object.values(TREE_ART)) { calls.length = 0; draw(ctx, 2); assert.ok(calls.includes('fillText') && calls.length > 20, 'trees are written in glyphs'); }
+  for (const draw of Object.values(TREE_ART)) { calls.length = 0; draw(ctx, 2); assert.ok(calls.length > 20); }
 });
