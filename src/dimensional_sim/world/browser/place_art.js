@@ -2,7 +2,9 @@
  * site and the old man of the prologue. Ground decoration only (never blocking). */
 import {CELL_W, CELL_H, visualHash} from './view.js';
 import {setupText} from './art.js';
-import {ACTOR_FOOT, OUTLINE, litCell, mirrorSprite, paintParts} from './sprites.js';
+import {ACTOR_FOOT, OUTLINE, mirrorSprite, paintParts} from './sprites.js';
+import {ELDER_H, ELDER_W, STONE_H, STONE_W, anchorStoneCanvas, drawFireArt, drawPainted, elderCanvas} from './painted.js';
+import {partCanvas, spotCanvas} from './painted_props.js';
 
 /** Encounter spot sprites: small ground features, outlined like actors. */
 const SPOT_ROLES = Object.freeze({
@@ -152,6 +154,7 @@ export function drawCampfire(ctx, x, y, {clock = 0, reducedMotion = false} = {})
   const glow = ctx.createRadialGradient(x, ground - 8, 2, x, ground - 8, 46);
   glow.addColorStop(0, `rgba(255,170,80,${.30 + pulse})`); glow.addColorStop(1, 'rgba(255,140,60,0)');
   ctx.fillStyle = glow; ctx.beginPath(); ctx.ellipse(x, ground - 6, 46, 30, 0, 0, Math.PI * 2); ctx.fill();
+  if (drawFireArt(ctx, x, ground, clock, reducedMotion)) { ctx.restore(); return; }
   const baseW = FIRE_BASE.paint[0].length * CELL_W;
   paintParts(ctx, FIRE_BASE, SPOT_ROLES, x - baseW / 2, ground - FIRE_BASE.paint.length * CELL_H);
   const flame = FLAMES[reducedMotion ? 0 : Math.floor(clock / 180) % FLAMES.length];
@@ -194,7 +197,9 @@ export function drawCamp(ctx, x, y, {clock = 0, reducedMotion = false} = {}) {
     ctx.fillStyle = '#d4eeff'; ctx.fillRect(Math.round(rx) - 1, Math.round(ry) - 1, 3, 3);
   }
   ctx.restore();
-  paintParts(ctx, CAMP.stone, CAMP_ROLES, x - 36, y - 56);
+  const stone = anchorStoneCanvas();
+  if (stone) drawPainted(ctx, stone, x - 18 - STONE_W / 2, y - 5 - STONE_H);
+  else paintParts(ctx, CAMP.stone, CAMP_ROLES, x - 36, y - 56);
   for (let i = 0; i < 4; i++) {
     const phase = reducedMotion ? i * 1.57 : clock / 700 + i * 1.57;
     const sx = x - 18 + Math.cos(phase) * (24 + i % 2 * 6);
@@ -261,7 +266,11 @@ export const AMBUSH = Object.freeze({
 export function drawAmbushSite(ctx, x, y) {
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
-  const part = (name, dx, dy) => paintParts(ctx, AMBUSH[name], AMBUSH_ROLES, x + dx, y + dy);
+  const part = (name, dx, dy) => {
+    const painted = partCanvas(name === 'sack' ? 'ambushSack' : name);
+    if (!painted?.canvas) { paintParts(ctx, AMBUSH[name], AMBUSH_ROLES, x + dx, y + dy); return; }
+    drawPainted(ctx, painted.canvas, x + dx, y + dy + AMBUSH[name].paint.length * CELL_H - painted.h);
+  };
   // Broken wagon to the west of the anchor, its lost wheel lying beside it.
   part('wagon', -148, -35);
   part('wheel', -52, 18);
@@ -290,25 +299,21 @@ export function drawSpot(ctx, spot, x, y, {clock = 0, goal = false, fade = 0} = 
   const sprite = spotSprite(spot);
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
-  const w = sprite.paint[0].length * CELL_W, h = sprite.paint.length * CELL_H;
+  const painted = spotCanvas(SPOTS[spot.art || spot.encounter] ? spot.art || spot.encounter : null);
+  const w = painted ? painted.lw - 2 * painted.pad : sprite.paint[0].length * CELL_W;
+  const h = painted ? painted.lh - 2 * painted.pad : sprite.paint.length * CELL_H;
   const left = x - w / 2, top = y + ACTOR_FOOT - 2 - h;
-  ctx.save(); ctx.globalAlpha = 1 - fade;
-  ctx.fillStyle = OUTLINE;
-  sprite.paint.forEach((row, r) => [...row].forEach((role, c) => {
-    if (role !== ' ') ctx.fillRect(left + c * CELL_W - 1, top + r * CELL_H - 1, CELL_W + 2, CELL_H + 2);
-  }));
-  sprite.paint.forEach((row, r) => [...row].forEach((role, c) => {
-    if (role === ' ') return;
-    ctx.fillStyle = SPOT_ROLES[role].fill; ctx.fillRect(left + c * CELL_W, top + r * CELL_H, CELL_W, CELL_H);
-    litCell(ctx, sprite.paint, r, c, left + c * CELL_W, top + r * CELL_H);
-    const ch = sprite.glyph[r][c];
-    if (ch !== ' ') { ctx.fillStyle = SPOT_ROLES[role].ink; ctx.fillText(ch, left + c * CELL_W, top + r * CELL_H); }
-  }));
+  ctx.save();
+  if (painted) drawPainted(ctx, painted, left, top, 1 - fade);
+  else paintParts(ctx, sprite, SPOT_ROLES, left, top, 1 - fade);
+  ctx.globalAlpha = 1 - fade;
   if (!fade) {
     const lift = Math.round(Math.sin((clock + visualHash(spot.x, spot.y, 3) % 900) / 300) * 2);
     const sy = top - 7 + lift, size = goal || spot.glint ? 3 : 2;
-    ctx.fillStyle = OUTLINE; ctx.fillRect(x - size - 1, sy - size - 1, size * 2 + 2, size * 2 + 2);
-    ctx.fillStyle = spot.glint || (goal ? '#fff0b0' : '#d8b860'); ctx.fillRect(x - size, sy - size, size * 2, size * 2);
+    const diamond = r => { ctx.beginPath(); ctx.moveTo(x, sy - r * 1.3); ctx.lineTo(x + r, sy); ctx.lineTo(x, sy + r * 1.3); ctx.lineTo(x - r, sy); ctx.closePath(); ctx.fill(); };
+    ctx.fillStyle = OUTLINE; diamond(size + 1.2);
+    ctx.fillStyle = spot.glint || (goal ? '#fff0b0' : '#d8b860'); diamond(size);
+    ctx.fillStyle = 'rgba(255, 255, 240, .7)'; ctx.fillRect(x - .5, sy - size * .9, 1, size * .8);
     if (spot.glint && Math.floor((clock + visualHash(spot.x, spot.y, 5) % 1200) / 400) % 3 === 0) {
       ctx.fillStyle = spot.glint;   // a slow twinkle: four points around the sparkle
       for (const [dx, dy] of [[0, -6], [0, 6], [-6, 0], [6, 0]]) ctx.fillRect(x + dx - 1, sy + dy - 1, 2, 2);
@@ -351,15 +356,17 @@ export function drawElder(ctx, x, y, {clock = 0, facing = 'west', alpha = 1, tal
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
   const sprite = facing === 'east' ? mirrorSprite(ELDER) : ELDER;
-  const width = sprite.paint[0].length * CELL_W, height = sprite.paint.length * CELL_H;
+  const painted = elderCanvas(facing === 'east' ? 'east' : 'west');
+  const width = painted ? ELDER_W : sprite.paint[0].length * CELL_W, height = painted ? ELDER_H : sprite.paint.length * CELL_H;
   const sway = reducedMotion ? 0 : Math.floor(clock / 900) % 2;
   const left = x - width / 2, top = y + ACTOR_FOOT - height + sway;
   ctx.save(); ctx.globalAlpha = alpha;
   ctx.fillStyle = 'rgba(3, 6, 3, .5)';
   ctx.beginPath(); ctx.ellipse(x, y + ACTOR_FOOT - 1, 15, 4, 0, 0, Math.PI * 2); ctx.fill();
-  paintParts(ctx, sprite, ELDER_ROLES, left, top, alpha);
+  if (painted) drawPainted(ctx, painted, left, top, alpha);
+  else paintParts(ctx, sprite, ELDER_ROLES, left, top, alpha);
   // Lantern-warm glint on the staff head.
-  const gx = facing === 'east' ? left + width - CELL_W * 2 : left + CELL_W;
+  const gx = painted ? (facing === 'east' ? left + width - 7.6 : left + 3.6) : facing === 'east' ? left + width - CELL_W * 2 : left + CELL_W;
   ctx.globalAlpha = alpha * (.35 + (reducedMotion ? .1 : .15 * Math.sin(clock / 300)));
   const glow = ctx.createRadialGradient(gx + 2, top + 3, 1, gx + 2, top + 3, 14);
   glow.addColorStop(0, '#ffe7a0'); glow.addColorStop(1, '#ffe7a000');
@@ -368,8 +375,8 @@ export function drawElder(ctx, x, y, {clock = 0, facing = 'west', alpha = 1, tal
     for (let i = 0; i < 3; i++) {
       const lift = reducedMotion ? 0 : Math.round(Math.max(0, Math.sin(clock / 160 - i * .9)) * 3);
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = OUTLINE; ctx.fillRect(x - 9 + i * 7, top - 12 - lift, 6, 6);
-      ctx.fillStyle = '#f3e7c6'; ctx.fillRect(x - 8 + i * 7, top - 11 - lift, 4, 4);
+      ctx.fillStyle = OUTLINE; ctx.beginPath(); ctx.arc(x - 6 + i * 7, top - 9 - lift, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#f3e7c6'; ctx.beginPath(); ctx.arc(x - 6 + i * 7, top - 9 - lift, 2, 0, Math.PI * 2); ctx.fill();
     }
   }
   ctx.restore();
@@ -423,7 +430,9 @@ export function drawBuildings(ctx, x, y, buildings = [], {clock = 0} = {}) {
       ctx.beginPath(); ctx.ellipse(bx - 4, ground + 3, 30, 6, 0, 0, Math.PI * 2); ctx.fill();
       for (const [name, dx, dy] of art.parts) {
         const part = BUILDING_PARTS[name];
-        paintParts(ctx, part, BUILDING_ROLES, bx + dx, ground - dy - part.paint.length * CELL_H);
+        const painted = partCanvas(name);
+        if (painted?.canvas) drawPainted(ctx, painted.canvas, bx + dx, ground - dy - painted.h);
+        else paintParts(ctx, part, BUILDING_ROLES, bx + dx, ground - dy - part.paint.length * CELL_H);
       }
     } else {
       paintParts(ctx, FALLBACK_SPOT, SPOT_ROLES, bx - 14, ground - 21);

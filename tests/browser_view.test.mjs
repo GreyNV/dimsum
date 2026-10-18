@@ -214,10 +214,11 @@ test('encounter spot sprites are well-formed and activity poses crouch the body'
   for(const id of ['bramble_berries','fallen_branches','animal_tracks','gnarled_tree','forest_spring','mossy_stone','old_carvings']) assert.ok(SPOTS[id],id);
   assert.ok(pixelPlayerFrame(true).height<pixelPlayerFrame(false).height,'working poses crouch');
   for(const kind of ['forage','gather','observe','climb','drink','meditate','study']) assert.ok(POSE[kind],kind);
-  const calls=[];const ctx=new Proxy({},{get:(_,k)=>k==='save'||k==='restore'||k==='fillRect'||k==='fillText'?(...a)=>calls.push(k):undefined,set:()=>true});
+  const PATH=['beginPath','moveTo','lineTo','closePath','fill','arc'];
+  const calls=[];const ctx=new Proxy({},{get:(_,k)=>k==='save'||k==='restore'||k==='fillRect'||k==='fillText'?(...a)=>calls.push(k):PATH.includes(k)?()=>{}:undefined,set:()=>true});
   drawSpot(ctx,{encounter:'unknown',x:0,y:0},0,0); assert.ok(calls.length>0,'spots without art draw the fallback marker');
   calls.length=0; drawSpot(ctx,{x:0,y:0},0,0); assert.equal(calls.length,0,'a spot with no action draws nothing');
-  const fills=[];const paint=new Proxy({},{get:(t,k)=>k==='fillRect'?()=>fills.push(t.fillStyle):k==='save'||k==='restore'||k==='fillText'?()=>{}:t[k],set:(t,k,v)=>{t[k]=v;return true;}});
+  const fills=[];const paint=new Proxy({},{get:(t,k)=>k==='fillRect'||k==='fill'?()=>fills.push(t.fillStyle):k==='save'||k==='restore'||k==='fillText'||PATH.includes(k)?()=>{}:t[k],set:(t,k,v)=>{t[k]=v;return true;}});
   drawSpot(paint,{encounter:'old_carvings',x:0,y:0,glint:'#8fd17a'},0,0);
   assert.ok(fills.includes('#8fd17a'),'uncommon and rarer spots sparkle in their rarity color');
 });

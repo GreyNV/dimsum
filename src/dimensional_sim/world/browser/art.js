@@ -4,6 +4,9 @@
  */
 import {TILE_W, TILE_H, CELL_W, CELL_H, visualHash} from './view.js';
 import {paintParts} from './sprites.js';
+import {fineResolution} from './fine_art.js';
+import {paintedResolution} from './painted.js';
+import {structureCanvas} from './painted_props.js';
 import {SHALLOW_BG, WATER_BG, blooms, drawBlooms, drawFlagstones, drawPath, drawPlanks, drawRubble, drawScorch, drawBlades, drawReflection, drawShores, isWater, drawLitRock, drawRipples, grassBlades, ripples, TREE_ART} from './nature_art.js';
 export const PALETTE = Object.freeze({
   void: '#11180f', floor: '#172011', path: '#242418',
@@ -106,6 +109,7 @@ export let RES = 2;
 export function setResolution(res) {
   const next = Math.max(1, Math.min(4, Math.round(res)));
   if (next !== RES) { RES = next; stamps.clear(); }
+  fineResolution(RES); paintedResolution(RES);
   return RES;
 }
 /** A canvas `width` x `height` logical pixels, backed at RES, with the context scaled. */
@@ -162,6 +166,8 @@ function treeStamp(variant, createCanvas, kind = 'o') {
 }
 /** {canvas, dx, dy}: the stamp and its offset from the tile's top-left corner. */
 function structureStamp(glyph, createCanvas) {
+  const painted = createCanvas === defaultCanvas ? structureCanvas(glyph) : null;
+  if (painted?.canvas) return {canvas: painted.canvas, dx: 12 - painted.w / 2 - painted.canvas.pad, dy: 24 - painted.h - painted.canvas.pad};
   const art = STRUCTURE_ART[glyph], cols = art.paint[0].length, rows = art.paint.length;
   const width = Math.max(32, cols * CELL_W + 2), height = Math.max(28, rows * CELL_H + 2);
   const canvas = stamp(`site:${glyph}`, width, height, ctx => {

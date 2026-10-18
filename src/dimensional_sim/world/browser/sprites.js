@@ -7,6 +7,7 @@
  * transparent) and `glyph` (texture character per cell, space = none).
  */
 import {CELL_W, CELL_H, visualHash} from './view.js';
+import {cellSpriteCanvas} from './fine_art.js';
 
 /** Feet rest this many pixels below the logical tile center. */
 export const ACTOR_FOOT = 12;
@@ -53,6 +54,8 @@ export function spriteSize(sprite) {
 export function paintSprite(ctx, sprite, x, y, {flash = false, alpha = 1, dissolve = 0, seed = 0} = {}) {
   const {paint, glyph} = sprite;
   const keep = (r, c) => dissolve <= 0 || visualHash(c, r, seed) % 1000 >= dissolve * 1000;
+  const fine = cellSpriteCanvas(sprite, ROLE, CELL_W, CELL_H, {flash: flash ? FLASH : null});
+  if (fine) { drawFine(ctx, fine, x, y, alpha, dissolve > 0 ? keep : null); return; }
   ctx.globalAlpha = alpha;
   ctx.fillStyle = OUTLINE;
   paint.forEach((row, r) => [...row].forEach((role, c) => {
@@ -92,6 +95,8 @@ export function drawShadow(ctx, x, y, rx) {
 }
 
 export function paintParts(ctx, sprite, roles, left, top, alpha = 1) {
+  const fine = cellSpriteCanvas(sprite, roles, CELL_W, CELL_H);
+  if (fine) { drawFine(ctx, fine, left, top, alpha); return; }
   ctx.globalAlpha = alpha;
   ctx.fillStyle = OUTLINE;
   sprite.paint.forEach((row, r) => [...row].forEach((role, c) => {
@@ -123,4 +128,29 @@ export function occludingTreeTiles(tx, ty) {
   const result = [];
   for (let dy = 1; dy <= 2; dy++) for (let dx = -1; dx <= 1; dx++) result.push({x: tx + dx, y: ty + dy});
   return result;
+}
+
+/** Copy a fine sprite canvas (fine_art.js) with its cell grid's top-left at (x, y), smoothly
+ * resampled. `keep(r, c)` (dying enemies) erases the cells that have dissolved. */
+let scratch = null;
+export function drawFine(ctx, fine, x, y, alpha = 1, keep = null) {
+  let source = fine;
+  if (keep) {
+    scratch ||= document.createElement('canvas');
+    scratch.width = fine.width; scratch.height = fine.height;
+    const s = scratch.getContext('2d'), k = fine.width / fine.lw;
+    s.drawImage(fine, 0, 0);
+    s.globalCompositeOperation = 'destination-out';
+    const rows = Math.round((fine.lh - 2) / CELL_H), cols = Math.round((fine.lw - 2) / CELL_W);
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++)
+      if (!keep(r, c)) s.fillRect((1 + c * CELL_W - .5) * k, (1 + r * CELL_H - .5) * k, (CELL_W + 1) * k, (CELL_H + 1) * k);
+    s.globalCompositeOperation = 'source-over';
+    source = scratch;
+  }
+  const smoothing = ctx.imageSmoothingEnabled;
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'low';
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(source, x - 1, y - 1, fine.lw, fine.lh);
+  ctx.globalAlpha = 1;
+  ctx.imageSmoothingEnabled = smoothing;
 }

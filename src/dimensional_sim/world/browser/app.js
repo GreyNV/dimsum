@@ -428,6 +428,7 @@ function render(now) {
       const at=enemyXY(t,now);
       drawReflection(ctx,wet,at.y+ACTOR_FOOT,c=>drawEnemy(c,t,at.x,at.y,{clock:state.clock_ms,reducedMotion,reflection:true}),.32);
     }
+    ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='low';   // trees and actors: resampled smoothly
     for(const chunk of revealed) drawObjects(ctx,pictures.get(chunk.id),chunk.x*chunk.width*TILE_W,chunk.y*chunk.height*TILE_H);
     ctx.restore();
     const anchor = state.expedition?.anchor;

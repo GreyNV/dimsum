@@ -3,6 +3,7 @@
 import {TILE_W, TILE_H, visualHash} from './view.js';
 import {setupText} from './art.js';
 import {ACTOR_FOOT, FACING_ANGLE, OUTLINE, drawShadow, paintSprite, spriteSize} from './sprites.js';
+import {ENEMY_FRAMES, drawPainted, enemyCanvas, flashCanvas} from './painted.js';
 
 // 11 columns x 7 rows = 44x49 px.
 export const ENEMY = Object.freeze({paint: [
@@ -49,6 +50,9 @@ export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying =
   const breathe = reducedMotion ? 0 : Math.floor((clock + seed % 1000) / 500) % 2;
   const shake = !reducedMotion && hit < 160 ? (Math.floor(hit / 40) % 2 ? 2 : -2) : 0;
   const float = sprite === WISP ? (reducedMotion ? -8 : -8 + Math.round(3 * Math.sin((clock + seed % 900) / 260))) : 0;
+  const kind = ENEMY_FRAMES[target.sprite] ? target.sprite : 'boar';
+  const painted = enemyCanvas(kind, breathe);
+  if (painted) return drawPaintedEnemy(ctx, target, painted, kind, x, y, {clock, hit, dying, maxHp, reducedMotion, ghost, reflection, shake, float, seed, breathe});
   const left = x - width / 2 + shake, top = y + ACTOR_FOOT - height + breathe + float;
   if (dying !== null) {
     paintSprite(ctx, sprite, left, top - Math.round(dying * 6), {dissolve: dying, alpha: 1 - dying * .6, seed});
@@ -85,6 +89,48 @@ export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying =
     ctx.save(); ctx.globalAlpha = reducedMotion ? .8 : .55 + .45 * Math.abs(Math.sin((clock + seed % 700) / 230));
     ctx.fillStyle = '#bff3ff';
     ctx.fillRect(left + 4 * 4 + 1, top + 7 + 3, 2, 2); ctx.fillRect(left + 6 * 4 + 1, top + 7 + 3, 2, 2);
+    ctx.restore();
+  }
+  drawHealth(ctx, x, top - 7, target.hp, Math.max(maxHp, target.hp));
+  return {left, top, width, height};
+}
+
+/** The painted enemy (painted.js): same placement, flash, ghost, reflection and dying rules. */
+function drawPaintedEnemy(ctx, target, painted, kind, x, y, {clock, hit, dying, maxHp, reducedMotion, ghost, reflection, shake, float, seed, breathe}) {
+  const [width, height] = ENEMY_FRAMES[kind];
+  const left = x - width / 2 + shake, top = y + ACTOR_FOOT - height + float;
+  const key = `enemy|${kind}|${breathe}`;
+  if (dying !== null) {   // sinks a little and fades as it dissolves
+    drawPainted(ctx, painted, left, top - Math.round(dying * 6), 1 - dying);
+    return {left, top, width, height};
+  }
+  const flash = hit < 110 ? flashCanvas(painted, key) : painted;
+  if (ghost) {
+    drawPainted(ctx, flash, left, top, .42);
+    drawHealth(ctx, x, top - 7, target.hp, Math.max(maxHp, target.hp));
+    return {left, top, width, height};
+  }
+  if (reflection) { drawPainted(ctx, painted, left, top); return {left, top, width, height}; }
+  if (kind === 'wisp') {   // a soft cold halo instead of a shadow on the ground
+    const glow = ctx.createRadialGradient(x, top + 15, 2, x, top + 15, 26);
+    glow.addColorStop(0, '#cfe6ff55'); glow.addColorStop(1, '#cfe6ff00');
+    ctx.fillStyle = glow; ctx.fillRect(x - 26, top - 11, 52, 52);
+    drawShadow(ctx, x, y, 7);
+  } else drawShadow(ctx, x, y, kind === 'wolf' ? 20 : kind === 'lurker' ? 19 : kind === 'skeleton' ? 11 : 17);
+  drawPainted(ctx, flash, left, top);
+  if (hit >= 110 && !reducedMotion && kind === 'boar') {   // breath puffs from the snout
+    ctx.save(); ctx.globalAlpha = .18 + .18 * Math.sin((clock + seed % 500) / 190);
+    ctx.fillStyle = '#f1e2d6';
+    ctx.beginPath(); ctx.ellipse(left + 18, top + 40, 2, 1.2, 0, 0, Math.PI * 2); ctx.ellipse(left + 28, top + 40, 2, 1.2, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  if (hit >= 110 && kind === 'skeleton') {   // cold eye-light, flickering
+    ctx.save(); ctx.globalAlpha = reducedMotion ? .8 : .55 + .45 * Math.abs(Math.sin((clock + seed % 700) / 230));
+    for (const s of [-1, 1]) {
+      const g = ctx.createRadialGradient(left + 20 + s * 2.6, top + 10.8, 0, left + 20 + s * 2.6, top + 10.8, 2.4);
+      g.addColorStop(0, '#e8fbff'); g.addColorStop(.4, '#8fe3ff'); g.addColorStop(1, 'rgba(143,227,255,0)');
+      ctx.fillStyle = g; ctx.fillRect(left + 20 + s * 2.6 - 2.4, top + 8.4, 4.8, 4.8);
+    }
     ctx.restore();
   }
   drawHealth(ctx, x, top - 7, target.hp, Math.max(maxHp, target.hp));

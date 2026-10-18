@@ -6,7 +6,9 @@
  */
 import {TILE_W, TILE_H} from './view.js';
 import {setupText} from './art.js';
-import {ACTOR_FOOT, FACING_ANGLE, OUTLINE, ROLE, drawShadow} from './sprites.js';
+import {ACTOR_FOOT, FACING_ANGLE, OUTLINE, ROLE, drawShadow, drawFine} from './sprites.js';
+import {fineCanvas} from './fine_art.js';
+import {HERO, drawPainted, heroCanvas} from './painted.js';
 
 /** Bare-handed punch from server metadata: active frame = strike; otherwise windup
  * until the active frame has been observed for this attack, then recover.
@@ -21,6 +23,16 @@ const SHOULDER = {south: [9, -33], north: [-9, -33], east: [5, -33], west: [-5, 
 /** Snap to the pixel-player art grid so arms step in whole art pixels. */
 const snap = v => Math.round(v / PIXEL) * PIXEL;
 function drawFist(ctx, sx, sy, fx, fy) {
+  if (typeof document !== 'undefined') {   // painted: a sleeved arm and a round fist
+    ctx.save(); ctx.lineCap = 'round';
+    ctx.strokeStyle = OUTLINE; ctx.lineWidth = 5.4; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(fx, fy); ctx.stroke();
+    ctx.fillStyle = OUTLINE; ctx.beginPath(); ctx.arc(fx, fy, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = HERO.scarf; ctx.lineWidth = 3.6; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(fx, fy); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255, 230, 200, .25)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sx - .8, sy - .8); ctx.lineTo(fx - .8, fy - .8); ctx.stroke();
+    ctx.fillStyle = HERO.skin; ctx.beginPath(); ctx.arc(fx, fy, 2.1, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255, 240, 220, .55)'; ctx.beginPath(); ctx.arc(fx - .6, fy - .7, .8, 0, Math.PI * 2); ctx.fill();
+    ctx.restore(); return;
+  }
   sx = snap(sx); sy = snap(sy); fx = snap(fx); fy = snap(fy);
   // One sleeve cell per grid step: a staircase of whole cells, never a 1px diagonal.
   const steps = Math.max(1, Math.abs(fx - sx) / PIXEL, Math.abs(fy - sy) / PIXEL);
@@ -146,9 +158,37 @@ function newCanvas(width, height) {
   if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(width, height);
   return null;
 }
+/** The avatar's art as a colour grid (16 x 20 or 13 art px): later rectangles win, and the
+ * outline cells touching the outside are dropped - the fine renderer draws its own soft
+ * outline; outline cells inside the figure stay as dark feature lines. */
+export function pixelPlayerGrid(player, compact = false, reducedMotion = false) {
+  const art = pixelPlayerArt(player, {compact, reducedMotion});
+  const cells = Array.from({length: art.height}, () => Array(art.width).fill(null));
+  for (const [color, x, y, w, h] of art.rects)
+    for (let r = Math.max(0, y); r < Math.min(art.height, y + h); r++)
+      for (let c = Math.max(0, x); c < Math.min(art.width, x + w); c++) cells[r][c] = color;
+  const outside = [];
+  for (let r = 0; r < art.height; r++) for (let c = 0; c < art.width; c++)
+    if ((r === 0 || c === 0 || r === art.height - 1 || c === art.width - 1) && (cells[r][c] === null || cells[r][c] === OUTLINE)) outside.push([c, r]);
+  const seen = new Set(outside.map(([c, r]) => r * art.width + c));
+  while (outside.length) {
+    const [c, r] = outside.pop();
+    cells[r][c] = null;
+    for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nc = c + dc, nr = r + dr, id = nr * art.width + nc;
+      if (nc < 0 || nr < 0 || nc >= art.width || nr >= art.height || seen.has(id)) continue;
+      if (cells[nr][nc] === null || cells[nr][nc] === OUTLINE) { seen.add(id); outside.push([nc, nr]); }
+    }
+  }
+  return {width: art.width, height: art.height, cells};
+}
 export function pixelPlayerStamp(player, compact = false, reducedMotion = false) {
   const pose = pixelPlayerPose(player, reducedMotion);
   const key = compact ? `${pose.facing}|crouch` : `${pose.facing}|${pose.stride}|${pose.breathe}`;
+  const grid = pixelPlayerGrid(player, compact, reducedMotion);
+  const fine = fineCanvas({key: `player|${key}`, cols: grid.width, rows: grid.height, cw: PIXEL, ch: PIXEL, round: .5,
+    color: (c, r) => grid.cells[r][c]});
+  if (fine) return fine;
   if (PIXEL_STAMPS.has(key)) return PIXEL_STAMPS.get(key);
   const {width, height} = pixelPlayerFrame(compact);
   const canvas = newCanvas(width, height);
@@ -168,6 +208,13 @@ export const WEAPON_LOOKS = Object.freeze({
   axe: {shaft: '#7a5532', shaftLight: '#a9834f', length: 18, tip: null, head: ['#b9bfae', '#6d7468']},
 });
 function pixelLine(ctx, x0, y0, x1, y1, color, light = null) {
+  if (typeof document !== 'undefined') {   // painted: an outlined round-capped shaft with a lit edge
+    ctx.save(); ctx.lineCap = 'round';
+    ctx.strokeStyle = OUTLINE; ctx.lineWidth = 3.6; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+    if (light) { ctx.strokeStyle = light; ctx.lineWidth = .7; ctx.beginPath(); ctx.moveTo(x0 - .5, y0 - .5); ctx.lineTo(x1 - .5, y1 - .5); ctx.stroke(); }
+    ctx.restore(); return;
+  }
   x0 = snap(x0); y0 = snap(y0); x1 = snap(x1); y1 = snap(y1);
   const steps = Math.max(1, Math.abs(x1 - x0) / PIXEL, Math.abs(y1 - y0) / PIXEL);
   const cells = [];
@@ -268,8 +315,12 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
   if (held?.behind) drawWeapon(ctx, weapon, held);
   const hands = pose === 'crouch' ? workingHands(activity, player.facing, x, y, clock, reducedMotion) : null;
   if (hands?.behind) for (const arm of hands.arms) drawFist(ctx, ...arm);   // seen from behind
-  const stamp = pixelPlayerStamp(player, compact, reducedMotion);
-  if (stamp) { ctx.imageSmoothingEnabled = false; ctx.drawImage(stamp, left, top); }
+  const look = pixelPlayerPose(player, reducedMotion);
+  const painted = heroCanvas(look.facing, look.stride, look.breathe, compact);
+  const stamp = painted ? null : pixelPlayerStamp(player, compact, reducedMotion);
+  if (painted) drawPainted(ctx, painted, left, top);
+  else if (stamp?.lw) drawFine(ctx, stamp, left, top);
+  else if (stamp) { ctx.imageSmoothingEnabled = false; ctx.drawImage(stamp, left, top); }
   else paintPixelPlayer(ctx, player, left, top, {compact, reducedMotion});
   if (fist && !fistBehind) drawFist(ctx, ...fist);
   if (held && !held.behind) drawWeapon(ctx, weapon, held);
