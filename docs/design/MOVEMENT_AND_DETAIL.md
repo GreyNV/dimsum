@@ -51,3 +51,23 @@ Andrew: "do the same for the actor sprites and structures - good quality art tha
   as 'high' and is ~2x cheaper in software rendering (30 fps headless vs 24 before this round).
 
 Tests: tests/painted_art.test.mjs (coverage of every key, frames, no-DOM fallback, vector marks).
+
+## Scale and realism (phase 3, 2026-10-18)
+Andrew: tree sizes must vary (an actor almost as tall as a tree is funny), review enemy sizes,
+more realism in the actors.
+- Trees: `art.treeScale(kind, variant)` - oak 1.35-1.85x, pine 1.55-2.2x, birch 1.4-1.9x, dead
+  1.2-1.7x, old 1.8-2.2x of the 52x70 art, so a tree is 2-4x a person. Big stamps keep their
+  fine grain (`nature_art.withDetail`: leaf cells and bark shrink by the same factor). Roots stay
+  on the tile (`treeAt`); OBJECT_PAD 150; canopies up to five rows south / two columns aside cover
+  an actor (`occludingTreeTiles`).
+- Readability under tall canopies: trees rooted just south of the avatar fade (`canopyFade`:
+  28% / 55%), canopies over enemies and spots repaint see-through (composited off-screen at full
+  strength first, so nearer leaves still hide farther trunks), and only over the actor's box.
+  Explored trees draw whole over the fog line (the hidden-ground mask now sits under the objects).
+- The avatar re-proportioned: about six heads tall (head ~6.6 px of 40), shoulders 10, waist 20,
+  knees 30; tapered limbs hinged at joints (`T`, `limb`), knee-lift walk in front views, scissor
+  walk in profile; thinner sleeved arms, fists and weapon shafts to match. Default zoom 1.6.
+- Enemies sized against the avatar: a side-on wild boar (half a person at the shoulder, bristled
+  mane with brambles, tusks), wolf at 0.74, lurker 0.74, a person-height skeleton with a small
+  skull, wisp 0.62. Side-on enemies turn to face the avatar. The old man is the avatar's height,
+  stooped over his staff.

@@ -39,7 +39,7 @@ export function paintedCanvas(key, w, h, draw, {outline = true} = {}) {
     // silhouette: the art stamped around a small circle, tinted dark, then the art on top
     const sil = document.createElement('canvas'); sil.width = art.width; sil.height = art.height;
     const s = sil.getContext('2d');
-    const r = .95 * k;
+    const r = .75 * k;
     if (outline) for (let i = 0; i < 12; i++) { const t = i / 12 * Math.PI * 2; s.drawImage(art, Math.cos(t) * r, Math.sin(t) * r); }
     s.globalCompositeOperation = 'source-in'; s.fillStyle = OUTLINE; s.fillRect(0, 0, sil.width, sil.height);
     const layer = list => { if (!list.length) return; o.save(); o.scale(k, k); o.translate(PAD, PAD); o.lineJoin = 'round'; o.lineCap = 'round'; for (const f of list) f(o); o.restore(); };
@@ -145,138 +145,163 @@ const dot = (ctx, x, y, r, color) => { ctx.fillStyle = color; ctx.beginPath(); c
 const mirrorX = (ctx, w, draw) => { ctx.save(); ctx.translate(w, 0); ctx.scale(-1, 1); draw(); ctx.restore(); };
 
 // --- the avatar ------------------------------------------------------------------
-export const HERO = Object.freeze({skin: '#f0bc89', skinDark: '#c98f62', hair: '#3c2a27', hairLight: '#6b4a3f',
-  scarf: '#9a4b3c', scarfDark: '#6e3128', tunic: '#55603d', tunicLight: '#76804f', belt: '#ae8355', buckle: '#ecd08a',
-  pants: '#2a3933', pantsLight: '#3d5045', boot: '#5a4736', bootLight: '#9d8060', eye: '#271a16'});
+/* Proportions of a person, not a doll: about six heads tall in the 40 px frame (head ~6.6 px,
+ * shoulders at 10, waist at 20, knees at 30, soles on the frame's bottom edge). Limbs are
+ * tapered segments hinged at the joints, so walking swings thighs and shins, not blocks. */
+export const HERO = Object.freeze({skin: '#e9b487', skinDark: '#b98058', hair: '#3a2925', hairLight: '#6b4a3f',
+  scarf: '#9a4b3c', scarfDark: '#6e3128', cloak: '#5e2f27', tunic: '#55603d', tunicLight: '#76804f', sleeve: '#48522f',
+  belt: '#8f6a43', buckle: '#e3c27a', pants: '#2c3a33', pantsLight: '#3a4b41', boot: '#4e3c2c', bootLight: '#8d7055', eye: '#1e1512'});
 export const HERO_W = 32, HERO_H = 40, HERO_COMPACT_H = 26;
-
+/** A tapered limb segment from (x0, y0) radius r0 to (x1, y1) radius r1. */
+export function T(x0, y0, r0, x1, y1, r1) {
+  const a = Math.atan2(y1 - y0, x1 - x0), h = Math.PI / 2;
+  return {box: [Math.min(x0 - r0, x1 - r1), Math.min(y0 - r0, y1 - r1), Math.abs(x1 - x0) + r0 + r1, Math.abs(y1 - y0) + r0 + r1],
+    path: c => { c.arc(x0, y0, r0, a + h, a - h); c.arc(x1, y1, r1, a - h, a + h); c.closePath(); }};
+}
+/** Hip/shoulder -> knee/elbow -> ankle/wrist as two tapered segments. */
+function limb(c, [x0, y0, r0], [x1, y1, r1], [x2, y2, r2], color, opts = {}) {
+  fill(c, T(x0, y0, r0, x1, y1, r1), color, {sheen: .28, shade: .5, ...opts});
+  fill(c, T(x1, y1, r1, x2, y2, r2), color, {sheen: .28, shade: .5, ...opts});
+}
+function heroBoot(c, x, y, facing, dir = 1) {
+  const H = HERO;
+  if (facing === 'east') {
+    fill(c, T(x, y - 3.4, 1.35, x, y - .6, 1.45), H.boot, {sheen: .3, edge: .5});
+    const f = dir;
+    fill(c, P([[x - 1.5 * f, y - 1.4], [x + 2.2 * f, y - 1.1], [x + 3.2 * f, y + .4], [x + 3.2 * f, y + 1.6], [x - 1.6 * f, y + 1.6]], true), H.boot, {sheen: .3});
+    c.fillStyle = rgba(H.bootLight, .7); c.fillRect(Math.min(x - 1.2 * f, x + 3.2 * f), y + 1.1, 4.2, .35);
+    return;
+  }
+  fill(c, T(x, y - 3.6, 1.35, x, y - .4, 1.5), H.boot, {sheen: .3, edge: .5});
+  fill(c, E(x, y + .5, 1.75, 1.15), H.boot, {sheen: .35});
+  c.fillStyle = rgba(H.bootLight, .6); c.fillRect(x - 1.1, y - 3.4, 2.2, .35);
+}
 function heroHead(c, facing, cx, cy) {
   const H = HERO;
+  fill(c, R(cx - 1.1, cy + 2, 2.2, 3.2, 1), H.skinDark, {edge: .4, sheen: .1});                 // neck
   if (facing === 'north') {
-    fill(c, E(cx - 6.8, cy + 1.2, 1.3, 1.8), H.skinDark, {edge: .4});
-    fill(c, E(cx + 6.8, cy + 1.2, 1.3, 1.8), H.skinDark, {edge: .4});
-    const hair = P([[cx - 7.6, cy + 3], [cx - 8, cy - 4], [cx - 4.5, cy - 8.6], [cx, cy - 9.6], [cx + 4.8, cy - 8.4], [cx + 8, cy - 4], [cx + 7.6, cy + 3],
-      [cx + 4.5, cy + 5.8], [cx + 2, cy + 4.6], [cx, cy + 6.2], [cx - 2.3, cy + 4.6], [cx - 4.8, cy + 5.8]], true);
-    fill(c, hair, H.hair, {sheen: .28, shade: .45});
-    strokes(c, hair, H.hairLight, 14, {len: 3.2, angle: Math.PI / 2 + .2, spread: .8, seed: 3, alpha: .6});
-    fill(c, P([[cx - 1, cy - 8.8], [cx + 1.4, cy - 11.2], [cx + 2.6, cy - 8.2]]), H.hair, {edge: .5});
+    for (const d of [-1, 1]) fill(c, E(cx + d * 2.85, cy + .3, .55, .9), H.skinDark, {edge: .35});
+    const hair = P([[cx - 2.9, cy + 1.8], [cx - 3.1, cy - 1.8], [cx - 1.6, cy - 3.9], [cx + .4, cy - 4.3], [cx + 2.3, cy - 3.6], [cx + 3.2, cy - 1.4],
+      [cx + 2.9, cy + 1.9], [cx + 1.2, cy + 2.6], [cx - 1.2, cy + 2.6]], true);
+    fill(c, hair, H.hair, {sheen: .3, shade: .45});
+    strokes(c, hair, H.hairLight, 10, {len: 1.6, angle: Math.PI / 2 + .25, spread: .7, width: .35, seed: 3, alpha: .7});
     return;
   }
   if (facing === 'east') {
-    fill(c, E(cx + 1.4, cy, 5.9, 6.3), H.skin, {sheen: .35, shade: .32, light: [.62, .3]});
-    fill(c, E(cx + 7, cy + 1.4, 1.3, 1.1), H.skin, {edge: .45, shade: .2});          // nose
-    dot(c, cx + 4.6, cy + 1, .95, H.eye); dot(c, cx + 4.85, cy + .55, .35, '#ffffff');
-    c.strokeStyle = rgba(H.skinDark, .9); c.lineWidth = .6;
-    c.beginPath(); c.moveTo(cx + 4.4, cy + 4); c.lineTo(cx + 5.8, cy + 3.8); c.stroke();     // mouth
-    dot(c, cx + 2.6, cy + 2.6, 1, rgba('#d9705a', .3));                               // cheek
-    const hair = P([[cx - 6.6, cy + 2.2], [cx - 6.8, cy - 4.4], [cx - 3.8, cy - 8.4], [cx + .6, cy - 9.6], [cx + 5.4, cy - 8.2], [cx + 7.6, cy - 4.4],
-      [cx + 6.6, cy - 2.6], [cx + 4.4, cy - 3.6], [cx + 3.4, cy - 1.6], [cx + 1.6, cy - 3], [cx + .2, cy + .4], [cx - 1, cy + 3.4], [cx - 2.4, cy + 6], [cx - 5.6, cy + 5.4]], true);
+    fill(c, E(cx + .3, cy, 2.7, 3.2), H.skin, {sheen: .32, shade: .35, light: [.7, .3]});
+    fill(c, E(cx + 1.4, cy + 1.9, 1.4, 1.05), H.skin, {edge: .35, shade: .3});                  // jaw and chin
+    fill(c, P([[cx + 2.5, cy - .7], [cx + 3.6, cy + .9], [cx + 2.6, cy + 1.1]]), H.skin, {edge: .45, shade: .25});   // nose
+    c.fillStyle = H.eye; c.beginPath(); c.ellipse(cx + 1.75, cy - .1, .33, .42, 0, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = rgba(H.hair, .9); c.lineWidth = .35; c.beginPath(); c.moveTo(cx + 1.1, cy - .95); c.lineTo(cx + 2.3, cy - 1.05); c.stroke();
+    c.strokeStyle = rgba(H.skinDark, .9); c.lineWidth = .3; c.beginPath(); c.moveTo(cx + 1.8, cy + 2.05); c.lineTo(cx + 2.5, cy + 1.95); c.stroke();
+    fill(c, E(cx - .8, cy + .3, .7, 1), H.skinDark, {edge: .35});                                  // ear
+    const hair = P([[cx - 2.6, cy + 1.6], [cx - 2.9, cy - 1.8], [cx - 1.4, cy - 3.9], [cx + .9, cy - 4.3], [cx + 2.7, cy - 3.3], [cx + 3.1, cy - 1.6],
+      [cx + 2.1, cy - 1.8], [cx + 1.2, cy - 1], [cx + .2, cy - 1.5], [cx - .3, cy + .2], [cx - 1, cy + 2], [cx - 1.8, cy + 2.8]], true);
     fill(c, hair, H.hair, {sheen: .3, shade: .45});
-    strokes(c, hair, H.hairLight, 12, {len: 3, angle: Math.PI * .7, spread: .7, seed: 5, alpha: .6});
-    fill(c, E(cx - 1.4, cy + 1.2, 1.4, 1.9), H.skin, {edge: .45, shade: .3});          // ear
-    fill(c, P([[cx - 1, cy - 8.8], [cx + .8, cy - 11.2], [cx + 2.4, cy - 8.6]]), H.hair, {edge: .5});
+    strokes(c, hair, H.hairLight, 9, {len: 1.5, angle: Math.PI * .75, spread: .6, width: .35, seed: 5, alpha: .7});
     return;
   }
-  // south: the face
-  fill(c, E(cx - 6.6, cy + 1, 1.3, 1.8), H.skin, {edge: .45, shade: .3});
-  fill(c, E(cx + 6.6, cy + 1, 1.3, 1.8), H.skin, {edge: .45, shade: .3});
-  fill(c, E(cx, cy + .2, 6.5, 6.2), H.skin, {sheen: .35, shade: .32});
-  for (const s of [-1, 1]) {
-    c.fillStyle = H.eye; c.beginPath(); c.ellipse(cx + s * 2.7, cy + 1.2, .95, 1.25, 0, 0, Math.PI * 2); c.fill();
-    dot(c, cx + s * 2.7 + .3, cy + .7, .38, '#ffffff');
-    dot(c, cx + s * 3.9, cy + 3.1, 1.1, rgba('#d9705a', .28));
+  for (const d of [-1, 1]) fill(c, E(cx + d * 2.75, cy + .3, .55, .9), H.skin, {edge: .35, shade: .3});
+  const face = P([[cx - 2.6, cy - 1.6], [cx + 2.6, cy - 1.6], [cx + 2.5, cy + 1.2], [cx + 1.3, cy + 3], [cx, cy + 3.4], [cx - 1.3, cy + 3], [cx - 2.5, cy + 1.2]], true);
+  fill(c, face, H.skin, {sheen: .32, shade: .32});
+  for (const d of [-1, 1]) {
+    c.fillStyle = H.eye; c.beginPath(); c.ellipse(cx + d * 1.15, cy + .1, .34, .4, 0, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = rgba(H.hair, .9); c.lineWidth = .35; c.beginPath(); c.moveTo(cx + d * .6, cy - .85); c.lineTo(cx + d * 1.75, cy - .95); c.stroke();
   }
-  c.strokeStyle = rgba(H.skinDark, .9); c.lineWidth = .6;
-  c.beginPath(); c.moveTo(cx - .9, cy + 4.1); c.quadraticCurveTo(cx, cy + 4.6, cx + .9, cy + 4.1); c.stroke();
-  const hair = P([[cx - 7.4, cy + 2.4], [cx - 7.6, cy - 4.4], [cx - 4.4, cy - 8.6], [cx, cy - 9.7], [cx + 4.6, cy - 8.5], [cx + 7.7, cy - 4.4], [cx + 7.4, cy + 2.4],
-    [cx + 6, cy - 2], [cx + 4, cy - 3.6], [cx + 2.4, cy - 1.8], [cx + .4, cy - 3.8], [cx - 1.6, cy - 1.8], [cx - 3.8, cy - 3.6], [cx - 6, cy - 1.6]], true);
+  c.strokeStyle = rgba(H.skinDark, .85); c.lineWidth = .3;
+  c.beginPath(); c.moveTo(cx + .1, cy + .3); c.lineTo(cx + .3, cy + 1.2); c.lineTo(cx - .1, cy + 1.3); c.stroke();   // nose
+  c.beginPath(); c.moveTo(cx - .6, cy + 2.1); c.quadraticCurveTo(cx, cy + 2.35, cx + .6, cy + 2.1); c.stroke();
+  const hair = P([[cx - 2.9, cy + 1.2], [cx - 3.1, cy - 2], [cx - 1.6, cy - 3.9], [cx + .4, cy - 4.3], [cx + 2.4, cy - 3.6], [cx + 3.2, cy - 1.6], [cx + 2.9, cy + 1.2],
+    [cx + 2.4, cy - .9], [cx + 1.1, cy - 1.5], [cx - .1, cy - 1], [cx - 1.3, cy - 1.7], [cx - 2.4, cy - .9]], true);
   fill(c, hair, H.hair, {sheen: .3, shade: .45});
-  strokes(c, hair, H.hairLight, 12, {len: 3, angle: Math.PI / 2 + .3, spread: .9, seed: 7, alpha: .55});
-  fill(c, P([[cx - 1, cy - 8.8], [cx + 1, cy - 11.2], [cx + 2.6, cy - 8.4]]), H.hair, {edge: .5});
+  strokes(c, hair, H.hairLight, 9, {len: 1.5, angle: Math.PI / 2 + .35, spread: .9, width: .35, seed: 7, alpha: .7});
 }
-function boot(c, x, y, facing) {
-  const H = HERO;
-  const s = facing === 'east' ? R(x - 2.4, y - 3.2, 6.2, 3.8, 1.6) : R(x - 2.6, y - 3.4, 5.2, 4, 1.6);
-  fill(c, s, H.boot, {sheen: .3, shade: .5});
-  c.fillStyle = rgba(H.bootLight, .8); c.fillRect(s.box[0] + .8, y - .6, s.box[2] - 1.6, .5);
+function heroTunic(c, x0, x1, top, waist, hem, b, light = true) {
+  const H = HERO, mid = (x0 + x1) / 2, w = x1 - x0;
+  const tunic = P([[x0 + .2, top + b], [x1 - .2, top + b], [x1 + .2, top + 4 + b], [x1 - w * .08, waist + b], [x1 + w * .06, hem], [mid, hem + .7], [x0 - w * .06, hem], [x0 + w * .08, waist + b], [x0 - .2, top + 4 + b]], true);
+  fill(c, tunic, H.tunic, {sheen: .3});
+  strokes(c, tunic, H.tunicLight, 9, {len: 2.4, angle: Math.PI / 2, spread: .3, width: .35, seed: Math.round(x0 * 3), alpha: light ? .45 : .25});
+  strokes(c, tunic, rgba('#20281a', .8), 6, {len: 3, angle: Math.PI / 2, spread: .2, width: .3, seed: Math.round(x1 * 5), alpha: .5});
+  fill(c, R(x0 + w * .06, waist - .9 + b, w * .88, 1.7, .6), H.belt, {edge: .45, shade: .3});
 }
 /** The standing avatar (south / north / east; west is east mirrored) in a 32 x 40 frame. */
 function heroStanding(c, facing, stride, breathe) {
-  const H = HERO, b = breathe * .6;
+  const H = HERO, b = breathe * .4;
   if (facing === 'east') {
-    // cloak streams behind, back leg, body, front leg, near arm, scarf, head
-    const cloak = P([[13, 18.5 + b], [17, 18.5 + b], [15.5, 31.5], [11, 33 - stride], [7.5, 31]], true);
-    fill(c, cloak, H.scarfDark, {sheen: .2, shade: .45});
-    const back = -stride * 2.6, front = stride * 2.6;
-    fill(c, C(15.5, 29, 15.5 + back, 36.4, 2), H.pants, {shade: .55});
-    boot(c, 15.5 + back + .6, 39.6, 'east');
-    const torso = R(11.6, 17.8 + b, 9.4, 12.8, 3.2);
-    fill(c, torso, H.tunic, {sheen: .3});
-    strokes(c, torso, H.tunicLight, 10, {len: 2.4, seed: 2, alpha: .35});
-    fill(c, R(11.6, 27.4 + b, 9.4, 2.2, 1), H.belt, {edge: .45, shade: .3});
-    fill(c, C(17, 29, 17 + front, 36.4, 2), H.pantsLight, {shade: .5});
-    boot(c, 17 + front + .6, 39.6, 'east');
-    const swing = -stride * 2.4;
-    fill(c, C(16.4, 20.4 + b, 16.6 + swing, 26.6 + b, 1.8), H.scarf, {sheen: .3});
-    fill(c, E(16.6 + swing, 28 + b, 1.75, 1.75), H.skin, {shade: .35});
-    fill(c, R(11.4, 16.4 + b, 10.4, 3.8, 1.9), H.scarf, {sheen: .35});
-    fill(c, P([[12.4, 18], [9.4, 19.4], [7.8, 23.6], [10.6, 22.2]], true), H.scarf, {edge: .5});
-    heroHead(c, 'east', 15.5, 10.9 + b * .5);
+    const sw = -stride;   // the near arm swings against the near leg
+    fill(c, P([[14.2, 9.8 + b], [17.2, 9.8 + b], [16.2, 21], [13.8, 31.2 - stride * .5], [10, 30.2], [11.6, 18]], true), H.cloak, {sheen: .18, shade: .45});
+    limb(c, [16.6, 11 + b, 1.4], [16.6 + stride * 1.6, 16.2 + b, 1.15], [16.6 + stride * 2.8, 21 + b, .95], rgba(H.sleeve, 1), {shade: .65});   // far arm
+    const legs = stride === 0 ? [[16.4, 30.3, 16.1, 37.2], [16.8, 30.4, 16.6, 37.4]]
+      : [[16 - 1.5, 30.5, 16 - 4.1, 36.6], [16 + 2.6, 30, 16 + 4.3, 37.4]];
+    const [far, near] = stride >= 0 ? [legs[0], legs[1]] : [legs[1], legs[0]];
+    limb(c, [16, 22, 2.1], [far[0], far[1], 1.6], [far[2], far[3], 1.2], H.pants, {shade: .62});
+    heroBoot(c, far[2], far[3] + 1.6 + (far[2] < 14 ? -.6 : 0), 'east');
+    limb(c, [16.4, 22, 2.2], [near[0], near[1], 1.7], [near[2], near[3], 1.25], H.pantsLight);
+    heroBoot(c, near[2], near[3] + 1.6 + (near[2] < 14 ? -.6 : 0), 'east');
+    heroTunic(c, 13, 19.4, 9.8, 19.8, 25.6, b);
+    limb(c, [16.1, 11 + b, 1.5], [16.1 + sw * 1.9, 16.3 + b, 1.2], [16.1 + sw * 3.4, 21.1 + b, 1], H.sleeve);   // near arm
+    fill(c, E(16.1 + sw * 3.6, 22.2 + b, 1.05, 1.2), H.skin, {shade: .35});
+    fill(c, E(16.3, 9.4 + b, 2.6, 1.4), H.scarf, {sheen: .35});
+    fill(c, P([[14.8, 9.6 + b], [12.2, 10.4], [10.6, 13.4], [12.8, 12.4]], true), H.scarf, {edge: .5});
+    heroHead(c, 'east', 16.2, 4.4 + b * .5);
     return;
   }
   const back = facing === 'north';
-  if (!back) fill(c, P([[8.4, 18.8 + b], [23.6, 18.8 + b], [26, 32.2], [6, 32.2]], true), H.scarfDark, {sheen: .15, shade: .5});
-  for (const s of [-1, 1]) {   // legs lift alternately, so a front view still walks
-    const lift = stride === s ? -1.4 : 0, x = 16 + s * 3.1;
-    fill(c, C(x, 29, x, 36.2 + lift, 2.1), s < 0 ? H.pants : H.pantsLight, {shade: .55});
-    boot(c, x, 39.6 + lift, facing);
+  if (!back) fill(c, P([[10.4, 9.6 + b], [21.6, 9.6 + b], [23.6, 30.4], [16, 31.6], [8.4, 30.4]], true), H.cloak, {sheen: .12, shade: .5});
+  for (const d of [-1, 1]) {   // a front view walks by lifting one knee, then the other
+    const lift = stride === d ? 1 : 0;
+    limb(c, [16 + d * 2.2, 22, 2.2], [16 + d * 2.5, 30.4 - lift * 1.3, 1.7], [16 + d * 2.4, 37.2 - lift * 1.6, 1.25], d < 0 ? H.pants : H.pantsLight);
+    heroBoot(c, 16 + d * 2.4, 38.8 - lift * 1.6, facing);
   }
-  const torso = R(10, 17.8 + b, 12, 12.8, 3.6);
-  fill(c, torso, H.tunic, {sheen: .3});
-  strokes(c, torso, H.tunicLight, 12, {len: 2.4, seed: 4, alpha: .35});
-  fill(c, R(10, 27.4 + b, 12, 2.2, 1), H.belt, {edge: .45, shade: .3});
-  if (!back) fill(c, R(15, 27.1 + b, 2.2, 2.8, .6), H.buckle, {edge: .5, shade: .2});
-  for (const s of [-1, 1]) {
-    const swing = stride * s * 1.6, sx = 16 + s * 6.3;
-    fill(c, C(sx, 20.2 + b, sx + s * 1.1, 26.6 + b + swing, 1.85), H.scarf, {sheen: .3});
-    fill(c, E(sx + s * 1.1, 28 + b + swing, 1.8, 1.8), H.skin, {shade: .35});
+  heroTunic(c, 10.6, 21.4, 9.8, 19.8, 25.8, b, !back);
+  if (!back) fill(c, R(15.1, 18.8 + b, 1.8, 2, .4), H.buckle, {edge: .45, shade: .2});
+  for (const d of [-1, 1]) {
+    const swing = stride * d * .9;
+    limb(c, [16 + d * 5.3, 10.8 + b, 1.55], [16 + d * 6.2, 16.2 + b - swing * .3, 1.25], [16 + d * 6.3, 21.2 + b - swing, 1], H.sleeve);
+    fill(c, E(16 + d * 6.3, 22.3 + b - swing, 1.05, 1.25), H.skin, {shade: .35});
   }
   if (back) {
-    const cloak = P([[8.6, 17.8 + b], [23.4, 17.8 + b], [25.6, 33], [16, 34], [6.4, 33]], true);
-    fill(c, cloak, H.scarf, {sheen: .26, shade: .5});
-    c.save(); c.strokeStyle = rgba(H.scarfDark, .9); c.lineWidth = .7;
-    for (const x of [12.5, 16, 19.5]) { c.beginPath(); c.moveTo(x, 21 + b); c.quadraticCurveTo(x + .6, 27, x - .2 * (x - 16), 33); c.stroke(); }
+    const cloak = P([[10.2, 9.6 + b], [21.8, 9.6 + b], [23.4, 30.2], [16, 31.4], [8.6, 30.2]], true);
+    fill(c, cloak, H.scarf, {sheen: .24, shade: .5});
+    c.save(); c.strokeStyle = rgba(H.cloak, .9); c.lineWidth = .5;
+    for (const x of [13, 16, 19]) { c.beginPath(); c.moveTo(x, 12 + b); c.quadraticCurveTo(x + .4, 22, x + (x - 16) * .35, 30.6); c.stroke(); }
     c.restore();
   }
-  fill(c, R(9.4, 16.3 + b, 13.2, 4, 2), H.scarf, {sheen: .35});
-  if (!back) fill(c, P([[18.8, 18.8 + b], [21.6, 18.8 + b], [22.6, 25 + b], [20.2, 24.2 + b]], true), H.scarf, {edge: .5});
-  heroHead(c, facing, 16, 10.9 + b * .5);
+  fill(c, E(16, 9.3 + b, 3.6, 1.5), H.scarf, {sheen: .35});
+  if (!back) fill(c, P([[17, 9.8 + b], [18.6, 9.8 + b], [19.2, 15.4 + b], [17.8, 15 + b]], true), H.scarf, {edge: .5});
+  heroHead(c, facing, 16, 4.4 + b * .5);
 }
 /** Crouching / sitting / kneeling at work, in a 32 x 26 frame. */
 function heroCompact(c, facing) {
   const H = HERO;
   if (facing === 'east') {
-    fill(c, P([[12.6, 14], [16, 14], [14.6, 23.4], [7.4, 24], [7.8, 20]], true), H.scarfDark, {sheen: .2});
-    fill(c, C(13, 21.8, 16, 23, 2), H.pants, {shade: .55});                          // folded back leg
-    boot(c, 12.6, 25.6, 'east');
-    fill(c, R(11.4, 13.4, 9.6, 9.4, 3.2), H.tunic, {sheen: .3});
-    fill(c, R(11.4, 20.6, 9.6, 2, 1), H.belt, {edge: .45});
-    fill(c, C(15.6, 21, 22, 19.2, 2.1), H.pantsLight, {shade: .5});                 // thigh up to the knee
-    fill(c, C(22, 19.4, 22.4, 23.4, 2), H.pantsLight, {shade: .55});
-    boot(c, 23, 25.6, 'east');
-    fill(c, R(11.2, 12.2, 10.4, 3.6, 1.8), H.scarf, {sheen: .35});
-    heroHead(c, 'east', 15.5, 6.6);
+    fill(c, P([[14.2, 9.6], [17.6, 9.6], [15.4, 19], [11.6, 24.4], [9.6, 21]], true), H.cloak, {sheen: .18});
+    limb(c, [14, 20.4, 2.1], [15.8, 24.2, 1.6], [11, 24.4, 1.2], H.pants, {shade: .62});           // kneeling far leg
+    heroBoot(c, 10.2, 25.4, 'east', -1);
+    limb(c, [14.4, 20.2, 2.2], [20, 16.8, 1.7], [19.8, 23.4, 1.25], H.pantsLight);                 // near leg, knee up
+    heroBoot(c, 19.8, 25.2, 'east');
+    const torso = P([[13.4, 20.6], [12.8, 15], [15, 10], [18.2, 9.8], [19, 13], [17.4, 19], [16.4, 21.6]], true);
+    fill(c, torso, H.tunic, {sheen: .3});
+    fill(c, R(13.4, 18.4, 4.4, 1.6, .6), H.belt, {edge: .45});
+    limb(c, [17.2, 11.2, 1.45], [19.4, 15.6, 1.2], [21.6, 18.4, 1], H.sleeve);
+    fill(c, E(22.2, 19, 1.05, 1.15), H.skin, {shade: .35});
+    fill(c, E(17.4, 9.6, 2.4, 1.3), H.scarf, {sheen: .35});
+    heroHead(c, 'east', 18.6, 5.2);
     return;
   }
   const back = facing === 'north';
-  for (const s of [-1, 1]) {   // knees splay up either side of the lowered hips
-    fill(c, E(16 + s * 6.4, 20.2, 3.6, 3.2), s < 0 ? H.pants : H.pantsLight, {shade: .5});
-    boot(c, 16 + s * 6.8, 25.8, facing);
+  for (const d of [-1, 1]) {   // knees up either side, forearms resting on them
+    limb(c, [16 + d * 2.2, 20.6, 2.1], [16 + d * 4.6, 17, 1.7], [16 + d * 3.8, 23.4, 1.25], d < 0 ? H.pants : H.pantsLight);
+    heroBoot(c, 16 + d * 3.8, 25, facing);
   }
-  fill(c, R(10.2, 13.4, 11.6, 9, 3.4), back ? H.scarf : H.tunic, {sheen: .3});
-  if (!back) fill(c, R(10.2, 20.4, 11.6, 2, 1), H.belt, {edge: .45});
-  fill(c, R(9.6, 12.2, 12.8, 3.6, 1.8), H.scarf, {sheen: .35});
-  heroHead(c, facing, 16, 6.6);
+  if (back) fill(c, P([[10.6, 10], [21.4, 10], [22.6, 21.4], [16, 22.4], [9.4, 21.4]], true), H.scarf, {sheen: .24});
+  else heroTunic(c, 11.2, 20.8, 10, 18.4, 21.4, 0);
+  for (const d of [-1, 1]) {
+    limb(c, [16 + d * 4.8, 11.2, 1.5], [16 + d * 5.6, 15.6, 1.2], [16 + d * 3.8, 18, 1], H.sleeve);
+    if (!back) fill(c, E(16 + d * 3.6, 18.8, 1.05, 1.15), H.skin, {shade: .35});
+  }
+  fill(c, E(16, 9.8, 3.4, 1.4), H.scarf, {sheen: .35});
+  heroHead(c, facing, 16, 5.2);
 }
 /** The avatar's body for a pose (fists, weapons and work hands are drawn live around it). */
 export function heroCanvas(facing, stride, breathe, compact) {
@@ -291,52 +316,58 @@ export function heroCanvas(facing, stride, breathe, compact) {
 
 // --- enemies -----------------------------------------------------------------------
 /** Frame sizes (w, h) per enemy sprite key: feet on the bottom edge, centred on the tile. */
-export const ENEMY_FRAMES = Object.freeze({boar: [46, 46], lurker: [48, 32], skeleton: [40, 50], wisp: [34, 40], wolf: [54, 38]});
+/* Sized against the avatar (about 1.75 m in a 40 px frame): a boar stands about half a person
+ * at the shoulder, a wolf a little less, a lurker lies low, the bones are a person's height and
+ * a wisp is no bigger than a lantern-glow. ENEMY_ART draws at `scale` 1 in ENEMY_ART_FRAMES. */
+const ENEMY_ART_FRAMES = {boar: [41, 26, 1], lurker: [48, 32, .74], skeleton: [24, 41, 1], wisp: [34, 40, .62], wolf: [54, 38, .74]};
+export const ENEMY_FRAMES = Object.freeze(Object.fromEntries(Object.entries(ENEMY_ART_FRAMES).map(([k, [w, h, s]]) => [k, [Math.round(w * s), Math.round(h * s)]])));
+/** Enemies seen side-on (boar, wolf) turn to face the avatar; the art faces east. */
+export const SIDE_ON = Object.freeze(new Set(['boar', 'wolf']));
 
 function boar(c) {
-  const fur = '#7e3447', furLight = '#9a4559', dark = '#4c1b2a', bone = '#e3d4b0', thorn = '#33502a';
-  for (const x of [12, 34]) fill(c, R(x - 3.2, 34, 6.4, 10, 2.6), dark, {shade: .55});        // hind legs
-  const body = E(23, 27.5, 18, 13.5);
-  fill(c, body, fur, {sheen: .3, shade: .55});
-  strokes(c, body, dark, 46, {len: 2.6, angle: Math.PI * .58, spread: .7, seed: 11, alpha: .55});
-  strokes(c, body, furLight, 22, {len: 2.2, angle: Math.PI * .58, spread: .7, seed: 12, alpha: .45});
-  // brambles across the back: a dark vine with thorns and a few berries
-  c.save(); c.strokeStyle = thorn; c.lineWidth = 1.6;
-  c.beginPath(); c.moveTo(6.5, 24); c.bezierCurveTo(12, 12, 32, 10, 39.5, 23); c.stroke();
-  c.lineWidth = .9; c.beginPath(); c.moveTo(10, 18.5); c.bezierCurveTo(17, 13.5, 26, 12.5, 33, 15.5); c.stroke();
-  c.fillStyle = '#5c7f3c';
-  for (const [x, y, a] of [[9, 20, -2.4], [13, 15.6, -2], [18, 13.4, -1.7], [23, 12.8, -1.5], [28, 13.4, -1.3], [33, 15.4, -1], [37, 19, -.7]]) {
-    c.beginPath(); c.moveTo(x - 1, y + .4); c.lineTo(x + Math.cos(a) * 2.6, y + Math.sin(a) * 2.6); c.lineTo(x + 1, y - .2); c.closePath(); c.fill();
+  // A wild boar seen side-on, facing east: high bristled withers, a long wedge head, tusks,
+  // thin legs under a heavy barrel body - with brambles tangled in the mane.
+  const coat = '#4e2b2c', coatLight = '#74404a', dark = '#2a1517', snout = '#8e6464', thorn = '#33502a';
+  c.save(); c.strokeStyle = coat; c.lineWidth = .7; c.beginPath(); c.moveTo(4.2, 10.4); c.quadraticCurveTo(2, 12.4, 2.2, 15.6); c.stroke(); c.restore();
+  fill(c, E(2.2, 16, .8, 1.3), dark, {edge: .4});                                                     // tail tuft
+  for (const [x0, y0, x1] of [[9.6, 17, 8.6], [29.6, 17, 30.4]]) {                                     // far legs
+    fill(c, T(x0, y0, 1.4, x1, 24.6, .75), dark, {shade: .55});
+    fill(c, R(x1 - .9, 24.2, 1.9, 1.6, .5), '#120a08', {edge: .4});
+  }
+  const body = P([[4.2, 12.6], [5.6, 7.6], [11, 5], [17, 3.4], [22.6, 2.8], [27.6, 4.4], [31.2, 7.4], [32, 12.6], [30.6, 17], [24, 18.4], [15, 18.6], [8.4, 17.6], [4.8, 15.6]], true);
+  fill(c, body, coat, {sheen: .3, shade: .55});
+  strokes(c, body, dark, 60, {len: 2, angle: Math.PI * .62, spread: .5, width: .4, seed: 11, alpha: .75});
+  strokes(c, body, coatLight, 30, {len: 1.8, angle: Math.PI * .62, spread: .5, width: .35, seed: 12, alpha: .55});
+  c.save(); c.strokeStyle = dark; c.lineWidth = .55;                                                 // the bristled mane
+  for (let i = 0; i < 26; i++) {
+    const t = i / 25, x = 7 + t * 23, y = 6.2 - Math.sin(t * Math.PI) * 3.6 + (t > .7 ? (t - .7) * 4 : 0);
+    c.beginPath(); c.moveTo(x, y + 1.2); c.lineTo(x - .5 + (i % 3) * .3, y - 1.4 - (i % 2) * .6); c.stroke();
   }
   c.restore();
-  for (const [x, y] of [[15.5, 16.2], [30.5, 15.6], [21, 13.4]]) { dot(c, x, y, 1.15, '#b8323f'); dot(c, x - .35, y - .35, .4, '#ffb0a0'); }
-  for (const x of [16.4, 29.6]) {                                                                // front legs
-    fill(c, R(x - 3, 33, 6, 11.2, 2.6), fur, {shade: .5});
-    fill(c, R(x - 3.1, 42.4, 6.2, 3.4, 1.2), '#2a1a14', {sheen: .25});
-  }
-  mirrorPair(c, 46, () => {                                                                       // ears and horns
-    fill(c, P([[13.6, 22.6], [10.2, 16.6], [17.4, 20.4]]), fur, {edge: .55});
-    fill(c, P([[13.8, 21.4], [11.6, 18], [16, 20.4]]), '#c56a7c', {edge: 0, sheen: .2});
-    fill(c, P([[15.8, 24.6], [11.6, 21], [9.4, 14.8], [10.4, 9.4], [12.4, 13.8], [14.4, 19], [18, 22.4]], true), bone, {sheen: .45, shade: .45});
-    c.save(); c.strokeStyle = rgba('#8d7a5a', .8); c.lineWidth = .5;
-    for (const y of [13, 15.5, 18]) { c.beginPath(); c.moveTo(10.2, y); c.lineTo(12.6, y + .8); c.stroke(); } c.restore();
-  });
-  const head = E(23, 30.4, 10.8, 9.2);
-  fill(c, head, furLight, {sheen: .32, shade: .5});
-  strokes(c, head, dark, 18, {len: 1.8, angle: Math.PI * .5, spread: .9, seed: 13, alpha: .45});
-  c.save(); c.fillStyle = rgba(dark, .9);                                                      // a heavy brow
-  c.beginPath(); c.moveTo(14.6, 27.4); c.quadraticCurveTo(23, 23.6, 31.4, 27.4); c.quadraticCurveTo(23, 26, 14.6, 27.4); c.fill(); c.restore();
-  for (const s of [-1, 1]) {                                                                     // ember eyes
-    dot(c, 23 + s * 4.6, 29.2, 1.9, '#2a0b10');
-    const g = c.createRadialGradient(23 + s * 4.6, 29.2, 0, 23 + s * 4.6, 29.2, 1.6);
-    g.addColorStop(0, '#fff3a8'); g.addColorStop(.5, '#ffb43c'); g.addColorStop(1, 'rgba(255,120,40,0)');
-    c.fillStyle = g; c.beginPath(); c.arc(23 + s * 4.6, 29.2, 1.6, 0, Math.PI * 2); c.fill();
-  }
-  fill(c, E(23, 35.4, 5.8, 4.2), '#b8606e', {sheen: .4, shade: .4});                         // snout
-  for (const s of [-1, 1]) { c.fillStyle = '#3a1218'; c.beginPath(); c.ellipse(23 + s * 2, 35.6, .9, 1.4, 0, 0, Math.PI * 2); c.fill(); }
-  mirrorPair(c, 46, () => fill(c, P([[18.6, 38.2], [16.2, 37], [15.2, 33.6], [17.2, 35.8], [19.6, 36.6]], true), '#f1e6cc', {sheen: .5, shade: .3}));
+  c.save(); c.strokeStyle = thorn; c.lineWidth = .8;                                                // brambles in the mane
+  c.beginPath(); c.moveTo(8, 7.4); c.bezierCurveTo(13, 2.6, 22, 1.4, 29, 5.4); c.stroke();
+  c.fillStyle = '#5c7f3c';
+  for (const [x, y] of [[11, 5], [15, 3.4], [19, 2.6], [23, 2.8], [27, 4.2]]) { c.beginPath(); c.moveTo(x - .5, y); c.lineTo(x + .2, y - 1.4); c.lineTo(x + .5, y); c.fill(); }
+  c.restore();
+  for (const [x, y] of [[13.4, 4.4], [21, 2.4], [25.6, 3.8]]) { dot(c, x, y, .65, '#b8323f'); dot(c, x - .2, y - .2, .25, '#ffb0a0'); }
+  fill(c, E(9.4, 13.6, 4, 4.6), coat, {sheen: .28, shade: .5, edge: .35});                            // haunch
+  fill(c, T(9.8, 16.4, 1.7, 9.4, 24.6, .85), coat, {shade: .5});                                     // near legs
+  fill(c, R(8.4, 24.2, 2.1, 1.7, .5), '#120a08', {edge: .4});
+  fill(c, T(27.4, 15.6, 1.9, 27.8, 24.6, .9), coat, {shade: .5});
+  fill(c, R(26.8, 24.2, 2.1, 1.7, .5), '#120a08', {edge: .4});
+  const head = P([[28.6, 5.8], [33, 6.2], [36.6, 9.2], [39.2, 11.6], [39.6, 13.6], [37.6, 15], [33.4, 15.4], [29.6, 14.2]], true);
+  fill(c, head, coat, {sheen: .32, shade: .5, light: [.4, .2]});
+  strokes(c, head, dark, 14, {len: 1.4, angle: Math.PI * .1, spread: .5, width: .35, seed: 13, alpha: .7});
+  fill(c, E(39.3, 12.7, .95, 1.35), snout, {sheen: .35, edge: .55});
+  dot(c, 39.5, 12.4, .3, '#2a1214'); dot(c, 39.4, 13.2, .3, '#2a1214');
+  fill(c, P([[32.2, 6.6], [31.2, 2.8], [34, 5.8]], true), coat, {edge: .55});                         // ear
+  fill(c, P([[32.3, 5.6], [31.9, 3.9], [33.2, 5.6]], true), '#8e5a5a', {edge: 0});
+  fill(c, P([[36.2, 14.6], [37.6, 12.2], [38.2, 10.6], [38.1, 12.8], [37.2, 14.8]], true), '#efe6cf', {sheen: .5, shade: .3, edge: .6});   // tusk
+  dot(c, 34.6, 9.4, .7, '#1a0606');
+  const g = c.createRadialGradient(34.6, 9.3, 0, 34.6, 9.3, .75);
+  g.addColorStop(0, '#fff3a8'); g.addColorStop(.55, '#ff9d3c'); g.addColorStop(1, 'rgba(255,120,40,0)');
+  c.fillStyle = g; c.beginPath(); c.arc(34.6, 9.3, .75, 0, Math.PI * 2); c.fill();
 }
-function mirrorPair(c, w, draw) { draw(); mirrorX(c, w, draw); }
 
 function lurker(c) {
   const hide = '#2f5f57', hideDark = '#1b3d37', belly = '#9fbf8a', eye = '#e8d84a';
@@ -370,46 +401,44 @@ function lurker(c) {
 }
 
 function skeleton(c) {
+  // A person's frame, about the avatar's height: a small skull, a narrow ribcage, long bones.
   const bone = '#d8d2bc', boneDark = '#9d977f', socket = '#14100c', rust = '#8a5130';
   for (const s of [-1, 1]) {
-    const hip = 20 + s * 3;
-    fill(c, C(hip, 32, hip + s * .6, 40, 1.4), bone, {shade: .45});
-    fill(c, C(hip + s * .6, 40.6, hip + s * .4, 47, 1.2), bone, {shade: .45});
-    fill(c, E(hip + s * .4, 41, 1.7, 1.4), bone, {edge: .5});                                   // knee
-    fill(c, R(hip + s * .4 - 2.2 + (s > 0 ? 1 : 0), 46.6, 3.6, 2, .9), boneDark, {edge: .5});
+    const hip = 12 + s * 1.9;
+    fill(c, T(hip, 22.4, .95, hip + s * .3, 31, .75), bone, {shade: .45});
+    fill(c, E(hip + s * .3, 31.2, 1, .9), bone, {edge: .5});                                           // knee
+    fill(c, T(hip + s * .3, 31.6, .75, hip + s * .2, 39.4, .6), bone, {shade: .45});
+    fill(c, R(hip + s * .2 - 1.3 + (s > 0 ? .7 : 0), 39.4, 2.1, 1.2, .5), boneDark, {edge: .5});
   }
-  fill(c, P([[15.4, 30], [24.6, 30], [23.4, 34], [20, 35.2], [16.6, 34]], true), bone, {sheen: .4});   // pelvis
-  c.save(); c.strokeStyle = bone; c.lineWidth = 1.5;                                        // spine
-  c.beginPath(); c.moveTo(20, 19); c.lineTo(20, 31); c.stroke(); c.restore();
-  for (let i = 0; i < 4; i++) {                                                                  // ribs
-    const y = 20.4 + i * 2.4, w = 6.4 - i * .7;
+  fill(c, P([[8.6, 20.2], [15.4, 20.2], [14.4, 23.2], [12, 24], [9.6, 23.2]], true), bone, {sheen: .4});   // pelvis
+  c.save(); c.strokeStyle = OUTLINE; c.lineWidth = 1.5; c.beginPath(); c.moveTo(12, 7.6); c.lineTo(12, 20.6); c.stroke();
+  c.strokeStyle = bone; c.lineWidth = .8; c.setLineDash([.8, .35]); c.stroke(); c.restore();           // spine
+  for (let i = 0; i < 5; i++) {                                                                        // ribs
+    const y = 10 + i * 1.5, w = 4 - i * .35;
     for (const s of [-1, 1]) {
-      c.save(); c.strokeStyle = OUTLINE; c.lineWidth = 2.1;
-      c.beginPath(); c.moveTo(20, y); c.quadraticCurveTo(20 + s * w * 1.1, y - .4, 20 + s * w * .8, y + 2); c.stroke();
-      c.strokeStyle = i ? bone : '#ece7d4'; c.lineWidth = 1.1; c.stroke(); c.restore();
+      c.save(); c.strokeStyle = OUTLINE; c.lineWidth = 1.2;
+      c.beginPath(); c.moveTo(12, y); c.quadraticCurveTo(12 + s * w * 1.1, y - .3, 12 + s * w * .75, y + 1.4); c.stroke();
+      c.strokeStyle = i ? bone : '#ece7d4'; c.lineWidth = .6; c.stroke(); c.restore();
     }
   }
-  fill(c, C(13.6, 19.4, 26.4, 19.4, 1.1), bone, {edge: .6});                                  // collar
-  fill(c, C(13.4, 20, 11.6, 27.4, 1.25), bone, {shade: .45});                                 // far arm
-  fill(c, C(11.6, 27.8, 12.4, 33.4, 1.1), bone, {shade: .45});
-  fill(c, E(12.4, 34, 1.4, 1.2), boneDark, {edge: .5});
-  // a rusted blade, raised in the near hand
-  fill(c, P([[30.4, 31], [33.6, 6.4], [34.8, 4.6], [35.6, 6.8], [32.6, 31.6]]), '#9a9c92', {sheen: .55, shade: .45, light: [.2, .1]});
-  c.save(); c.strokeStyle = '#e4e6dc'; c.lineWidth = .5; c.beginPath(); c.moveTo(33.9, 8); c.lineTo(31.2, 30.6); c.stroke();
-  c.fillStyle = rgba(rust, .85); for (const [x, y, r] of [[33, 14, .9], [32.4, 20, .7], [32.8, 25, 1.1], [33.6, 10, .5]]) { c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); } c.restore();
-  fill(c, C(28.2, 31.6, 35.2, 32.6, .9), '#5a3a22', {edge: .6});                              // crossguard
-  fill(c, C(26.6, 20, 28.6, 27, 1.25), bone, {shade: .45});                                   // near arm
-  fill(c, C(28.6, 27.4, 31.6, 32.4, 1.1), bone, {shade: .45});
-  fill(c, E(31.6, 32.6, 1.5, 1.3), bone, {edge: .5});
-  const skull = E(20, 10.6, 6.6, 6.8);
-  fill(c, skull, bone, {sheen: .45, shade: .45});
-  fill(c, R(16.4, 13.6, 7.2, 4.8, 1.8), bone, {sheen: .3, shade: .45});                       // jaw
-  c.strokeStyle = rgba(OUTLINE, .75); c.lineWidth = .5;
-  for (let i = 0; i < 5; i++) { c.beginPath(); c.moveTo(17.4 + i * 1.3, 15.2); c.lineTo(17.4 + i * 1.3, 17.4); c.stroke(); }
-  c.beginPath(); c.moveTo(16.8, 16.2); c.lineTo(23.2, 16.2); c.stroke();
-  for (const s of [-1, 1]) { c.fillStyle = socket; c.beginPath(); c.ellipse(20 + s * 2.6, 10.8, 1.8, 2.1, s * .2, 0, Math.PI * 2); c.fill(); }
-  c.fillStyle = socket; c.beginPath(); c.moveTo(19.3, 14.2); c.lineTo(20, 12.6); c.lineTo(20.7, 14.2); c.fill();
-  c.strokeStyle = rgba(boneDark, .9); c.lineWidth = .5; c.beginPath(); c.moveTo(21.8, 4.6); c.lineTo(22.6, 6.6); c.lineTo(21.9, 7.8); c.stroke();  // a crack
+  fill(c, T(7.6, 9.6, .7, 16.4, 9.6, .7), bone, {edge: .6});                                         // collarbones
+  fill(c, T(7.6, 10, .8, 6.9, 16.4, .7), bone, {shade: .45});                                       // far arm
+  fill(c, T(6.9, 16.8, .7, 7.3, 22, .6), bone, {shade: .45});
+  fill(c, E(7.4, 22.6, .9, .8), boneDark, {edge: .5});
+  fill(c, P([[18.6, 19.8], [20.6, 2.2], [21.4, 1], [21.8, 2.4], [19.8, 20.2]]), '#9a9c92', {sheen: .55, shade: .45, light: [.2, .1]});   // a pitted old blade
+  c.save(); c.strokeStyle = '#e4e6dc'; c.lineWidth = .3; c.beginPath(); c.moveTo(20.9, 3); c.lineTo(19.1, 19.4); c.stroke();
+  c.fillStyle = rgba(rust, .85); for (const [x, y, r] of [[20.4, 7, .5], [19.9, 12, .45], [19.6, 16, .6]]) { c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); } c.restore();
+  fill(c, T(17.2, 20.4, .55, 22, 20, .55), '#5a3a22', {edge: .6});                                  // crossguard
+  fill(c, T(16.4, 10, .8, 18, 15.2, .7), bone, {shade: .45});                                       // near arm
+  fill(c, T(18, 15.6, .7, 19.2, 20.4, .6), bone, {shade: .45});
+  fill(c, E(19.2, 20.8, .95, .85), bone, {edge: .5});
+  fill(c, T(12, 6.6, .6, 12, 8.4, .6), bone, {edge: .5});                                            // neck
+  fill(c, E(12, 3.6, 2.7, 2.9), bone, {sheen: .45, shade: .45});                                   // skull
+  fill(c, R(10.4, 5, 3.2, 2.2, .9), bone, {sheen: .3, shade: .45});                                // jaw
+  c.strokeStyle = rgba(OUTLINE, .75); c.lineWidth = .25;
+  for (let i = 0; i < 4; i++) { c.beginPath(); c.moveTo(10.9 + i * .75, 5.6); c.lineTo(10.9 + i * .75, 6.8); c.stroke(); }
+  for (const s of [-1, 1]) { c.fillStyle = socket; c.beginPath(); c.ellipse(12 + s * 1.1, 3.6, .75, .85, s * .2, 0, Math.PI * 2); c.fill(); }
+  c.fillStyle = socket; c.beginPath(); c.moveTo(11.7, 5.1); c.lineTo(12, 4.4); c.lineTo(12.3, 5.1); c.fill();
 }
 
 function wisp(c) {
@@ -465,38 +494,45 @@ function wolf(c) {
   c.fillStyle = g; c.beginPath(); c.arc(48.8, 14, 1.1, 0, Math.PI * 2); c.fill();
 }
 const ENEMY_ART = {boar, lurker, skeleton, wisp, wolf};
-export function enemyCanvas(sprite, breathe = 0) {
+export function enemyCanvas(sprite, breathe = 0, west = false) {
   const draw = ENEMY_ART[sprite];
   if (!draw) return null;
-  const [w, h] = ENEMY_FRAMES[sprite];
-  return paintedCanvas(`enemy|${sprite}|${breathe}`, w, h, c => {
+  const [w, h] = ENEMY_FRAMES[sprite], scale = ENEMY_ART_FRAMES[sprite][2], flip = west && SIDE_ON.has(sprite);
+  return paintedCanvas(`enemy|${sprite}|${breathe}|${flip ? 'w' : 'e'}`, w, h, c => {
+    if (flip) { c.translate(w, 0); c.scale(-1, 1); }
     if (breathe) { c.translate(0, h); c.scale(1, 1 - .025); c.translate(0, -h); }   // a slow heave
+    c.scale(scale, scale);
     draw(c);
   }, {outline: sprite !== 'wisp'});
 }
 
 // --- the old man, the anchor stone ---------------------------------------------------
-export const ELDER_W = 36, ELDER_H = 60;
+export const ELDER_W = 30, ELDER_H = 46;
 function elder(c) {
+  // An old man of ordinary height, a little stooped over his staff (held west), hood up,
+  // a long white beard - drawn to the same proportions as the avatar.
   const robe = '#5b5d53', robeLight = '#7d7f72', hood = '#6b6457', skin = '#d8b48c', beard = '#ece6d6', staff = '#7b5a36';
-  fill(c, C(5.6, 6, 6.6, 59, 1.4), staff, {sheen: .35});                                       // staff (held west)
-  fill(c, E(5.6, 5, 2.4, 2.4), '#8a6a44', {edge: .6});
-  const body = P([[13, 20], [24, 18.6], [29, 30], [31.6, 57], [10.4, 57.6], [11.6, 34]], true);
+  fill(c, T(4.2, 4.6, .75, 5.2, 45.4, .6), staff, {sheen: .35});
+  fill(c, E(4.1, 3.8, 1.35, 1.3), '#8a6a44', {edge: .6});
+  const body = P([[11.4, 10.4], [18.8, 9.8], [21.6, 17], [23.8, 44.2], [16.4, 45], [9.2, 44.4], [10, 25]], true);
   fill(c, body, robe, {sheen: .28, shade: .5});
-  c.save(); c.beginPath(); body.path(c); c.clip(); c.strokeStyle = rgba('#3a3c34', .8); c.lineWidth = .8;
-  for (const x of [16, 21, 26]) { c.beginPath(); c.moveTo(x, 26); c.quadraticCurveTo(x + 1.4, 42, x + (x - 21) * .3, 57); c.stroke(); }
+  c.save(); c.beginPath(); body.path(c); c.clip(); c.strokeStyle = rgba('#3a3c34', .8); c.lineWidth = .5;
+  for (const x of [13, 16.4, 19.8]) { c.beginPath(); c.moveTo(x, 18); c.quadraticCurveTo(x + .8, 32, x + (x - 16.4) * .35, 45); c.stroke(); }
   c.restore();
-  fill(c, R(13, 33, 15.6, 2.2, 1), '#3a2c20', {edge: .5});                                   // rope belt
-  fill(c, C(14.4, 23, 7.4, 30.6, 2.4), robeLight, {sheen: .3});                                // arm to the staff
-  fill(c, E(6.8, 31, 2, 1.9), skin, {shade: .4});
-  for (const x of [14.4, 23.4]) fill(c, R(x, 56, 5.6, 3.4, 1.4), '#3a2c20', {sheen: .25});      // feet
-  fill(c, P([[12.2, 13], [15.4, 3.6], [22.4, 2.6], [27.6, 9.4], [28.4, 20.4], [24, 24.6], [14.6, 23.4]], true), hood, {sheen: .3, shade: .55});   // hood
-  fill(c, E(19.2, 14.6, 4.6, 5.2), skin, {sheen: .3, shade: .35});
-  fill(c, P([[14.6, 15], [19.6, 18.6], [23.8, 15.6], [23, 23.4], [19.6, 30.4], [15.4, 23.8]], true), beard, {sheen: .45, shade: .35});   // beard
-  strokes(c, P([[15, 17], [24, 17], [20, 30]]), '#b9b19c', 10, {len: 3.2, angle: Math.PI / 2, spread: .3, seed: 31, alpha: .7});
-  c.save(); c.strokeStyle = '#3a2618'; c.lineWidth = .7;
-  for (const x of [17, 21.4]) { c.beginPath(); c.moveTo(x - 1, 13.6); c.lineTo(x + 1, 13.8); c.stroke(); }   // kind narrowed eyes
-  c.strokeStyle = '#ffffff'; c.globalAlpha = .7; c.beginPath(); c.moveTo(16, 12.2); c.lineTo(18.4, 11.8); c.moveTo(20.4, 11.8); c.lineTo(22.8, 12.2); c.stroke(); c.restore();
+  fill(c, R(10.6, 22, 11, 1.3, .6), '#3a2c20', {edge: .5});                                          // rope belt
+  fill(c, T(15.2, 22.6, .45, 14.8, 27, .4), '#3a2c20', {edge: .4});
+  for (const x of [11.4, 17.6]) fill(c, R(x, 44.2, 3.6, 1.7, .8), '#3a2c20', {sheen: .25});           // feet
+  fill(c, T(12.8, 12.4, 1.6, 8, 17.4, 1.3), robeLight, {sheen: .3});                                 // arm to the staff
+  fill(c, T(8, 17.4, 1.3, 5.2, 20.2, 1.1), robeLight, {sheen: .3});
+  fill(c, E(4.9, 20.6, 1.15, 1.1), skin, {shade: .4});
+  fill(c, P([[11.2, 10.6], [11, 5.2], [13.6, 1.4], [17.6, 1.2], [20.2, 4.6], [20, 10.8], [16.4, 12]], true), hood, {sheen: .3, shade: .55});   // hood
+  fill(c, E(14.6, 6.4, 2.4, 2.9), skin, {sheen: .3, shade: .35, light: [.35, .3]});
+  fill(c, P([[12.4, 5.8], [11.3, 7.4], [12.4, 7.7]], true), skin, {edge: .45});                     // nose
+  fill(c, P([[12.4, 7.8], [16.8, 7.6], [17, 10.6], [15.2, 15.8], [12.6, 11.8]], true), beard, {sheen: .45, shade: .35});   // beard
+  strokes(c, P([[12.8, 8.4], [16.6, 8.4], [15, 15]]), '#b9b19c', 8, {len: 2.2, angle: Math.PI / 2, spread: .3, width: .3, seed: 31, alpha: .8});
+  c.save(); c.strokeStyle = '#f4efe2'; c.lineWidth = .55;                                         // bushy brows
+  c.beginPath(); c.moveTo(12.4, 5); c.lineTo(14.6, 4.8); c.stroke(); c.restore();
+  c.save(); c.strokeStyle = '#3a2618'; c.lineWidth = .3; c.beginPath(); c.moveTo(12.8, 5.9); c.lineTo(13.9, 6); c.stroke(); c.restore();
 }
 export function elderCanvas(facing = 'west') {
   return paintedCanvas(`elder|${facing}`, ELDER_W, ELDER_H, c => facing === 'east' ? mirrorX(c, ELDER_W, () => elder(c)) : elder(c));

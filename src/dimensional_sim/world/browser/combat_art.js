@@ -3,7 +3,7 @@
 import {TILE_W, TILE_H, visualHash} from './view.js';
 import {setupText} from './art.js';
 import {ACTOR_FOOT, FACING_ANGLE, OUTLINE, drawShadow, paintSprite, spriteSize} from './sprites.js';
-import {ENEMY_FRAMES, drawPainted, enemyCanvas, flashCanvas} from './painted.js';
+import {ENEMY_FRAMES, SIDE_ON, drawPainted, enemyCanvas, flashCanvas} from './painted.js';
 
 // 11 columns x 7 rows = 44x49 px.
 export const ENEMY = Object.freeze({paint: [
@@ -41,7 +41,7 @@ export const WOLF = Object.freeze({paint: [
 export const ENEMY_SPRITES = Object.freeze({boar: ENEMY, lurker: LURKER, skeleton: SKELETON, wisp: WISP, wolf: WOLF});
 
 /** Enemy at tile center (x, y). `hit` = ms since last HP loss; `dying` = 0..1 progress. */
-export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying = null, maxHp = 3, reducedMotion = false, ghost = false, reflection = false} = {}) {
+export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying = null, maxHp = 3, reducedMotion = false, ghost = false, reflection = false, west = false} = {}) {
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
   const sprite = ENEMY_SPRITES[target.sprite] || ENEMY;
@@ -51,8 +51,8 @@ export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying =
   const shake = !reducedMotion && hit < 160 ? (Math.floor(hit / 40) % 2 ? 2 : -2) : 0;
   const float = sprite === WISP ? (reducedMotion ? -8 : -8 + Math.round(3 * Math.sin((clock + seed % 900) / 260))) : 0;
   const kind = ENEMY_FRAMES[target.sprite] ? target.sprite : 'boar';
-  const painted = enemyCanvas(kind, breathe);
-  if (painted) return drawPaintedEnemy(ctx, target, painted, kind, x, y, {clock, hit, dying, maxHp, reducedMotion, ghost, reflection, shake, float, seed, breathe});
+  const painted = enemyCanvas(kind, breathe, west);
+  if (painted) return drawPaintedEnemy(ctx, target, painted, kind, x, y, {clock, hit, dying, maxHp, reducedMotion, ghost, reflection, shake, float: kind === 'wisp' ? float * .7 : float, seed, breathe, west});
   const left = x - width / 2 + shake, top = y + ACTOR_FOOT - height + breathe + float;
   if (dying !== null) {
     paintSprite(ctx, sprite, left, top - Math.round(dying * 6), {dissolve: dying, alpha: 1 - dying * .6, seed});
@@ -96,10 +96,10 @@ export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying =
 }
 
 /** The painted enemy (painted.js): same placement, flash, ghost, reflection and dying rules. */
-function drawPaintedEnemy(ctx, target, painted, kind, x, y, {clock, hit, dying, maxHp, reducedMotion, ghost, reflection, shake, float, seed, breathe}) {
+function drawPaintedEnemy(ctx, target, painted, kind, x, y, {clock, hit, dying, maxHp, reducedMotion, ghost, reflection, shake, float, seed, breathe, west}) {
   const [width, height] = ENEMY_FRAMES[kind];
   const left = x - width / 2 + shake, top = y + ACTOR_FOOT - height + float;
-  const key = `enemy|${kind}|${breathe}`;
+  const key = `enemy|${kind}|${breathe}|${west && SIDE_ON.has(kind) ? 'w' : 'e'}`;
   if (dying !== null) {   // sinks a little and fades as it dissolves
     drawPainted(ctx, painted, left, top - Math.round(dying * 6), 1 - dying);
     return {left, top, width, height};
@@ -112,24 +112,26 @@ function drawPaintedEnemy(ctx, target, painted, kind, x, y, {clock, hit, dying, 
   }
   if (reflection) { drawPainted(ctx, painted, left, top); return {left, top, width, height}; }
   if (kind === 'wisp') {   // a soft cold halo instead of a shadow on the ground
-    const glow = ctx.createRadialGradient(x, top + 15, 2, x, top + 15, 26);
+    const glow = ctx.createRadialGradient(x, top + 9, 1, x, top + 9, 17);
     glow.addColorStop(0, '#cfe6ff55'); glow.addColorStop(1, '#cfe6ff00');
-    ctx.fillStyle = glow; ctx.fillRect(x - 26, top - 11, 52, 52);
-    drawShadow(ctx, x, y, 7);
-  } else drawShadow(ctx, x, y, kind === 'wolf' ? 20 : kind === 'lurker' ? 19 : kind === 'skeleton' ? 11 : 17);
+    ctx.fillStyle = glow; ctx.fillRect(x - 17, top - 8, 34, 34);
+    drawShadow(ctx, x, y, 4);
+  } else drawShadow(ctx, x, y, kind === 'wolf' ? 15 : kind === 'lurker' ? 16 : kind === 'skeleton' ? 7 : 15);
   drawPainted(ctx, flash, left, top);
   if (hit >= 110 && !reducedMotion && kind === 'boar') {   // breath puffs from the snout
     ctx.save(); ctx.globalAlpha = .18 + .18 * Math.sin((clock + seed % 500) / 190);
     ctx.fillStyle = '#f1e2d6';
-    ctx.beginPath(); ctx.ellipse(left + 18, top + 40, 2, 1.2, 0, 0, Math.PI * 2); ctx.ellipse(left + 28, top + 40, 2, 1.2, 0, 0, Math.PI * 2); ctx.fill();
+    const nose = west ? left + 1 : left + width - 1;
+    ctx.beginPath(); ctx.ellipse(nose + (west ? -1.6 : 1.6), top + 13.4, 1.4, .8, 0, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
   if (hit >= 110 && kind === 'skeleton') {   // cold eye-light, flickering
     ctx.save(); ctx.globalAlpha = reducedMotion ? .8 : .55 + .45 * Math.abs(Math.sin((clock + seed % 700) / 230));
     for (const s of [-1, 1]) {
-      const g = ctx.createRadialGradient(left + 20 + s * 2.6, top + 10.8, 0, left + 20 + s * 2.6, top + 10.8, 2.4);
-      g.addColorStop(0, '#e8fbff'); g.addColorStop(.4, '#8fe3ff'); g.addColorStop(1, 'rgba(143,227,255,0)');
-      ctx.fillStyle = g; ctx.fillRect(left + 20 + s * 2.6 - 2.4, top + 8.4, 4.8, 4.8);
+      const ex = left + 12 + s * 1.1, ey = top + 3.6;
+      const g = ctx.createRadialGradient(ex, ey, 0, ex, ey, 1.3);
+      g.addColorStop(0, '#e8fbff'); g.addColorStop(.45, '#8fe3ff'); g.addColorStop(1, 'rgba(143,227,255,0)');
+      ctx.fillStyle = g; ctx.fillRect(ex - 1.3, ey - 1.3, 2.6, 2.6);
     }
     ctx.restore();
   }

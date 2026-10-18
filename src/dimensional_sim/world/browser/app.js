@@ -1,6 +1,6 @@
 /** Browser adapter: snapshots in, character art out. Python owns all game rules. */
 import {TILE_W, TILE_H, ZOOM, clamp, residentBounds, cameraView, follow, glide, retainResident, tileAt, visualHash, stickDirection, Controls} from './view.js';
-import {PALETTE, OBJECT_PAD, paintChunk, drawTree, treeKind, drawObjects, put, setResolution} from './art.js';
+import {PALETTE, OBJECT_PAD, paintChunk, treeAt, treeKind, drawObjects, canopyFade, put, setResolution} from './art.js';
 import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawUnarmedReach, drawDamage, drawFloat, drawReveal, drawSpot, drawSpotCompletion, drawCamp, drawBuildings, drawCampfire, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
 import {PAGES, needsDetail, pageModel, PANELS, COLLAPSE_KEY, loadCollapsed, toggleCollapsed, defaultCollapsed, subtabsOf} from './pages.js';
 import {debugText, ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
@@ -273,15 +273,47 @@ function attackPhase(player) {
 }
 /** Canopies south of an actor are repainted over it; over the avatar they are see-through,
  * so it never vanishes into the leaves while walking behind a tree. */
-function repaintCanopies(tx, ty, resident, alpha = 1) {
-  ctx.globalAlpha = alpha;
+let canopyLayer = null;
+/** Repaint the canopies that stand in front of an actor at tile (tx, ty), only over `box`
+ * (the actor's own picture, world px [x0, y0, x1, y1]; default: around the tile). */
+function repaintCanopies(tx, ty, resident, alpha = 1, box = null) {
+  const cx = (tx + .5) * TILE_W, cy = (ty + .5) * TILE_H;
+  const [bx0, by0, bx1, by1] = box || [cx - 22, cy - 48, cx + 22, cy + 14];
+  const trees = [];
   for (const tile of occludingTreeTiles(tx, ty)) {
     const chunk = resident.find(c => Math.floor(tile.x / c.width) === c.x && Math.floor(tile.y / c.height) === c.y);
     if (!chunk) continue;
     const lx = tile.x - chunk.x * chunk.width, ly = tile.y - chunk.y * chunk.height;
-    if (chunk.tiles[ly][lx] === 'T') drawTree(ctx, tile.x * TILE_W, tile.y * TILE_H, visualHash(tile.x, tile.y, chunk.seed), undefined, treeKind(chunk, lx, ly));
+    if (chunk.tiles[ly][lx] !== 'T') continue;
+    const t = treeAt(tile.x * TILE_W, tile.y * TILE_H, visualHash(tile.x, tile.y, chunk.seed), undefined, treeKind(chunk, lx, ly));
+    t.fade = actor ? canopyFade(tile.x - (actor.x / TILE_W - .5), tile.y - (actor.y / TILE_H - .5)) : 1;
+    if (t.x < bx1 && t.x + t.canvas.lw > bx0 && t.y < by1 && t.y + t.canvas.lh > by0) trees.push(t);
   }
-  ctx.globalAlpha = 1;
+  if (!trees.length) return;
+  if (alpha >= 1) { for (const t of trees) { ctx.globalAlpha = t.fade; put(ctx, t.canvas, t.x, t.y); } ctx.globalAlpha = 1; return; }
+  // See-through leaves: the overlapping trees are composed at full strength off-screen (so
+  // nearer canopies still hide farther trunks), then laid over the actor at `alpha`.
+  const m = ctx.getTransform();
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const t of trees) {
+    x0 = Math.min(x0, t.x); y0 = Math.min(y0, t.y); x1 = Math.max(x1, t.x + t.canvas.lw); y1 = Math.max(y1, t.y + t.canvas.lh);
+  }
+  x0 = Math.max(x0, bx0); y0 = Math.max(y0, by0); x1 = Math.min(x1, bx1); y1 = Math.min(y1, by1);   // only over the actor
+  const X0 = Math.max(0, Math.floor(m.a * x0 + m.e)), Y0 = Math.max(0, Math.floor(m.d * y0 + m.f));
+  const X1 = Math.min(canvas.width, Math.ceil(m.a * x1 + m.e)), Y1 = Math.min(canvas.height, Math.ceil(m.d * y1 + m.f));
+  if (X1 <= X0 || Y1 <= Y0) return;
+  canopyLayer ||= document.createElement('canvas');
+  if (canopyLayer.width < X1 - X0) canopyLayer.width = X1 - X0;
+  if (canopyLayer.height < Y1 - Y0) canopyLayer.height = Y1 - Y0;
+  const g = canopyLayer.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, X1 - X0, Y1 - Y0);
+  g.setTransform(m.a, 0, 0, m.d, m.e - X0, m.f - Y0);
+  g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'low';
+  for (const t of trees) { g.globalAlpha = t.fade; put(g, t.canvas, t.x, t.y); }
+  g.globalAlpha = 1;
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = alpha;
+  ctx.drawImage(canopyLayer, 0, 0, X1 - X0, Y1 - Y0, X0, Y0, X1 - X0, Y1 - Y0);
+  ctx.restore();
 }
 /** Exactly one request in flight. Server fixed ticks and input lease own timing. */
 async function poll() {
@@ -426,23 +458,53 @@ function render(now) {
       }
       if(!wet.length) continue;
       const at=enemyXY(t,now);
-      drawReflection(ctx,wet,at.y+ACTOR_FOOT,c=>drawEnemy(c,t,at.x,at.y,{clock:state.clock_ms,reducedMotion,reflection:true}),.32);
+      drawReflection(ctx,wet,at.y+ACTOR_FOOT,c=>drawEnemy(c,t,at.x,at.y,{clock:state.clock_ms,reducedMotion,reflection:true,west:actor.x<at.x}),.32);
     }
-    ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='low';   // trees and actors: resampled smoothly
-    for(const chunk of revealed) drawObjects(ctx,pictures.get(chunk.id),chunk.x*chunk.width*TILE_W,chunk.y*chunk.height*TILE_H);
     ctx.restore();
+    // Hidden ground stays dark (under the objects, so canopies of explored trees reach over it).
+    ctx.fillStyle='#101b17';
+    for(const chunk of visible) {
+      const x=chunk.x*chunk.width*TILE_W, y=chunk.y*chunk.height*TILE_H;
+      const rows=fog[`${chunk.x}:${chunk.y}`];
+      for(let row=0;row<chunk.height;row++) {
+        const mask=rows?.[row] || '';
+        for(let col=0;col<chunk.width;) {
+          if(mask[col] === '1') { col++; continue; }
+          const start=col;
+          while(col<chunk.width && mask[col] !== '1') col++;
+          ctx.fillRect(x+start*TILE_W,y+row*TILE_H,(col-start)*TILE_W,TILE_H);
+        }
+      }
+    }
+    // Trees, rocks and structures rooted in explored tiles draw whole - a tall canopy reaches
+    // over the dark beyond instead of being cut off at the fog line.
+    ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='low';   // trees and actors: resampled smoothly
+    for(const chunk of revealed) {
+      const rows=fog[`${chunk.x}:${chunk.y}`];
+      const ax=actor.x/TILE_W-.5, ay=actor.y/TILE_H-.5;
+      drawObjects(ctx,pictures.get(chunk.id),chunk.x*chunk.width*TILE_W,chunk.y*chunk.height*TILE_H,(tx,ty)=>rows?.[ty]?.[tx]==='1',
+        (tx,ty)=>chunk.tiles[ty][tx]==='T' && !state.expedition?.anchor_space ? canopyFade(chunk.x*chunk.width+tx-ax, chunk.y*chunk.height+ty-ay) : 1);
+    }
     const anchor = state.expedition?.anchor;
     if (anchor && inSight(anchor.x,anchor.y)) {
       drawAmbushSite(ctx, (anchor.x+.5)*TILE_W, (anchor.y+.5)*TILE_H);
       drawCamp(ctx, (anchor.x+.5)*TILE_W, (anchor.y+.5)*TILE_H, {clock: state.clock_ms, reducedMotion});
       drawBuildings(ctx, (anchor.x+.5)*TILE_W, (anchor.y+.5)*TILE_H, state.expedition?.camp?.buildings, {clock: state.clock_ms});
+      // the wreckage and camp lie on the ground: trees standing south of them stay in front
+      for (let dx = -7; dx <= 7; dx++) repaintCanopies(anchor.x + dx, anchor.y + 1, revealed, 1,
+        [(anchor.x + dx) * TILE_W, (anchor.y - 3) * TILE_H, (anchor.x + dx + 1) * TILE_W, (anchor.y + 3) * TILE_H]);
     }
     const fire = state.expedition?.campfire;
     if (fire && inSight(fire.x, fire.y))
       drawCampfire(ctx, (fire.x+.5)*TILE_W, (fire.y+.5)*TILE_H, {clock: state.clock_ms, reducedMotion});
+    if (fire && inSight(fire.x, fire.y)) repaintCanopies(fire.x, fire.y, revealed, 1);
     const goal = state.expedition?.goal;
-    for (const spot of state.spots || []) if(inSight(spot.x,spot.y)) drawSpot(ctx, spot, (spot.x+.5)*TILE_W, (spot.y+.5)*TILE_H,
-      {clock: state.clock_ms, goal: !!goal && goal.x === spot.x && goal.y === spot.y});
+    // Spots sit on the ground: canopies south of them cover them too, see-through so they still read.
+    const spots = (state.spots || []).filter(spot => inSight(spot.x, spot.y)).sort((a, b) => a.y - b.y);
+    for (const spot of spots) {
+      drawSpot(ctx, spot, (spot.x+.5)*TILE_W, (spot.y+.5)*TILE_H, {clock: state.clock_ms, goal: !!goal && goal.x === spot.x && goal.y === spot.y});
+      repaintCanopies(spot.x, spot.y, revealed, .55);
+    }
     for (const [id, f] of fadingSpots) {
       const age = now - f.at;
       if (age >= 650) { fadingSpots.delete(id); continue; }
@@ -482,15 +544,16 @@ function render(now) {
       else {
         const t=item.target, hit=hits.get(t.id), death=deaths.get(t.id);
         const at=enemyXY(t,now,dt);
-        drawEnemy(ctx,t,at.x,at.y,{clock:state.clock_ms,reducedMotion,
+        drawEnemy(ctx,t,at.x,at.y,{clock:state.clock_ms,reducedMotion,west:actor.x<at.x,
           hit:hit?now-hit.at:Infinity,dying:t.hp===0&&death?Math.min(1,(now-death.at)/600):null});
       }
-      repaintCanopies(item.tx,item.ty,revealed,item.kind==='player' ? .45 : 1);
+      // the avatar's own trees are already thinned (canopyFade); others' leaves are see-through
+      if(item.kind!=='player') repaintCanopies(item.tx,item.ty,revealed,.6);   // leaves over actors are see-through
     }
     for(const t of state.targets) if(inSight(t.x,t.y) && hiddenBehind(t,state.player)) {
       const hit=hits.get(t.id);
       const at=enemyXY(t,now);
-      drawEnemy(ctx,t,at.x,at.y,{clock:state.clock_ms,reducedMotion,ghost:true,hit:hit?now-hit.at:Infinity});
+      drawEnemy(ctx,t,at.x,at.y,{clock:state.clock_ms,reducedMotion,west:actor.x<at.x,ghost:true,hit:hit?now-hit.at:Infinity});
     }
     if (state.expedition?.control === 'manual' && !prologue) {
       const target = state.targets.find(t=>t.id===state.expedition.auto_target && t.hp>0 && inSight(t.x,t.y));
@@ -513,21 +576,6 @@ function render(now) {
     if(!reducedMotion) drawMotes(ctx,view.x-width/view.scale/2,view.y-height/view.scale/2,
       view.x+width/view.scale/2,view.y+height/view.scale/2,state.clock_ms,
       ...(state.expedition?.region?.shimmer ? [2.4, ['#b493ff', '#efe4ff']] : []));
-    // Mask actor art and effects that cross from a revealed tile into hidden ground.
-    ctx.fillStyle='#101b17';
-    for(const chunk of visible) {
-      const x=chunk.x*chunk.width*TILE_W, y=chunk.y*chunk.height*TILE_H;
-      const rows=fog[`${chunk.x}:${chunk.y}`];
-      for(let row=0;row<chunk.height;row++) {
-        const mask=rows?.[row] || '';
-        for(let col=0;col<chunk.width;) {
-          if(mask[col] === '1') { col++; continue; }
-          const start=col;
-          while(col<chunk.width && mask[col] !== '1') col++;
-          ctx.fillRect(x+start*TILE_W,y+row*TILE_H,(col-start)*TILE_W,TILE_H);
-        }
-      }
-    }
     for (let i = rewards.length - 1; i >= 0; i--) {
       const age = now - rewards[i].at;
       if (age > 1600) { rewards.splice(i, 1); continue; }

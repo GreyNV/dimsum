@@ -123,10 +123,12 @@ export function hiddenBehind(target, player) {
 export const TORSO_LIFT = 14;
 
 /** Tiles whose tree canopy must be repainted over an actor standing at (tx, ty):
- * trees one or two rows south and one column either side overlap the sprite. */
+ * trees up to five rows south and two columns either side overlap the sprite. */
 export function occludingTreeTiles(tx, ty) {
+  // Trees stand 2-4x a person (art.treeScale): canopies rooted up to five rows south and two
+  // columns aside can cover an actor.
   const result = [];
-  for (let dy = 1; dy <= 2; dy++) for (let dx = -1; dx <= 1; dx++) result.push({x: tx + dx, y: ty + dy});
+  for (let dy = 1; dy <= 5; dy++) for (let dx = -2; dx <= 2; dx++) result.push({x: tx + dx, y: ty + dy});
   return result;
 }
 

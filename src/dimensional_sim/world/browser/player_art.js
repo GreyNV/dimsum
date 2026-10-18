@@ -18,19 +18,19 @@ export function punchReach(player, phase) {
   return {windup: -3, strike: 15, recover: 6}[phase] ?? -3;
 }
 /** Shoulder of the punching arm, relative to the feet anchor. */
-const SHOULDER = {south: [9, -33], north: [-9, -33], east: [5, -33], west: [-5, -33]};
+const SHOULDER = {south: [8.1, -44.1], north: [-8.1, -44.1], east: [.9, -43.8], west: [-.9, -43.8]};   // x2/3 = painted shoulders
 
 /** Snap to the pixel-player art grid so arms step in whole art pixels. */
 const snap = v => Math.round(v / PIXEL) * PIXEL;
 function drawFist(ctx, sx, sy, fx, fy) {
   if (typeof document !== 'undefined') {   // painted: a sleeved arm and a round fist
     ctx.save(); ctx.lineCap = 'round';
-    ctx.strokeStyle = OUTLINE; ctx.lineWidth = 5.4; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(fx, fy); ctx.stroke();
-    ctx.fillStyle = OUTLINE; ctx.beginPath(); ctx.arc(fx, fy, 3, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = HERO.scarf; ctx.lineWidth = 3.6; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(fx, fy); ctx.stroke();
+    ctx.strokeStyle = OUTLINE; ctx.lineWidth = 4.1; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(fx, fy); ctx.stroke();
+    ctx.fillStyle = OUTLINE; ctx.beginPath(); ctx.arc(fx, fy, 2.1, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = HERO.sleeve; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(fx, fy); ctx.stroke();
     ctx.strokeStyle = 'rgba(255, 230, 200, .25)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sx - .8, sy - .8); ctx.lineTo(fx - .8, fy - .8); ctx.stroke();
-    ctx.fillStyle = HERO.skin; ctx.beginPath(); ctx.arc(fx, fy, 2.1, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = 'rgba(255, 240, 220, .55)'; ctx.beginPath(); ctx.arc(fx - .6, fy - .7, .8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = HERO.skin; ctx.beginPath(); ctx.arc(fx, fy, 1.35, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255, 240, 220, .55)'; ctx.beginPath(); ctx.arc(fx - .4, fy - .5, .5, 0, Math.PI * 2); ctx.fill();
     ctx.restore(); return;
   }
   sx = snap(sx); sy = snap(sy); fx = snap(fx); fy = snap(fy);
@@ -210,8 +210,8 @@ export const WEAPON_LOOKS = Object.freeze({
 function pixelLine(ctx, x0, y0, x1, y1, color, light = null) {
   if (typeof document !== 'undefined') {   // painted: an outlined round-capped shaft with a lit edge
     ctx.save(); ctx.lineCap = 'round';
-    ctx.strokeStyle = OUTLINE; ctx.lineWidth = 3.6; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2.9; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
     if (light) { ctx.strokeStyle = light; ctx.lineWidth = .7; ctx.beginPath(); ctx.moveTo(x0 - .5, y0 - .5); ctx.lineTo(x1 - .5, y1 - .5); ctx.stroke(); }
     ctx.restore(); return;
   }
@@ -234,14 +234,14 @@ export function weaponPose(weapon, facing, x, y, phase, clock = 0, walking = fal
   const look = WEAPON_LOOKS[weapon.item];
   const foot = y + ACTOR_FOOT;
   if (phase === null) {   // carried upright in the leading hand
-    const side = {south: 8, north: -8, east: 5, west: -5}[facing] ?? 8;
+    const side = {south: 6.3, north: -6.3, east: 3.4, west: -3.4}[facing] ?? 6.3;
     const sway = walking ? Math.round(Math.sin(clock / 120)) * PIXEL : 0;
-    const gx = x + side, gy = foot - 14;
+    const gx = x + side, gy = foot - 17.8;
     return {grip: [gx, gy], from: [gx + sway, gy + 8], to: [gx + 2 + sway, gy - look.length + 8],
             behind: facing === 'north', angle: -Math.PI / 2};
   }
   const a = FACING_ANGLE[facing] ?? Math.PI / 2;
-  const sx = x + Math.cos(a) * 4, sy = foot - 20 + Math.sin(a) * 3;
+  const sx = x + Math.cos(a) * 4, sy = foot - 26 + Math.sin(a) * 3;
   if (weapon.shape === 'swing') {   // raised behind the shoulder, chopped down through the facing
     const turn = {windup: -1.5, strike: 0.15, recover: 0.8}[phase] ?? -1.5;
     const b = a + turn;
@@ -348,9 +348,9 @@ export function workingHands(activity, facing, x, y, clock = 0, reducedMotion = 
     if (dx || dy) dir = Math.abs(dy) >= Math.abs(dx) ? (dy > 0 ? 'south' : 'north') : (dx > 0 ? 'east' : 'west');
   }
   const beat = reducedMotion ? 0 : Math.round(Math.sin(clock / 145) * 2);
-  const shoulderY = y + 1;   // compact frame: shoulders near the torso, below the head
+  const shoulderY = y - 3;   // compact frame: shoulders below the head
   if (dir === 'south') return {behind: false, arms: [
-    [x - 6, shoulderY, x - 4, y + 7 + beat], [x + 6, shoulderY, x + 4, y + 7 - beat]]};
+    [x - 5, shoulderY, x - 3.6, y + 5 + beat], [x + 5, shoulderY, x + 3.6, y + 5 - beat]]};
   if (dir === 'north') return {behind: true, arms: [
     [x - 6, shoulderY, x - 7, y - 10 + beat], [x + 6, shoulderY, x + 7, y - 10 - beat]]};
   const side = dir === 'east' ? 1 : -1;
@@ -372,7 +372,7 @@ function drawActionInteraction(ctx, activity, x, y, clock, reducedMotion, {armDr
   const beat = reducedMotion ? 0 : Math.sin(clock / (activity.kind === 'climb' ? 170 : 145));
   const touch = ['forage','gather','climb','drink','study','hunt'].includes(activity.kind);
   if (touch && !armDrawn) {   // climbing: the standing sprite reaches up from the chest
-    const sx = x + ux * 5, sy = y - 11 + uy * 2;
+    const sx = x + ux * 5, sy = y - 16 + uy * 2;
     const reach = 8 + beat * 3;
     drawFist(ctx, sx, sy, sx + ux * reach, sy + uy * reach - (activity.kind === 'climb' ? 5 + beat * 4 : 0));
   }

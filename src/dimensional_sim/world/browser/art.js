@@ -7,7 +7,7 @@ import {paintParts} from './sprites.js';
 import {fineResolution} from './fine_art.js';
 import {paintedResolution} from './painted.js';
 import {structureCanvas} from './painted_props.js';
-import {SHALLOW_BG, WATER_BG, blooms, drawBlooms, drawFlagstones, drawPath, drawPlanks, drawRubble, drawScorch, drawBlades, drawReflection, drawShores, isWater, drawLitRock, drawRipples, grassBlades, ripples, TREE_ART} from './nature_art.js';
+import {SHALLOW_BG, WATER_BG, blooms, drawBlooms, drawFlagstones, drawPath, drawPlanks, drawRubble, drawScorch, drawBlades, drawReflection, drawShores, isWater, drawLitRock, drawRipples, grassBlades, ripples, TREE_ART, withDetail} from './nature_art.js';
 export const PALETTE = Object.freeze({
   void: '#11180f', floor: '#172011', path: '#242418',
   grass: ['#334824', '#405930', '#59713b', '#748648'],
@@ -91,7 +91,7 @@ export function groundMarks(glyph, x, y, seed) {
   }
   return marks;
 }
-export const OBJECT_PAD = 56;
+export const OBJECT_PAD = 150;
 /* Stamp cache: each ground tile, tree and rock is drawn once per visual variant and
  * then copied with drawImage. Painting a chunk drops from ~12k fillText calls to
  * ~600 image copies, which removes the hitch when new chunks stream in at a border.
@@ -160,9 +160,26 @@ function tileStamp(glyph, variant, createCanvas) {
     if (terrain === '*') drawBlooms(ctx, blooms(variant, STAMP_SEED));
   }, createCanvas);
 }
+/* Trees come in sizes: each kind has its own range (pines and old trees tower, dead trees and
+ * birches stay slimmer), picked per variant, so a forest is never a row of identical lollipops
+ * and a tree stands two to four times the height of a person. */
+const TREE_SIZES = Object.freeze({o: [1.35, 1.85], p: [1.55, 2.2], b: [1.4, 1.9], d: [1.2, 1.7], m: [1.8, 2.2]});
+export function treeScale(kind, variant) {
+  const [lo, hi] = TREE_SIZES[kind] || TREE_SIZES.o;
+  return Math.round((lo + (hi - lo) * ((variant * 5 + 3) % TREE_VARIANTS) / (TREE_VARIANTS - 1)) * 20) / 20;
+}
 function treeStamp(variant, createCanvas, kind = 'o') {
-  const draw = TREE_ART[kind] || TREE_ART.o;
-  return stamp(`tree:${TREE_ART[kind] ? kind : 'o'}:${variant}`, 52, 70, ctx => draw(ctx, variant), createCanvas);
+  const known = TREE_ART[kind] ? kind : 'o', draw = TREE_ART[known], scale = treeScale(known, variant);
+  return stamp(`tree:${known}:${variant}`, 52 * scale, 70 * scale, ctx => {
+    ctx.scale(scale, scale);
+    withDetail(scale, () => draw(ctx, variant));
+  }, createCanvas);
+}
+/** Where a tree stamp goes for the tile whose top-left is (px, py): the roots (stamp 26, 62)
+ * on the tile's lower middle. */
+export function treeAt(px, py, seed, createCanvas = defaultCanvas, kind = 'o') {
+  const variant = seed % TREE_VARIANTS, known = TREE_ART[kind] ? kind : 'o', scale = treeScale(known, variant);
+  return {canvas: treeStamp(variant, createCanvas, known), x: px + 12 - 26 * scale, y: py + 20 - 62 * scale};
 }
 /** {canvas, dx, dy}: the stamp and its offset from the tile's top-left corner. */
 function structureStamp(glyph, createCanvas) {
@@ -187,7 +204,8 @@ function rockStamp(variant, createCanvas) {
 /** Tree whose logical tile top-left is (px, py). The trunk sits over the blocking
  * cell; canopy overhang is visual. Reused to repaint canopies in front of actors. */
 export function drawTree(ctx, px, py, seed, createCanvas, kind = 'o') {
-  put(ctx, treeStamp(seed % TREE_VARIANTS, createCanvas, kind), px - 14, py - 42);
+  const tree = treeAt(px, py, seed, createCanvas, kind);
+  put(ctx, tree.canvas, tree.x, tree.y);
 }
 /** The tree kind letter at a chunk cell (frames send chunk.trees; older frames: oak). */
 export const treeKind = (chunk, x, y) => chunk.trees?.[y]?.[x] || 'o';
@@ -198,7 +216,8 @@ export function paintChunk(chunk, createCanvas = defaultCanvas) {
   const width = chunk.width * TILE_W, height = chunk.height * TILE_H;
   const {canvas: ground, ctx: g} = surface(width, height, createCanvas);
   const objects = [];
-  const o = {drawImage: (canvas, x, y) => objects.push({canvas, x: x - OBJECT_PAD, y: y - OBJECT_PAD})};
+  let tile = [0, 0];   // the root tile of the object being placed (drawObjects can skip hidden ones)
+  const o = {drawImage: (canvas, x, y) => objects.push({canvas, x: x - OBJECT_PAD, y: y - OBJECT_PAD, tx: tile[0], ty: tile[1]})};
   let wet = false;
   for (let y = 0; y < chunk.height; y++) for (let x = 0; x < chunk.width; x++) {
     const glyph = chunk.tiles[y][x], px = x * TILE_W, py = y * TILE_H;
@@ -206,7 +225,8 @@ export function paintChunk(chunk, createCanvas = defaultCanvas) {
     const seed = visualHash(gx, gy, chunk.seed);
     put(g, tileStamp(glyph, seed % TILE_VARIANTS, createCanvas), px, py);
     wet ||= isWater(glyph);
-    if (glyph === 'T') o.drawImage(treeStamp(seed % TREE_VARIANTS, createCanvas, treeKind(chunk, x, y)), px + OBJECT_PAD - 14, py + OBJECT_PAD - 42);
+    tile = [x, y];
+    if (glyph === 'T') { const tree = treeAt(px, py, seed, createCanvas, treeKind(chunk, x, y)); objects.push({canvas: tree.canvas, x: tree.x, y: tree.y, tx: x, ty: y}); }
     else if (glyph === '^') o.drawImage(rockStamp(seed % ROCK_VARIANTS, createCanvas), px + OBJECT_PAD - 4, py + OBJECT_PAD - 4);
     else if (STRUCTURE_ART[glyph]) {
       const {canvas, dx, dy} = structureStamp(glyph, createCanvas);
@@ -217,8 +237,24 @@ export function paintChunk(chunk, createCanvas = defaultCanvas) {
   return {ground, objects};
 }
 /** Draw a painted chunk's objects with the chunk's top-left at (ox, oy). */
-export function drawObjects(ctx, picture, ox, oy) {
-  for (const item of picture.objects) put(ctx, item.canvas, ox + item.x, oy + item.y);
+export function drawObjects(ctx, picture, ox, oy, shown = null, alpha = null) {
+  for (const item of picture.objects) {
+    if (shown && !shown(item.tx, item.ty)) continue;
+    const a = alpha ? alpha(item.tx, item.ty) : 1;
+    if (a <= 0) continue;
+    if (a < 1) { ctx.globalAlpha = a; put(ctx, item.canvas, ox + item.x, oy + item.y); ctx.globalAlpha = 1; }
+    else put(ctx, item.canvas, ox + item.x, oy + item.y);
+  }
+}
+/** Leaves thin out around the avatar: trees rooted just south of it and a few columns aside
+ * (the ones whose canopies cover the ground it stands on) fade, so the way ahead stays readable
+ * in deep woods. `dx`, `dy` in tiles from the avatar to the tree's root (south positive). */
+export function canopyFade(dx, dy) {
+  if (dy < -1 || dy > 6) return 1;
+  const ax = Math.abs(dx);
+  if (ax <= 1.5 && dy <= 5) return .28;
+  if (ax <= 3 && dy <= 6) return .55;
+  return 1;
 }
 /** Banks, then trees, rocks and structures mirrored in the water south of them. */
 function reflect(g, chunk, createCanvas) {

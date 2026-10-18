@@ -366,9 +366,9 @@ export function drawElder(ctx, x, y, {clock = 0, facing = 'west', alpha = 1, tal
   if (painted) drawPainted(ctx, painted, left, top, alpha);
   else paintParts(ctx, sprite, ELDER_ROLES, left, top, alpha);
   // Lantern-warm glint on the staff head.
-  const gx = painted ? (facing === 'east' ? left + width - 7.6 : left + 3.6) : facing === 'east' ? left + width - CELL_W * 2 : left + CELL_W;
+  const gx = painted ? (facing === 'east' ? left + width - 6.1 : left + 2.1) : facing === 'east' ? left + width - CELL_W * 2 : left + CELL_W;
   ctx.globalAlpha = alpha * (.35 + (reducedMotion ? .1 : .15 * Math.sin(clock / 300)));
-  const glow = ctx.createRadialGradient(gx + 2, top + 3, 1, gx + 2, top + 3, 14);
+  const glow = ctx.createRadialGradient(gx + 2, top + 3.8, 1, gx + 2, top + 3.8, 12);
   glow.addColorStop(0, '#ffe7a0'); glow.addColorStop(1, '#ffe7a000');
   ctx.fillStyle = glow; ctx.fillRect(gx - 12, top - 11, 28, 28);
   if (talking) {  // three speech dots above the hood

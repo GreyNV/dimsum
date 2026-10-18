@@ -187,8 +187,8 @@ test('x-ray and canopy occlusion are presentation helpers from authoritative til
   assert.ok(!hiddenBehind({x:5,y:6,hp:2},{x:5,y:5}));
   assert.ok(!hiddenBehind({x:5,y:4,hp:0},{x:5,y:5}));
   const tiles=occludingTreeTiles(-3,-7);
-  assert.equal(tiles.length,6);
-  assert.ok(tiles.every(t=>t.y>-7 && Math.abs(t.x+3)<=1));
+  assert.equal(tiles.length,25,'tall trees: five rows south, two columns aside');
+  assert.ok(tiles.every(t=>t.y>-7 && t.y<=-2 && Math.abs(t.x+3)<=2));
 });
 
 test('movement taps between polls reach the server once each, separated by a release',()=>{
