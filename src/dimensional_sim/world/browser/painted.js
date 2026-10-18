@@ -10,11 +10,12 @@
  * Presentation only and deterministic. Without a DOM (node tests) every builder returns null
  * and callers keep their cell-sprite fallback.
  */
-import {asciify} from './ascii_art.js';
+import {READ_K, asciify, onStyleChange} from './ascii_art.js';
 const OUTLINE = '#070a06';
 let RES = 2;
 const cache = new Map();
 export function paintedResolution(res) { if (res !== RES) { RES = res; cache.clear(); } }
+onStyleChange(() => cache.clear());
 export const paintedCount = () => cache.size;
 const PAD = 2;
 
@@ -23,21 +24,21 @@ const PAD = 2;
 export function paintedCanvas(key, w, h, draw, {outline = true} = {}) {
   if (cache.has(key)) return cache.get(key);
   if (typeof document === 'undefined' || !document.createElement) return null;
-  const W = w + PAD * 2, H = h + PAD * 2, k = RES;
+  const W = w + PAD * 2, H = h + PAD * 2, k = RES, kr = READ_K;   // painted fine, for reading
   const art = document.createElement('canvas');
-  art.width = Math.ceil(W * k); art.height = Math.ceil(H * k);
+  art.width = Math.ceil(W * kr); art.height = Math.ceil(H * kr);
   const a = art.getContext('2d');
-  a.scale(k, k); a.translate(PAD, PAD); a.lineJoin = 'round'; a.lineCap = 'round';
+  a.scale(kr, kr); a.translate(PAD, PAD); a.lineJoin = 'round'; a.lineCap = 'round';
   // Soft layers stay out of the silhouette: `under` (ground shadows) is painted beneath the
   // outlined art, `after` (glows) above it. Kit functions push to them (see onLayer).
   a.under = []; a.after = [];
   draw(a);
   // Shown as text, never as the picture: the ASCII shader reads it (ascii_art.js).
-  const text = asciify(art, w, h, k, {pad: PAD, lift: 1.45, whiten: .45});
+  const text = asciify(art, w, h, kr, k, {pad: PAD});
   let out = text;
   if (a.under.length || a.after.length) {
     out = document.createElement('canvas');
-    out.width = art.width; out.height = art.height;
+    out.width = text.width; out.height = text.height;
     const o = out.getContext('2d');
     const layer = list => { if (!list.length) return; o.save(); o.scale(k, k); o.translate(PAD, PAD); o.lineJoin = 'round'; o.lineCap = 'round'; for (const f of list) f(o); o.restore(); };
     layer(a.under);

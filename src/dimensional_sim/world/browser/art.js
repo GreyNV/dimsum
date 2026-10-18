@@ -5,7 +5,7 @@
 import {TILE_W, TILE_H, CELL_W, CELL_H, visualHash} from './view.js';
 import {paintParts} from './sprites.js';
 import {paintedResolution} from './painted.js';
-import {asciify, asciiReady} from './ascii_art.js';
+import {READ_K, asciify, asciiReady, onStyleChange} from './ascii_art.js';
 import {structureCanvas} from './painted_props.js';
 import {SHALLOW_BG, WATER_BG, blooms, drawBlooms, drawFlagstones, drawPath, drawPlanks, drawRubble, drawScorch, drawBlades, drawReflection, drawShores, isWater, drawLitRock, drawRipples, grassBlades, ripples, TREE_ART, withDetail} from './nature_art.js';
 export const PALETTE = Object.freeze({
@@ -113,12 +113,12 @@ export function setResolution(res) {
   return RES;
 }
 /** A canvas `width` x `height` logical pixels, backed at RES, with the context scaled. */
-function surface(width, height, createCanvas) {
+function surface(width, height, createCanvas, k = RES) {
   const canvas = createCanvas();
-  canvas.width = Math.ceil(width * RES); canvas.height = Math.ceil(height * RES);
+  canvas.width = Math.ceil(width * k); canvas.height = Math.ceil(height * k);
   canvas.lw = width; canvas.lh = height;
   const ctx = canvas.getContext('2d');
-  if (RES !== 1) ctx.scale(RES, RES);
+  if (k !== 1) ctx.scale(k, k);
   return {canvas, ctx};
 }
 /** Copy a stamp or chunk surface at its logical size. */
@@ -128,20 +128,22 @@ export function put(ctx, canvas, x, y) {
 function stamp(key, width, height, draw, createCanvas = defaultCanvas, {ascii = false} = {}) {
   let canvas = stamps.get(key);
   if (!canvas) {
-    const made = surface(width, height, createCanvas);
+    // trees, rocks and ground are painted fine as pictures, then shown as text (ascii_art.js)
+    const text = ascii && createCanvas === defaultCanvas && asciiReady();
+    const made = surface(width, height, createCanvas, text ? READ_K : RES);
     canvas = made.canvas; setupText(made.ctx); draw(made.ctx);
-    // trees and rocks are shaded as pictures, then shown as text (ascii_art.js)
-    if (ascii && createCanvas === defaultCanvas && asciiReady()) canvas = Object.assign(asciify(canvas, width, height, RES, ascii === true ? {lift: 1.3, whiten: .06} : ascii), {lw: width, lh: height});
+    if (text) canvas = Object.assign(asciify(canvas, width, height, READ_K, RES, ascii === true ? {} : ascii), {lw: width, lh: height});
     stamps.set(key, canvas);
   }
   return canvas;
 }
 export function clearStamps() { stamps.clear(); }
+onStyleChange(() => stamps.clear());
 export function stampCount() { return stamps.size; }
 /* Ground in text too: blades become strokes, earth and stone sparse dots, over a near-black base,
  * with light read on one fixed scale so neighbouring tiles match. Cells divide the 24 x 28 tile. */
-const GROUND_ASCII = {cell: [1.5, 28 / 11], ground: false, absolute: [.04, .3], base: '#0b1009', lift: 1.45, edges: false, whiten: 0,
-  glyphs: " .'`,:;-!|/\\"};
+const GROUND_ASCII = {cell: [1.5, 28 / 11], ground: false, absolute: [.04, .3], base: '#0b1009',
+  style: {backing: 'none', lift: 1.45, whiten: 0}, glyphs: " .'`,:;-!|/\\"};
 function tileStamp(glyph, variant, createCanvas) {
   const terrain = '=;o~x:w%H*F'.includes(glyph) ? glyph : '.';
   return stamp(`tile:${terrain}:${variant}`, TILE_W, TILE_H, ctx => {
