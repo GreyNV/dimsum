@@ -25,6 +25,7 @@ def started(seed=482910):
     while e.in_prologue:
         e.advance(500)
     e.goal = e.task = None
+    e.unlocked.add("return_anchor")
     return e
 
 
@@ -36,7 +37,7 @@ class OpeningTests(unittest.TestCase):
         self.assertEqual(e.total_ms, 0, "the anchor waits for the player")
         view = BrowserSession(e.game, e).state(0)["expedition"]
         self.assertEqual(view["anchor_space"]["kind"], "opening")
-        self.assertEqual([r["id"] for r in view["shop"]], ["campfire"], "the shop is shown before the first life")
+        self.assertEqual([r["id"] for r in view["shop"]], ["return_anchor", "campfire"], "the shop is shown before the first life")
         again = Expedition.from_dict(json.loads(dump(e)))
         self.assertEqual(dump(again), dump(e))
         e.anchor_action({"type": "begin_life"})
@@ -51,6 +52,24 @@ class OpeningTests(unittest.TestCase):
 
 
 class ContactTests(unittest.TestCase):
+    def test_contact_requires_the_ten_ash_skill_and_recharges_for_five_minutes(self):
+        e = started()
+        e.unlocked.remove("return_anchor")
+        with self.assertRaisesRegex(ValueError, "locked"):
+            e.anchor_action({"type": "contact"})
+        e.health = 0
+        e.advance(0)
+        e.ash = 10
+        e.anchor_action({"type": "unlock", "id": "return_anchor"})
+        self.assertEqual(e.ash, 0)
+        e.anchor_action({"type": "begin_life"})
+        e.anchor_action({"type": "contact"})
+        e.anchor_action({"type": "resume"})
+        self.assertEqual(e.contact_ready_ms, e.total_ms + ap.CONTACT_COOLDOWN_MS)
+        self.assertEqual(ap.CONTACT_COOLDOWN_MS, 300_000)
+        with self.assertRaisesRegex(ValueError, "recharging"):
+            e.anchor_action({"type": "contact"})
+
     def test_contacting_the_anchor_freezes_the_world_until_resumed(self):
         e = started()
         e.inventory, e.ash = {"stick": 3}, 40
@@ -158,7 +177,7 @@ class PossessionTests(unittest.TestCase):
 
 
 class MigrationTests(unittest.TestCase):
-    def test_schema_seventeen_drops_blessings_and_refunds_the_return_skill(self):
+    def test_schema_seventeen_preserves_the_paid_return_skill(self):
         e = started()
         old = v17(e.to_dict())
         old.update(blessing=20, boon="iron_skin", boon_next="bountiful_path", return_ready_ms=5, ash=3,
@@ -166,8 +185,9 @@ class MigrationTests(unittest.TestCase):
         old["log"].append({**old["log"][-1], "seq": old["log"][-1]["seq"] + 1, "type": "blessing", "blessing": 1})
         old["journal"]["actions"]["pray"] = 4
         loaded = Expedition.from_dict(json.loads(json.dumps(old)))
-        self.assertEqual(loaded.ash, 13, "the 10 ash return skill is refunded")
-        self.assertEqual(loaded.unlocked, {"climbing", "campfire"})
+        self.assertEqual(loaded.ash, 3)
+        self.assertEqual(loaded.unlocked, {"return_anchor", "climbing", "campfire"})
+        self.assertEqual(loaded.contact_ready_ms, 5)
         self.assertNotIn("pray", loaded.journal["actions"])
         self.assertEqual(loaded.log[-1]["type"], "lore")
         saved = loaded.to_dict()

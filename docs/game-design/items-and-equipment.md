@@ -58,6 +58,6 @@ Final pacing, pity, duplicate conversion and higher-rarity stat generation remai
 
 ## Design change 2026-10-04: gathered items
 Approved by the user for the world auto-pilot: a small current-life inventory of
-gathered food and materials (12 slots x 20). Food is auto-eaten with a cooldown;
+gathered food and materials (12 slots x 20). Food is auto-eaten when its full hunger value fits;
 materials are kept for future crafting/binding at the anchor camp. The inventory
 is lost at anchor return. Soulbound equipment is still summon-only and persists.

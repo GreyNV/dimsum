@@ -201,12 +201,11 @@ def _from_v16(data):
 
 
 def _from_v17(data):
-    """No more blessing, boons or the random prayer; the return-to-anchor skill (refunded)
-    became contacting the anchor; the campfire, free before, is kept as a bought skill."""
+    """Drop blessings, boons, prayer and old skill fields; keep a paid anchor return."""
     fields(data, V17_SAVE_FIELDS)
+    return_ready_ms = data["return_ready_ms"]
     data = {k: v for k, v in data.items() if k not in V18_DROPPED}
-    unlocked = set(data["unlocked"]) - {"return_anchor"}
-    refund = 10 if "return_anchor" in data["unlocked"] else 0
+    unlocked = set(data["unlocked"])
     log = [{**{k: v for k, v in e.items() if k != "blessing"},
             "type": "lore" if e.get("type") == "blessing" else e.get("type")} for e in data["log"]]
     journal = dict(data["journal"])
@@ -215,9 +214,9 @@ def _from_v17(data):
     task, goal = data["task"], data["goal"]
     if isinstance(task, dict) and task.get("type") == "pray":
         task, goal = None, None
-    return {**data, "schema_version": 18, "unlocked": sorted(unlocked | {"campfire"}), "ash": data["ash"] + refund,
+    return {**data, "schema_version": 18, "unlocked": sorted(unlocked | {"campfire"}),
             "log": log, "journal": journal, "task": task, "goal": goal,
-            "contact_ready_ms": 0, "possess_end_ms": None, "possess_ready_ms": 0, "opening": False}
+            "contact_ready_ms": return_ready_ms, "possess_end_ms": None, "possess_ready_ms": 0, "opening": False}
 
 
 def _from_v18(data):

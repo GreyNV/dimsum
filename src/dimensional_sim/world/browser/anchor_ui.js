@@ -8,8 +8,8 @@ import {shopSections} from './hud.js';
 export const ANCHOR_TEXT = Object.freeze({
   opening: {
     eyebrow: 'Before your first life', title: 'The anchor',
-    dialogue: '“I am the anchor. When your avatar falls, I pull you back here. Whatever it carries when it falls turns into dimensional ash, and ash buys what lasts: crafts you learn, camp buildings, new skills. Reach for me any time - I will hear you.”',
-    hint: 'Skills: 1 contacts the anchor without dying (the world waits), 2 makes a campfire once bought, 3 lets you possess the avatar for 30 seconds - quicker hands, your direction. New kinds of encounters open by themselves as your dimensional levels grow.',
+    dialogue: '“I am the anchor. When your avatar falls, I pull you back here. Whatever it carries when it falls turns into dimensional ash, and ash buys what lasts: crafts you learn, camp buildings, new skills. Buy the contact skill and you may reach me during a life.”',
+    hint: 'Skills: 1 contacts the anchor once bought, 2 makes a campfire once bought, 3 lets you possess the avatar for 30 seconds. New encounters open as your dimensional levels grow.',
     begin: 'Begin your first life'},
   death: {
     eyebrow: 'Between lives', title: 'The anchor holds you',
@@ -44,7 +44,11 @@ export function renderAnchor(ex) {
   $('anchor-dialogue').hidden = !dialogue;
   $('anchor-dialogue').textContent = dialogue;
   $('anchor-hint').textContent = text.hint;
-  $('anchor-begin').textContent = text.begin;
+  const unkept = anchor.kind === 'death' ? (ex.shop || []).filter(row => row.kind === 'keep') : [];
+  $('anchor-recipe-note').hidden = !unkept.length;
+  $('anchor-recipe-note').textContent = unkept.length
+    ? `${unkept.length} craft ${unkept.length === 1 ? 'recipe' : 'recipes'} found this life. Keep them with ash below, or they will be forgotten when the next life begins.` : '';
+  $('anchor-begin').textContent = unkept.length ? `Begin next life and forget ${unkept.length} ${unkept.length === 1 ? 'recipe' : 'recipes'}` : text.begin;
   $('anchor-begin').dataset.kind = anchor.kind;
   const shop = $('anchor-shop'), sections = shopSections(ex.shop);
   shop.replaceChildren(...sections.flatMap(section => [el('h3', '', section.title), ...section.rows.map(shopButton)]));

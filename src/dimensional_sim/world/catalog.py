@@ -708,7 +708,7 @@ ACTIONS = (
     # --- known from the first life -------------------------------------------
     ActionDef("bramble_berries", "Berry bush", "forage", "spot", "perception", 40, 2400, 11,
               "Pick berries from a thorny bramble patch.", "Picked bramble berries without getting scratched (much).",
-              window=(1, 2), loot=(L("wild_berries", 1, 2), L("bramble_thorn", 1, 1, 35)),
+              window=(1, 2), loot=(L("wild_berries", 4, 4), L("bramble_thorn", 1, 1, 35)),
               roles=("base", "discovery"), outcomes=(OutcomeDef("lead", "trampled_bushes", chance=15, ttl_ms=90_000),),
               ecology="berries", interaction="Picking berries"),
     ActionDef("fallen_branches", "Fallen branches", "gather", "spot", "strength", 30, 2200, 18,
@@ -1151,7 +1151,7 @@ BY_ID = {action.id: action for action in ACTIONS}
 
 # ----- unlocks, mastery ---------------------------------------------------
 CURRENCIES = ("ash",)
-ABILITIES = ("make_campfire",)   # engine capabilities an unlock can grant
+ABILITIES = ("contact_anchor", "make_campfire")   # engine capabilities an unlock can grant
 
 
 @dataclass(frozen=True)
@@ -1186,6 +1186,8 @@ class UnlockDef:
 
 
 UNLOCKS = {u.id: u for u in (
+    UnlockDef("return_anchor", "Contact anchor", "Reach the anchor mid-life to spend ash, then resume where you left off. Recharges in 5 minutes.",
+              "ash", 10, ability="contact_anchor"),
     UnlockDef("campfire", "Campfire", "A skill: set down a fire anywhere (3 sticks) and rest beside it to heal as at camp.",
               "ash", 25, ability="make_campfire"),
     # Opened by dimensional levels (permanent), roughly in the order a soul grows into them.

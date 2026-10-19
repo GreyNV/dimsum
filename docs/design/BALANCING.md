@@ -1,5 +1,18 @@
 # Balancing
 
+## 2026-10-20: berry yield and immediate eating
+
+Berry bushes now give four berries per harvest. Food is eaten as soon as its full
+hunger value fits the missing hunger, with no eating cooldown. Four berries can
+restore 48 hunger and up to 16 health when needed. The food-fit point is an exact
+simulation event, so bulk and split time advancement agree.
+
+In three seeded 30-minute `spend` runs, the previous rules completed seven lives
+(four starvation deaths). The new rules completed one life (a boar death); the
+other two runs were still in their first lives at 30 minutes. This is a small
+sample, but it shows a much longer early life and fewer anchor visits. Revisit
+danger pacing before adding more food or charging ash for survival supplies.
+
 ## Current first-life playtest adjustment
 
 Base hunger drain is 0.85 points per second, a boar hit starts at 8 health, and

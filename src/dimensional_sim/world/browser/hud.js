@@ -109,8 +109,8 @@ export class ExpeditionHud {
     this.renderLog(ex);
   }
   updateVitals(ex) {
-    const v = ex.vitals, cd = v.food_cooldown_ms;
-    const signature = [v.health, v.hunger, Math.ceil(cd / 250), ex.life, ex.depth, ex.best_depth, v.ash,
+    const v = ex.vitals;
+    const signature = [v.health, v.hunger, ex.life, ex.depth, ex.best_depth, v.ash,
       Math.ceil((ex.clock?.until_ms || 0) / 1000), ex.clock?.night].join();
     if (signature === this.vitalsSignature) return;
     this.vitalsSignature = signature;
@@ -120,10 +120,6 @@ export class ExpeditionHud {
       this.$(`${name}-value`).textContent = String(Math.ceil(pct));
       this.$(`${name}-bar`).closest('.vital').classList.toggle('low', pct < 30);
     }
-    const ring = this.$('food-ring');
-    ring.style.strokeDashoffset = String(50.27 * (cd / v.food_cooldown_total_ms));
-    this.$('food-label').textContent = cd ? `Food in ${Math.ceil(cd / 1000)}s` : 'Food ready';
-    this.updateFoodCooldown(ex);
     this.$('life').textContent = `Life ${ex.life}`;
     this.$('depth').textContent = `Ring ${ex.depth} - best ${ex.best_depth}`;
     const clock = this.$('clock');
@@ -163,17 +159,6 @@ export class ExpeditionHud {
       }
     }
   }
-  updateFoodCooldown(ex) {
-    const remaining = ex.vitals.food_cooldown_ms;
-    const total = ex.vitals.food_cooldown_total_ms || 1;
-    const ready = Math.max(0, Math.min(1, 1 - remaining / total));
-    for (const slot of this.$('inventory').querySelectorAll('li.food')) {
-      slot.style.setProperty('--food-brightness', (.35 + ready * .65).toFixed(3));
-      slot.style.setProperty('--food-fill', (ready * 100).toFixed(1) + '%');
-      slot.classList.toggle('on-cooldown', remaining > 0);
-      slot.setAttribute('aria-label', `${slot.dataset.name}, ${slot.dataset.count}. ${remaining ? `Food ready in ${Math.ceil(remaining / 1000)} seconds` : 'Food ready'}`);
-    }
-  }
   renderAttributes(ex) {
     this.$('attributes').replaceChildren(...usedAttributes(ex.attributes).map(([id, name, short]) => {
       const a = ex.attributes[id], li = this.doc.createElement('li');
@@ -200,7 +185,8 @@ export class ExpeditionHud {
       const row = rows[i], li = this.doc.createElement('li');
       if (!row) { li.className = 'empty'; slots.push(li); continue; }
       li.className = row.kind;
-      li.title = `${row.name} x${row.count}` + (row.food ? ` - restores ${row.food} hunger (eaten automatically)` : ' - material');
+      li.title = `${row.name} x${row.count}` + (row.food ? ` - restores ${row.food} hunger (eaten when it fully fits)` : ' - material');
+      li.setAttribute('aria-label', `${row.name}, ${row.count}.` + (row.food ? ` Restores ${row.food} hunger when it fully fits.` : ''));
       li.dataset.name = row.name;
       li.dataset.count = String(row.count);
       li.textContent = row.glyph;
@@ -210,7 +196,6 @@ export class ExpeditionHud {
       slots.push(li);
     }
     this.$('inventory').replaceChildren(...slots);
-    this.updateFoodCooldown(ex);
   }
   renderLog(ex) {
     const entries = [...ex.log].reverse().slice(0, 4);

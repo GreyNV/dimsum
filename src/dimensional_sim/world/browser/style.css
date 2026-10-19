@@ -11,8 +11,6 @@
 .vital .bar i{position:absolute;inset:0 auto 0 0;width:100%;transition:width .25s linear}
 .health .bar i{background:linear-gradient(#ef7a63,#b8382d)}.hunger .bar i{background:linear-gradient(#f0c56a,#b9862f)}
 .vital b{min-width:24px;text-align:right;font-size:11px;color:#f1e3bd}.vital.low b{color:#ff8f78}.vital.low .bar{box-shadow:0 0 6px #ff5a4088}
-.cooldown{display:flex;align-items:center;gap:6px;color:#a99d7d;font-size:9px;min-width:94px}.cooldown svg{width:18px;height:18px;transform:rotate(-90deg)}
-.cooldown .track{fill:none;stroke:rgba(0,0,0,.5);stroke-width:3}.cooldown .ring{fill:none;stroke:#bfe39a;stroke-width:3;stroke-dasharray:50.27;stroke-dashoffset:0}
 .life-line{display:flex;flex-direction:column;gap:2px;border-left:1px solid rgba(160,128,80,.42);padding-left:12px;color:#d9c38e;font-size:10px}#depth{color:#9fb889}.life-line span{white-space:nowrap}
 .attributes li{gap:1px}.attributes li i{display:block;width:80%;height:2px;background:rgba(0,0,0,.5);margin-top:2px}.attributes li i s{display:block;height:100%;background:#d3b575;text-decoration:none}
 .attributes li em{font:normal 8px ui-monospace,Consolas,monospace;color:#9fc2e8}
@@ -24,13 +22,9 @@
 .report{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);min-width:320px;max-width:min(460px,92vw);padding:24px 30px;background:rgba(8,12,8,.82);border:1px solid #9f8050;font:12px/1.7 ui-monospace,Consolas,monospace;color:#d8d2b4}
 .report h2{font:400 26px Georgia,serif;margin:4px 0 12px;color:#f0d9a6}.report ol{list-style:none;margin:0 0 14px;padding:0}.report li{opacity:0;animation:reveal .35s forwards}.report button{padding:8px 16px}
 @keyframes reveal{to{opacity:1}}
-@media(max-width:720px){.vitals{top:auto;bottom:178px;left:12px;right:12px;transform:none;flex-wrap:wrap;gap:6px 12px;padding:7px 10px}.vital .bar{width:82px}.cooldown{min-width:0}.life-line{flex-direction:row;gap:8px;border:0;padding:0}.inventory{top:160px;right:12px;width:142px;padding:8px}.slots{grid-template-columns:repeat(4,1fr)}.slots li{font-size:11px}}
+@media(max-width:720px){.vitals{top:auto;bottom:178px;left:12px;right:12px;transform:none;flex-wrap:wrap;gap:6px 12px;padding:7px 10px}.vital .bar{width:82px}.life-line{flex-direction:row;gap:8px;border:0;padding:0}.inventory{top:160px;right:12px;width:142px;padding:8px}.slots{grid-template-columns:repeat(4,1fr)}.slots li{font-size:11px}}
 @media(prefers-reduced-motion:reduce){.report li{animation:none;opacity:1}.vital .bar i{transition:none}}
 
-/* Food fills back to its normal color as the authoritative cooldown runs down. */
-.slots li.food{filter:brightness(var(--food-brightness,1));transition:filter .25s linear}
-.slots li.food::after{content:"";position:absolute;inset:0 auto 0 0;width:var(--food-fill,100%);border-bottom:2px solid #f2ce83;pointer-events:none}
-.slots li.food.on-cooldown{border-color:rgba(139,117,72,.6)}
 .report{z-index:5;max-height:min(82vh,680px);overflow-y:auto;background:rgba(8,12,8,.94);box-shadow:0 24px 90px #000c}
 .report.opening{width:min(540px,92vw);max-width:none;display:flex;flex-direction:column;overflow:hidden}
 .report.opening ol{min-height:0;overflow-y:auto;flex:1}
@@ -44,11 +38,11 @@ html,body{touch-action:manipulation;-webkit-user-select:none;user-select:none;-w
 
 /* Prologue (2026-10-04): the avatar wakes from the bandit ambush. Only the task line,
    health and hunger show; everything else fades in once the old man has spoken. */
-.expedition,.map-panel,.inventory,.controls,.cooldown,.life-line,.location .eyebrow,.location h1{transition:opacity 1.4s ease .3s}
+.expedition,.map-panel,.inventory,.controls,.life-line,.location .eyebrow,.location h1{transition:opacity 1.4s ease .3s}
 body.prologue .expedition,body.prologue .map-panel,body.prologue .inventory,body.prologue .controls,
-body.prologue .cooldown,body.prologue .life-line,body.prologue .location .eyebrow,body.prologue .location h1{opacity:0;pointer-events:none;transition:none}
+body.prologue .life-line,body.prologue .location .eyebrow,body.prologue .location h1{opacity:0;pointer-events:none;transition:none}
 body.prologue .location h1,body.prologue .location .eyebrow{height:0;margin:0;overflow:hidden}
-body.prologue .cooldown,body.prologue .life-line{display:none}
+body.prologue .life-line{display:none}
 body.prologue .location{width:auto;min-width:210px;padding:12px 16px}
 body.prologue .location-line{border-top:0;padding-top:0}
 body.prologue-dark .panel{background:rgba(0,0,0,.35);border-color:rgba(120,100,70,.35)}
@@ -201,7 +195,7 @@ body.page-open .controls{display:none!important}
   body.manual-unlocked.fold-expedition:not(.prologue) .vitals{top:5px;bottom:auto;left:8px;right:8px;
     padding:5px 8px;gap:4px 10px;min-height:42px;z-index:3;justify-content:space-between}
   .vital .bar{width:44px;height:7px}.vital-label{font-size:8px;letter-spacing:.3px}.vital b{font-size:10px}
-  .cooldown{display:none}.life-line{width:100%;justify-content:space-between;font-size:8px;line-height:1}
+  .life-line{width:100%;justify-content:space-between;font-size:8px;line-height:1}
   .life-line #wealth{display:none}
   .expedition{top:auto;bottom:157px;left:8px;right:8px;width:auto;max-height:120px;overflow:hidden;padding:7px 9px;z-index:2}
   .expedition .attributes{display:none}.expedition .log{max-height:42px;overflow:hidden}

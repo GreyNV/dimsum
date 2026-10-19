@@ -284,6 +284,7 @@ class EconomyTests(unittest.TestCase):
         e = fresh()
         rows = {(r["kind"], r["id"]): r for r in economy.offers(e)}
         self.assertNotIn(("unlock", "mushroom_lore"), rows, "level unlocks are not sold")
+        self.assertEqual(rows[("unlock", "return_anchor")]["cost"], 10)
         self.assertEqual(rows[("unlock", "campfire")]["cost"], 25)
         e.life_recipes.add("spear")
         rows = {(r["kind"], r["id"]): r for r in economy.offers(e)}
@@ -296,6 +297,8 @@ class EconomyTests(unittest.TestCase):
         e.inventory = {"stick": 5}
         at_anchor(e)
         self.assertEqual((e.ash, e.converted["stick"]), (5, 5))
+        e.ash = 40
+        e.anchor_action({"type": "unlock", "id": "return_anchor"})
         e.anchor_action({"type": "begin_life"})
         e.inventory = {"stick": 4}
         e.ash = 30

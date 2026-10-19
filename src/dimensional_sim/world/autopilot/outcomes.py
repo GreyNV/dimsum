@@ -11,7 +11,7 @@ from ..models import ChunkKey, chunk_ident
 from ..progression import DIMENSIONAL_DIVISOR, scaled_ms
 from ..seeds import derive_seed
 from .ecology import cell_of
-from .constants import (AFTER_LOCATION_REST_WEIGHT, EAT_AT, FOOD_COOLDOWN_MS, FOOD_HEALS_DIVISOR,
+from .constants import (AFTER_LOCATION_REST_WEIGHT, FOOD_HEALS_DIVISOR,
                         FIRE_KIT, INVENTORY_SLOTS, LEAD_HISTORY_LIMIT, LOG_LIMIT, LOOK_RADIUS, NEED_ACTIONS,
                         PAUSE_AFTER_ACTIVITY_MS, POINT, STACK_LIMIT, VITAL_MAX)
 
@@ -206,22 +206,23 @@ class OutcomesMixin:
                     xp=entry.xp, dim_xp=dim, items=items)
 
     def _eat(self):
-        """Auto-eat: the food that restores the most without wasting, else the smallest."""
-        foods = sorted((ITEMS[i].food, i) for i in self.inventory if ITEMS[i].kind == "food")
-        if not foods or self.food_cooldown_ms or self.hunger > EAT_AT:
-            return False
-        room = (VITAL_MAX - self.hunger) // POINT
-        fitting = [f for f in foods if f[0] <= room]
-        value, item = fitting[-1] if fitting else foods[0]
-        self._remove_item(item, 1)
-        self.hunger = min(VITAL_MAX, self.hunger + value * POINT)
-        heal = value // FOOD_HEALS_DIVISOR
-        self.health = min(VITAL_MAX, self.health + heal * POINT)
-        self.food_cooldown_ms = FOOD_COOLDOWN_MS
-        self.stats["eaten"] += 1
-        self._entry("eat", f"Ate {ITEMS[item].name.lower()} (+{value} hunger, +{heal} health).",
-                    items=[(item, -1)])
-        return True
+        """Eat the largest food that fits missing hunger, until no food fits."""
+        ate = False
+        while True:
+            room = (VITAL_MAX - self.hunger) // POINT
+            fitting = sorted((ITEMS[i].food, i) for i in self.inventory
+                             if ITEMS[i].kind == "food" and ITEMS[i].food <= room)
+            if not fitting:
+                return ate
+            value, item = fitting[-1]
+            self._remove_item(item, 1)
+            self.hunger += value * POINT
+            heal = value // FOOD_HEALS_DIVISOR
+            self.health = min(VITAL_MAX, self.health + heal * POINT)
+            self.stats["eaten"] += 1
+            self._entry("eat", f"Ate {ITEMS[item].name.lower()} (+{value} hunger, +{heal} health).",
+                        items=[(item, -1)])
+            ate = True
 
     def _start_self(self, action):
         duration = action.duration_ms if action.category in ("reflect", "pray") \

@@ -30,6 +30,7 @@ def far_and_hurt(seed=482910, sticks=5, bought=True):
     e.game._reveal()
     e._screen()
     e.health = RETREAT_BELOW - 5 * POINT
+    e.hunger = 100 * POINT  # food should wait until it restores its full hunger value
     e.inventory = {"stick": sticks, "wild_berries": 2}
     e.goal = e.task = None
     return e

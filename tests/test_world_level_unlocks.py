@@ -22,7 +22,7 @@ def xp_for_level(level):
 class LevelUnlockTests(unittest.TestCase):
     def test_actions_open_by_level_and_only_abilities_are_sold(self):
         priced = {u.id for u in UNLOCKS.values() if u.currency}
-        self.assertEqual(priced, {"campfire"})
+        self.assertEqual(priced, {"return_anchor", "campfire"})
         for u in UNLOCKS.values():
             if u.level is None:
                 continue

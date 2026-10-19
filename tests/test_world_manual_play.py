@@ -77,6 +77,9 @@ class SkillSlotTests(unittest.TestCase):
         e.inventory = {"stick": 1}
         slots = snapshot(e.game, expedition=e)["expedition"]["skill_slots"]
         contact, fire, possess = slots
+        self.assertEqual((contact["state"], contact["note"]), ("locked", "Unlock at the anchor (10 ash)"))
+        e.unlocked.add("return_anchor")
+        contact = snapshot(e.game, expedition=e)["expedition"]["skill_slots"][0]
         self.assertEqual(contact["state"], "ready")
         self.assertIn("without dying", contact["hint"])
         self.assertEqual(fire["state"], "locked")
@@ -91,7 +94,7 @@ class SkillSlotTests(unittest.TestCase):
         e.contact_ready_ms = e.total_ms + 60_000
         e.release()
         contact, _, possess = snapshot(e.game, expedition=e)["expedition"]["skill_slots"]
-        self.assertEqual((contact["state"], contact["remaining_ms"], contact["cooldown_ms"]), ("cooldown", 60_000, 120_000))
+        self.assertEqual((contact["state"], contact["remaining_ms"], contact["cooldown_ms"]), ("cooldown", 60_000, 300_000))
         self.assertEqual((possess["state"], possess["remaining_ms"]), ("cooldown", 60_000))
         self.assertTrue(BY_ID["make_campfire"].cost)
 

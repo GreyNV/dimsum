@@ -86,7 +86,7 @@ function character(d) {
     {title: 'Journey', kind: 'rows', rows: [
       ['Life', String(c.life)], ['Ring now', String(c.depth)], ['Frontier (safe push)', `ring ${c.frontier}`],
       ['Inventory', `${c.inventory_slots[0]} / ${c.inventory_slots[1]} slots`],
-      ['Dimensional ash', String(c.currencies.ash), 'carried resources convert when a life ends; keeps recipes, binds buildings, buys skills (contact the anchor with skill 1)'],
+      ['Dimensional ash', String(c.currencies.ash), 'carried resources convert when a life ends; keeps recipes, binds buildings, buys skills (buy skill 1 to contact the anchor)'],
       ['Unlocked', c.unlocked.length ? c.unlocked.join(', ') : 'none yet'],
     ]},
     ...(c.openings ? [{title: 'What opens as you grow', kind: 'table', head: ['Opens', 'Needs (dimensional level)', 'You', ''],

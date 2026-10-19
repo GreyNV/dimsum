@@ -255,25 +255,6 @@ test('HUD turns log entries into reward popups and shows reports only while fres
   for(const [id,s] of Object.entries(CAMP)) s.paint.forEach((row,r)=>{assert.equal(row.length,s.paint[0].length,id);assert.equal(s.glyph[r].length,row.length,id);});
   assert.equal(POSE.rest,'sit');
 });
-test('food slot visibly and accessibly recovers during its shared cooldown',()=>{
-  const values=new Map(), classes=new Map(), attrs=new Map();
-  const slot={dataset:{name:'Wild berries',count:'3'},
-    style:{setProperty:(key,value)=>values.set(key,value)},
-    classList:{toggle:(key,value)=>classes.set(key,value)},
-    setAttribute:(key,value)=>attrs.set(key,value)};
-  const hud=new ExpeditionHud({getElementById:()=>({querySelectorAll:()=>[slot]})});
-  const states=[];
-  for(const ms of [15000,7500,0]) {
-    hud.updateFoodCooldown({vitals:{food_cooldown_ms:ms,food_cooldown_total_ms:15000}});
-    states.push([Number(values.get('--food-brightness')),values.get('--food-fill'),classes.get('on-cooldown'),attrs.get('aria-label')]);
-  }
-  assert.ok(states[0][0]<states[1][0] && states[1][0]<states[2][0]);
-  assert.deepEqual(states.map(row=>row[1]),['0.0%','50.0%','100.0%']);
-  assert.deepEqual(states.map(row=>row[2]),[true,true,false]);
-  assert.match(states[0][3],/15 seconds/);
-  assert.match(states[2][3],/Food ready$/);
-});
-
 test('prologue: dark awakening with memories, eyes open, then the old man speaks',()=>{
   const memories=['a','b','c','d'];
   const dark=progress=>prologueView({stage:'awaken',progress,lines:memories,elder:{x:1,y:0}});

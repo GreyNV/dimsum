@@ -7,7 +7,7 @@ from ..catalog import ATTRIBUTES, BY_ID
 from ..models import DELTAS, DIRECTIONS
 
 DIRECTION_DELTAS = tuple(DELTAS[d] for d in DIRECTIONS)
-CONTACT_COOLDOWN_MS = 120_000     # contacting the anchor mid-life (the world waits while it is open)
+CONTACT_COOLDOWN_MS = 300_000     # contacting the anchor mid-life (the world waits while it is open)
 # Possession: the god takes the avatar's hands for a while (manual control).
 POSSESS_MS = 30_000
 POSSESS_COOLDOWN_MS = 60_000      # counted from the moment possession ends
@@ -25,8 +25,8 @@ STARVATION = 1_500                 # health micro/ms at zero hunger (1.5 points/
 REGEN = 200                        # health micro/ms while hunger is above half
 REST_REGEN = 1_000                 # extra health micro/ms while resting at the camp
 REGEN_ABOVE = 50 * POINT
-EAT_AT = 40 * POINT                # auto-eat only after hunger is genuinely low
-FOOD_COOLDOWN_MS = 15_000
+EAT_AT = 40 * POINT                # no food carried: seek food once hunger falls this low
+FOOD_COOLDOWN_MS = 15_000          # legacy save field; eating no longer waits for a cooldown
 RETREAT_BELOW = 35 * POINT         # badly hurt -> go home and rest
 FOOD_HEALS_DIVISOR = 3             # eating restores food/3 health points
 RESTED_AT = 90 * POINT

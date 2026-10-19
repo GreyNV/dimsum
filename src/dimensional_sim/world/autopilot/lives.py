@@ -44,6 +44,8 @@ class LivesMixin:
             return "Already at the anchor"
         if self.in_prologue:
             return "Not yet"
+        if not self.has_ability("contact_anchor"):
+            return "Locked"
         if self.total_ms < self.contact_ready_ms:
             return "Recharging"
         return None

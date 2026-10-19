@@ -11,10 +11,10 @@ is the player's god possessing the avatar: 30 s, 60 s recharge, +20% movement an
    pass. "Begin your first life" starts the prologue (wake up, stand up, the old man). Simulations and
    tests keep `opening=False` (the prologue starts at once).
 2. **Death**: unchanged - everything carried becomes ash, 30 s anchor countdown (`kind = "death"`).
-3. **Contact anchor** (skill 1, action `contact`): any time in a life after the prologue. The world
+3. **Contact anchor** (skill 1, action `contact`): buy for 10 ash, then use during a life after the prologue. The world
    waits (`advance` / `advance_manual` do nothing), the shop opens over the dimmed world
    (`kind = "contact"`), purchases work, `begin_life` is refused. "Resume this life" (`resume`) closes it
-   and starts a 2-minute recharge (`CONTACT_COOLDOWN_MS`, saved as `contact_ready_ms`). The open contact
+   and starts a 5-minute recharge (`CONTACT_COOLDOWN_MS`, saved as `contact_ready_ms`). The open contact
    itself is not saved: a reload steps back into the life.
 4. **Possession** (skill 3, Q, or the Possess button; actions `possess` / `release`): manual control for
    `POSSESS_MS` = 30 s of simulation time. While possessed, `speed()` x1.2 (every task started is
@@ -27,11 +27,12 @@ is the player's god possessing the avatar: 30 s, 60 s recharge, +20% movement an
 
 ## Removed
 Blessing, boons (`BoonDef`, `BOONS`), the random prayer (`pray` self action), `prayers_this_life`,
-skills / `take_control`, return-to-anchor and its cooldown, the "blessing" log type. Shrines stay as
+skills / `take_control`, the old death-on-return behavior, the "blessing" log type. Shrines stay as
 Willpower encounters; the shrine path opens at willpower 3.
 
 ## Save migration 17 -> 18
-Drops the removed fields; `return_anchor` is refunded (10 ash); the campfire, free before, is granted;
+Drops the removed fields; a purchased `return_anchor` now grants Contact anchor and retains its cooldown;
+the campfire, free before, is granted;
 "pray" leaves the journal counts; a running prayer task is dropped; blessing log entries become lore.
 Test support: `tests/save_fixture.py` turns a current save back into its schema-17 shape so older
 migration tests keep working.

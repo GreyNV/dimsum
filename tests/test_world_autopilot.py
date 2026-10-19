@@ -87,7 +87,7 @@ class CatalogTests(unittest.TestCase):
         for seed in range(200):
             loot = dict(roll_loot(entry, seed))
             self.assertEqual(loot, dict(roll_loot(entry, seed)))
-            self.assertIn(loot["wild_berries"], (1, 2))
+            self.assertEqual(loot["wild_berries"], 4)
         thorns = sum("bramble_thorn" in dict(roll_loot(entry, s)) for s in range(1000))
         self.assertTrue(250 < thorns < 450)  # 35% chance
 
@@ -143,23 +143,33 @@ class ProgressionTests(unittest.TestCase):
 
 
 class SurvivalTests(unittest.TestCase):
-    def test_auto_eat_respects_threshold_fit_and_cooldown(self):
+    def test_auto_eat_uses_full_value_as_soon_as_it_fits(self):
         e = expedition()
         e.inventory = {"wild_berries": 2, "boar_meat": 1}
-        e.hunger, e.health = 41 * P, 50 * P
+        e.hunger, e.health = 89 * P, 50 * P
         e._settle()
-        self.assertEqual(e.inventory, {"wild_berries": 2, "boar_meat": 1}, "above the threshold: no eating")
-        e.hunger = 40 * P
+        self.assertEqual(e.inventory, {"wild_berries": 2, "boar_meat": 1}, "no food fits 11 missing hunger")
+        e.hunger = 88 * P
+        e.food_cooldown_ms = ap.FOOD_COOLDOWN_MS  # old saves may still have a countdown
         e._settle()
-        self.assertEqual(e.inventory, {"wild_berries": 2}, "the biggest food that fits")
-        self.assertEqual((e.hunger, e.health, e.food_cooldown_ms), (75 * P, 61 * P, ap.FOOD_COOLDOWN_MS))
-        e.hunger = 10 * P
+        self.assertEqual(e.inventory, {"wild_berries": 1, "boar_meat": 1})
+        self.assertEqual((e.hunger, e.health), (100 * P, 54 * P))
+        e.hunger = 50 * P
         e._settle()
-        self.assertEqual(e.inventory["wild_berries"], 2, "cooldown blocks the next bite")
-        e.food_cooldown_ms = 0
-        e._settle()
-        self.assertEqual(e.inventory["wild_berries"], 1)
+        self.assertEqual(e.inventory, {}, "multiple foods are eaten immediately while they fit")
+        self.assertEqual((e.hunger, e.health, e.stats["eaten"]), (97 * P, 69 * P, 3))
         self.assertEqual(e.log[-1]["type"], "eat")
+
+    def test_food_fit_boundary_is_partition_independent(self):
+        bulk, ticks = expedition(), expedition()
+        for e in (bulk, ticks):
+            e.inventory = {"wild_berries": 1}
+            e.hunger = 89 * P
+        bulk.advance(2_000)
+        for _ in range(20):
+            ticks.advance(100)
+        self.assertEqual(dump(bulk), dump(ticks))
+        self.assertEqual(bulk.stats["eaten"], 1)
 
     def test_hunger_drains_and_starvation_hurts_exactly(self):
         e = expedition()

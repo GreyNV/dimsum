@@ -1,5 +1,6 @@
 """Hunger and health as exact integer rates; every rate change ends a simulation step."""
-from .constants import (EAT_AT, HUNGER_DRAIN, REGEN, REGEN_ABOVE, REST_REGEN, STARVATION, VITAL_MAX, ceil_div)
+from ..catalog import ITEMS
+from .constants import (EAT_AT, HUNGER_DRAIN, POINT, REGEN, REGEN_ABOVE, REST_REGEN, STARVATION, VITAL_MAX, ceil_div)
 
 
 class VitalsMixin:
@@ -26,6 +27,11 @@ class VitalsMixin:
                 limits.append(ceil_div(self.hunger - REGEN_ABOVE, drain))
             if self.hunger > EAT_AT:
                 limits.append(ceil_div(self.hunger - EAT_AT, drain))
+            foods = [ITEMS[item].food for item in self.inventory if ITEMS[item].kind == "food"]
+            if foods:
+                first_fit = VITAL_MAX - min(foods) * POINT
+                if self.hunger > first_fit:
+                    limits.append(ceil_div(self.hunger - first_fit, drain))
         if self.food_cooldown_ms:
             limits.append(self.food_cooldown_ms)
         rate = self._health_rate()

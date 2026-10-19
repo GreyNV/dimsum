@@ -101,9 +101,9 @@ Plan and decisions: world-lives-plan.md. Code: progression.py, autopilot/.
   health), stone 60, carvings 80, boar 100.
 - Items (current life; 12 slots, stacks of 20): wild berries (food 12), bird egg
   (20), boar meat (35), stick, bramble thorn, boar hide. Loot is rolled per life
-  and spot: berries 2-4 (+thorn 30%), branches 2-3 sticks, tree egg 50% / stick
-  40%, boar meat 1-2 + hide 60%. Food is auto-eaten at hunger <= 60: the largest
-  that fits, else the smallest; +food/3 health; 15s cooldown.
+  and spot: berry bushes give 4 (+thorn 35%), branches and other finds use their
+  own loot rolls. Food is eaten as soon as its full value fits missing hunger;
+  the largest fitting food goes first, with no cooldown. Eating also heals food/3 health.
 - Vitals in integer micro-points: hunger -0.5/s; at 0 hunger health -1/s; above
   50 hunger +0.2/s; resting at the camp +1/s. Every rate change ends a step.
 - Danger rings = Chebyshev chunk distance from the anchor. Boar HP 3 + ring;

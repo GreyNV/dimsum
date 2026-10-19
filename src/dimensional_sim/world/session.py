@@ -191,9 +191,12 @@ def _plural(n, name):
 def _skill_slots(e, in_anchor):
     """The three skill buttons: what each does (`hint`), why it can't be used now (`note`),
     and the cooldown or time left (`remaining_ms` of `cooldown_ms`) so the client can draw a timer.
-    Slot 1 contacts the anchor, slot 2 makes a campfire (bought with ash), slot 3 possesses."""
+    Slot 1 contacts the anchor once bought, slot 2 makes a campfire, slot 3 possesses."""
     busy = in_anchor or e.in_prologue
-    if busy:
+    contact_unlock = next((u for u in UNLOCKS.values() if u.ability == "contact_anchor"), None)
+    if not e.has_ability("contact_anchor"):
+        contact = {"state": "locked", "note": f"Unlock at the anchor ({contact_unlock.cost} ash)" if contact_unlock else "Locked"}
+    elif busy:
         contact = {"state": "disabled", "note": "Not now"}
     elif e.total_ms < e.contact_ready_ms:
         contact = {"state": "cooldown", "note": "Recharging"}
