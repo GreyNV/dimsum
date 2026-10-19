@@ -209,6 +209,7 @@ function structureStamp(glyph, createCanvas) {
   }, createCanvas);
   return {canvas, dx: -4 - Math.round((width - 32) / 2), dy: -4 - (height - 28)};
 }
+const GRASSY_TRAIL = new Set(['.', ';', 'o', '*']);
 function decorStamp(kind, variant, createCanvas) {
   return stamp(`decor:${kind}:${variant}`, DECOR_W, DECOR_H, ctx => drawDecor(ctx, kind, variant), createCanvas, {ascii: true});
 }
@@ -240,7 +241,7 @@ export function paintChunk(chunk, createCanvas = defaultCanvas) {
     put(g, tileStamp(glyph, seed % TILE_VARIANTS, createCanvas), px, py);
     wet ||= isWater(glyph);
     tile = [x, y];
-    if (glyph === 'T') { const tree = treeAt(px, py, seed, createCanvas, treeKind(chunk, x, y)); objects.push({canvas: tree.canvas, x: tree.x, y: tree.y, tx: x, ty: y}); }
+    if (glyph === 'T') { const tree = treeAt(px, py, seed, createCanvas, treeKind(chunk, x, y)); objects.push({canvas: tree.canvas, x: tree.x, y: tree.y, tx: x, ty: y, cover: pathCover(chunk, x, y)}); }
     else if (glyph === '^') o.drawImage(rockStamp(seed % ROCK_VARIANTS, createCanvas), px + OBJECT_PAD - 4, py + OBJECT_PAD - 4);
     else if (STRUCTURE_ART[glyph]) {
       const {canvas, dx, dy} = structureStamp(glyph, createCanvas);
@@ -262,12 +263,33 @@ export function paintChunk(chunk, createCanvas = defaultCanvas) {
       g.restore();
     }
   }
+  // worn forest trails: a walkable cell hemmed in by trees is trodden earth, so a path through the
+  // woods reads on the ground (a soft-edged patch per cell; neighbouring patches join into a strip)
+  for (let y = 0; y < chunk.height; y++) for (let x = 0; x < chunk.width; x++) {
+    if (chunk.collision?.[y]?.[x] === '1' || !GRASSY_TRAIL.has(at(x, y))) continue;
+    let hem = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) hem += (dx || dy) && (at(x + dx, y + dy) === 'T' || at(x + dx, y + dy) === '^') ? 1 : 0;
+    if (hem < 4) continue;
+    const gx = chunk.x * chunk.width + x, gy = chunk.y * chunk.height + y, h = visualHash(gx, gy, chunk.seed ^ 0x7a11);
+    const cx = x * TILE_W + 12 + (h % 5) - 2, cy = y * TILE_H + 14 + ((h >>> 3) % 5) - 2;
+    g.save(); g.beginPath();
+    for (let i = 0; i < 12; i++) {   // a ragged blob a little larger than the cell
+      const a = i / 12 * Math.PI * 2, r = 1 + ((visualHash(i, gx, gy) % 100) / 100 - .5) * .35;
+      g.lineTo(cx + Math.cos(a) * 15 * r, cy + Math.sin(a) * 17 * r);
+    }
+    g.closePath(); g.clip(); g.globalAlpha = .62;
+    put(g, tileStamp('=', h % TILE_VARIANTS, createCanvas), x * TILE_W - 6, y * TILE_H - 4);
+    put(g, tileStamp('=', (h >>> 4) % TILE_VARIANTS, createCanvas), x * TILE_W + 6, y * TILE_H + 4);
+    g.restore();
+  }
   // undergrowth in clumps: thick along the forest edge, rare in the open (natural_ground.js)
   const blocked = (x, y) => at(x, y) === 'T';
   for (let y = 0; y < chunk.height; y++) for (let x = 0; x < chunk.width; x++) {
     if (chunk.collision?.[y]?.[x] === '1') continue;
-    let trees = 0;
+    let trees = 0, hem = 0;
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) trees += (dx || dy) && blocked(x + dx, y + dy) ? 1 : 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) hem += (dx || dy) && (at(x + dx, y + dy) === 'T' || at(x + dx, y + dy) === '^') ? 1 : 0;
+    if (hem >= 4) continue;   // a trodden trail stays clear
     const piece = undergrowth(chunk.x * chunk.width + x, chunk.y * chunk.height + y, at(x, y), trees, chunk.seed | 0);
     if (!piece) continue;
     objects.push({decor: piece.kind, canvas: decorStamp(piece.kind, piece.variant, createCanvas), x: x * TILE_W + 12 - DECOR_W / 2 + piece.dx, y: y * TILE_H + 26 - DECOR_H + piece.dy, tx: x, ty: y});
@@ -280,7 +302,7 @@ export function paintChunk(chunk, createCanvas = defaultCanvas) {
 export function drawObjects(ctx, picture, ox, oy, shown = null, alpha = null) {
   for (const item of picture.objects) {
     if (shown && !shown(item.tx, item.ty)) continue;
-    const a = alpha ? alpha(item.tx, item.ty) : 1;
+    const a = alpha ? alpha(item.tx, item.ty, item) : 1;
     if (a <= 0) continue;
     if (a < 1) { ctx.globalAlpha = a; put(ctx, item.canvas, ox + item.x, oy + item.y); ctx.globalAlpha = 1; }
     else put(ctx, item.canvas, ox + item.x, oy + item.y);
@@ -289,6 +311,31 @@ export function drawObjects(ctx, picture, ox, oy, shown = null, alpha = null) {
 /** Leaves thin out around the avatar: trees rooted just south of it and a few columns aside
  * (the ones whose canopies cover the ground it stands on) fade, so the way ahead stays readable
  * in deep woods. `dx`, `dy` in tiles from the avatar to the tree's root (south positive). */
+/** The walkable tiles (global [gx, gy]) a tree's crown hangs over, within its own chunk: a
+ * forest trail under a big tree is hidden by leaves, so those trees are drawn see-through. */
+export function pathCover(chunk, x, y) {
+  const gx0 = chunk.x * chunk.width, gy0 = chunk.y * chunk.height;
+  const seed = visualHash(gx0 + x, gy0 + y, chunk.seed), kind = treeKind(chunk, x, y);
+  const scale = treeScale(TREE_ART[kind] ? kind : 'o', seed % TREE_VARIANTS);
+  const up = Math.ceil((62 * scale - 18) / TILE_H), side = Math.round(22 * scale / TILE_W);
+  const out = [];
+  for (let dy = -up; dy <= 0; dy++) for (let dx = -side; dx <= side; dx++) {
+    const tx = x + dx, ty = y + dy;
+    if (tx < 0 || ty < 0 || tx >= chunk.width || ty >= chunk.height) continue;
+    if (chunk.collision?.[ty]?.[tx] === '1' || isWater(chunk.tiles[ty][tx])) continue;
+    out.push([gx0 + tx, gy0 + ty]);
+  }
+  return out;
+}
+/** How see-through a tree is: crowns over a path are always thinned (the trail reads as a lighter
+ * corridor through the woods) and nearly clear around the avatar. `cover` is pathCover's list,
+ * (ax, ay) the avatar in tiles. */
+export function trailFade(cover, ax, ay) {
+  if (!cover || !cover.length) return 1;
+  let d = Infinity;
+  for (const [x, y] of cover) d = Math.min(d, Math.hypot(x - ax, (y - ay) * 1.15));
+  return d <= 3 ? .45 : d <= 9 ? .45 + (d - 3) / 6 * .33 : .78;
+}
 export function canopyFade(dx, dy) {
   if (dy < -1 || dy > 6) return 1;
   const ax = Math.abs(dx);

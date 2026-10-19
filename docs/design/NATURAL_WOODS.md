@@ -39,3 +39,14 @@ phase (audit round 2, phase A) is now the priority.
 
 Tests: natural ground test in browser_view.test.mjs (clumping, edges, bands); generator version
 and schema pins updated; region variety test uses seeds 2-4.
+
+## Forest trails readable (2026-10-20)
+Andrew: following a trail in deep woods, the path was only visible on the minimap - big crowns
+(2-4x a person) hid it.
+- Trodden trails: a walkable cell hemmed in by trees (4+ of 8 neighbours) gets a ragged patch of
+  path earth in the ground picture; patches join into a strip. Undergrowth never grows there.
+- Trail cut (`app.revealTrail`): around the avatar (6.5 tiles) the walkable ground under a canopy
+  is drawn back over the leaves through feathered blobs, lit a little warmer, fading with distance.
+  Built in world space once per avatar cell and zoom, then copied each frame (headless: 16 fps vs
+  17.5 without; a per-frame blur version ran at 1.6 fps and was replaced).
+- Crowns over any path are drawn slightly see-through everywhere (`art.pathCover`, `trailFade`).
