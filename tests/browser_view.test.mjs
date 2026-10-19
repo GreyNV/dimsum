@@ -107,8 +107,8 @@ test('character art is multi-cell; cached ground and objects paint separately wi
   const logs=[];
   const factory=()=> {
     const log=[];logs.push(log);
-    const canvas={width:0,height:0,log,getContext:()=>({set font(v){},set textBaseline(v){},set textAlign(v){},set fillStyle(v){},
-      scale(){},fillRect:(...a)=>log.push(['rect',...a]),fillText:(...a)=>log.push(['text',...a]),drawImage:(img,...a)=>log.push(['image',img,...a])})};
+    const known={scale(){},fillRect:(...a)=>log.push(['rect',...a]),fillText:(...a)=>log.push(['text',...a]),drawImage:(img,...a)=>log.push(['image',img,...a])};
+    const canvas={width:0,height:0,log,getContext:()=>new Proxy(known,{get:(t,k)=>k in t?t[k]:k==='createRadialGradient'||k==='createLinearGradient'?()=>({addColorStop(){}}):()=>{},set:()=>true})};
     return canvas;
   };
   clearStamps();
@@ -116,20 +116,21 @@ test('character art is multi-cell; cached ground and objects paint separately wi
   const pictures=paintChunk(asset,factory);
   assert.equal(pictures.ground.width,32*TILE_W*RES,'painted RES times denser');
   assert.equal(pictures.ground.lw,32*TILE_W,'logical size kept');
-  const groundLog=pictures.ground.log, objectLog=pictures.objects.map(o=>['image',o.canvas,o.x,o.y]);
+  const groundLog=pictures.ground.log, objectLog=pictures.objects.filter(o=>!o.decor).map(o=>['image',o.canvas,o.x,o.y]);
+  assert.ok(pictures.objects.filter(o=>o.decor).every(o=>o.y>=-OBJECT_PAD),'undergrowth stays near its tile');
   assert.equal(groundLog.filter(e=>e[0]==='image').length,32*16,'one stamp copy per tile');
   assert.equal(objectLog.length,2,'tree and rock stamps');
   assert.ok(pictures.objects.every(o=>o.x>=-OBJECT_PAD&&o.y>=-OBJECT_PAD),'objects overhang at most OBJECT_PAD');
   assert.ok(groundLog.every(e=>e[0]==='image'),'no per-glyph text on the chunk surface');
   const stamped=logs.filter(l=>l!==groundLog);
   assert.ok(stamped.some(l=>l.some(e=>e[0]==='text')),'stamps carry the character art');
-  assert.ok(stampCount()<=TILE_VARIANTS*3+TREE_VARIANTS+ROCK_VARIANTS);
+  assert.ok(stampCount()<=TILE_VARIANTS*3+TREE_VARIANTS+ROCK_VARIANTS+6*4,'bounded stamps (undergrowth: 6 kinds x 4)');
   const again=paintChunk(asset,factory);
   assert.equal(stampCount(),new Set(stamped).size,'stamps are reused, not redrawn');
   assert.deepEqual(again.ground.log.map(e=>e[1]),groundLog.map(e=>e[1]),'same variant per coordinate');
   assert.notEqual(terrainColor('='),terrainColor('T'));
   const site=chunk();site.tiles[0]='AM' + '.'.repeat(30);
-  assert.equal(paintChunk(site,factory).objects.length,2,'tent and masonry are drawn');
+  assert.equal(paintChunk(site,factory).objects.filter(o=>!o.decor).length,2,'tent and masonry are drawn');
   assert.notEqual(terrainColor('A'),terrainColor('.'));assert.notEqual(terrainColor('M'),terrainColor('.'));
 });
 
@@ -513,4 +514,22 @@ test('the avatar glides at an even pace, one tile per step interval, and hurries
   assert.deepEqual(glide({x: 0, y: 0}, target, 1000, 200), target, 'never overshoots');
   const far = glide({x: 0, y: 0}, {x: tile * 5, y: 0}, 20, 200).x, near = glide({x: 0, y: 0}, {x: tile, y: 0}, 20, 200).x;
   assert.ok(far > near * 3, 'catches up when a burst of steps lands');
+});
+
+test('natural ground: undergrowth clumps along forest edges, ragged bands stay inside their tile', async () => {
+  const {undergrowth, valueNoise, raggedBand} = await import('../src/dimensional_sim/world/browser/natural_ground.js');
+  assert.deepEqual(undergrowth(5, 9, '.', 2, 77), undergrowth(5, 9, '.', 2, 77), 'deterministic');
+  assert.equal(undergrowth(5, 9, '=', 3, 77), null, 'never on paths');
+  let open = 0, edge = 0;
+  for (let x = 0; x < 120; x++) for (let y = 0; y < 60; y++) { open += !!undergrowth(x, y, '.', 0, 9); edge += !!undergrowth(x, y, '.', 3, 9); }
+  assert.ok(edge > open * 1.6, `thicker along the forest edge (${edge} vs ${open})`);
+  // clumped, not an even scatter: neighbours of a piece hold more pieces than the average tile
+  let near = 0, pieces = 0;
+  for (let x = 1; x < 119; x++) for (let y = 1; y < 59; y++) if (undergrowth(x, y, '.', 0, 9)) {
+    pieces++; for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) near += !!undergrowth(x + dx, y + dy, '.', 0, 9);
+  }
+  assert.ok(near / (pieces * 4) > open / (120 * 60) * 1.3, 'pieces cluster');
+  for (let i = 0; i < 50; i++) { const v = valueNoise(i * .7, i * 1.3, 5, 3); assert.ok(v >= 0 && v <= 1); }
+  for (const side of ['n', 's', 'w', 'e']) for (const [x, y] of raggedBand(24, 28, 24, 28, side, 7, 5))
+    assert.ok(x >= 24 && x <= 48 && y >= 28 && y <= 56, `${side} band inside the tile`);
 });

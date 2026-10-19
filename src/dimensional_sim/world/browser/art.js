@@ -7,6 +7,7 @@ import {paintParts} from './sprites.js';
 import {paintedResolution} from './painted.js';
 import {READ_K, asciify, asciiReady, onStyleChange} from './ascii_art.js';
 import {structureCanvas} from './painted_props.js';
+import {DECOR_H, DECOR_W, SPILLS, drawDecor, raggedBand, undergrowth} from './natural_ground.js';
 import {SHALLOW_BG, WATER_BG, blooms, drawBlooms, drawFlagstones, drawPath, drawPlanks, drawRubble, drawScorch, drawBlades, drawReflection, drawShores, isWater, drawLitRock, drawRipples, grassBlades, ripples, TREE_ART, withDetail} from './nature_art.js';
 export const PALETTE = Object.freeze({
   void: '#11180f', floor: '#172011', path: '#242418',
@@ -187,7 +188,9 @@ function treeStamp(variant, createCanvas, kind = 'o') {
  * on the tile's lower middle. */
 export function treeAt(px, py, seed, createCanvas = defaultCanvas, kind = 'o') {
   const variant = seed % TREE_VARIANTS, known = TREE_ART[kind] ? kind : 'o', scale = treeScale(known, variant);
-  return {canvas: treeStamp(variant, createCanvas, known), x: px + 12 - 26 * scale, y: py + 20 - 62 * scale};
+  // off the grid: each trunk stands a few px from its tile centre (still on its own tile)
+  const jx = ((seed >>> 5) % 11) - 5, jy = ((seed >>> 9) % 7) - 3;
+  return {canvas: treeStamp(variant, createCanvas, known), x: px + 12 + jx - 26 * scale, y: py + 20 + jy - 62 * scale};
 }
 /** {canvas, dx, dy}: the stamp and its offset from the tile's top-left corner. */
 function structureStamp(glyph, createCanvas) {
@@ -205,6 +208,9 @@ function structureStamp(glyph, createCanvas) {
     paintParts(ctx, art, STRUCTURE_ROLES, left, height - 1 - rows * CELL_H);
   }, createCanvas);
   return {canvas, dx: -4 - Math.round((width - 32) / 2), dy: -4 - (height - 28)};
+}
+function decorStamp(kind, variant, createCanvas) {
+  return stamp(`decor:${kind}:${variant}`, DECOR_W, DECOR_H, ctx => drawDecor(ctx, kind, variant), createCanvas, {ascii: true});
 }
 function rockStamp(variant, createCanvas) {
   return stamp(`rock:${variant}`, 32, 28, ctx => drawLitRock(ctx, variant), createCanvas, {ascii: true});
@@ -241,6 +247,32 @@ export function paintChunk(chunk, createCanvas = defaultCanvas) {
       o.drawImage(canvas, px + OBJECT_PAD + dx, py + OBJECT_PAD + dy);
     }
   }
+  // ragged terrain edges: a path or bare earth spills a few px over the grass beside it
+  const at = (x, y) => chunk.tiles[y]?.[x];
+  for (let y = 0; y < chunk.height; y++) for (let x = 0; x < chunk.width; x++) {
+    const glyph = at(x, y);
+    if (SPILLS[glyph] || isWater(glyph) || glyph === 'H') continue;
+    for (const [side, nx, ny] of [['n', x, y - 1], ['s', x, y + 1], ['w', x - 1, y], ['e', x + 1, y]]) {
+      const other = at(nx, ny);
+      if (!SPILLS[other]) continue;
+      const gx = chunk.x * chunk.width + x, gy = chunk.y * chunk.height + y;
+      const pts = raggedBand(x * TILE_W, y * TILE_H, TILE_W, TILE_H, side, side === 'n' || side === 's' ? 7 : 6, visualHash(gx, gy, chunk.seed ^ 0xf1));
+      g.save(); g.beginPath(); g.moveTo(...pts[0]); for (const p of pts.slice(1)) g.lineTo(...p); g.closePath(); g.clip();
+      put(g, tileStamp(other, visualHash(gx, gy, chunk.seed) % TILE_VARIANTS, createCanvas), x * TILE_W, y * TILE_H);
+      g.restore();
+    }
+  }
+  // undergrowth in clumps: thick along the forest edge, rare in the open (natural_ground.js)
+  const blocked = (x, y) => at(x, y) === 'T';
+  for (let y = 0; y < chunk.height; y++) for (let x = 0; x < chunk.width; x++) {
+    if (chunk.collision?.[y]?.[x] === '1') continue;
+    let trees = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) trees += (dx || dy) && blocked(x + dx, y + dy) ? 1 : 0;
+    const piece = undergrowth(chunk.x * chunk.width + x, chunk.y * chunk.height + y, at(x, y), trees, chunk.seed | 0);
+    if (!piece) continue;
+    objects.push({decor: piece.kind, canvas: decorStamp(piece.kind, piece.variant, createCanvas), x: x * TILE_W + 12 - DECOR_W / 2 + piece.dx, y: y * TILE_H + 26 - DECOR_H + piece.dy, tx: x, ty: y});
+  }
+  objects.sort((a, b) => a.ty - b.ty || a.tx - b.tx);   // trees and undergrowth layer by row
   if (wet) reflect(g, chunk, createCanvas);
   return {ground, objects};
 }

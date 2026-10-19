@@ -79,9 +79,9 @@ def _trail(seed, along, other, band, size, label, amplitude, scale):
     return size // 2 + (_noise(seed, along, band * other, scale, label) - 50) * max(1, amplitude) // 50
 
 
-def compose_open(source, spec, key, seed, *, region=None, region_grid=None, water=None, site=None):
+def compose_open(source, spec, key, seed, *, region=None, region_grid=None, water=None, site=None, groves=False):
     if region_grid is not None:
-        return _compose_v3(source, spec, key, seed, region, region_grid, water, site)
+        return _compose_v3(source, spec, key, seed, region, region_grid, water, site, groves)
     if "open-terrain-v1" not in source.tags:
         raise ValueError("open generation requires a supported versioned recipe")
     w, h = source.width, source.height
@@ -175,7 +175,44 @@ def compose_open(source, spec, key, seed, *, region=None, region_grid=None, wate
                    spawns=tuple(spawns))
 
 
-def _compose_v3(source, spec, key, seed, region, grid, water=None, site=None):
+def _smooth_noise(seed, x, y, scale, label):
+    """Value noise with smoothstep blending (integer maths, so every platform agrees): round,
+    organic blobs instead of the diamond lattice bilinear blending shows at large scales."""
+    qx, rx = divmod(x, scale)
+    qy, ry = divmod(y, scale)
+    cube = scale ** 3
+    wx = rx * rx * (3 * scale - 2 * rx)          # smoothstep(rx / scale) * scale^3
+    wy = ry * ry * (3 * scale - 2 * ry)
+    a = _lattice(seed, label, qx, qy)
+    b = _lattice(seed, label, qx + 1, qy)
+    c = _lattice(seed, label, qx, qy + 1)
+    d = _lattice(seed, label, qx + 1, qy + 1)
+    top = a * (cube - wx) + b * wx
+    bottom = c * (cube - wx) + d * wx
+    return (top * (cube - wy) + bottom * wy) // (cube * cube)
+
+
+def _grove_block(seed, gx, gy, canopy):
+    """Generator v6: does a tree stand here? Woods grow the way real ones do - in groves of
+    many sizes with open clearings between, not as an even scatter: a broad grove field (scale 9)
+    shaped by smaller clumps (scale 4) gives dense cores, a sparse rim of single trees round each
+    grove, and now and then a lone tree out in the open. `canopy` (region) sets how much of the
+    land is grove. Pure function of world seed and global cell, so chunk borders agree."""
+    # three octaves, the middle one shifted so lattice lines never coincide
+    d = (_smooth_noise(seed, gx, gy, 13, "grove") * 55 + _smooth_noise(seed, gx + 3, gy + 2, 6, "clump") * 30
+         + _smooth_noise(seed, gx, gy, 3, "twig") * 15) // 100
+    t = 74 - canopy * 55 // 100   # deep woods still keep glades; open country still grows groves
+    roll = derive_seed(seed, "grove-tree", gx, gy) % 100
+    if d > t + 10:
+        return roll < 93          # grove core: nearly solid, a gap here and there
+    if d > t + 3:
+        return roll < 48          # inner rim
+    if d > t - 4:
+        return roll < 16          # outer rim: single trees thinning into the open
+    return roll < 2               # a lone tree in a clearing
+
+
+def _compose_v3(source, spec, key, seed, region, grid, water=None, site=None, groves=False):
     """Generator v3: tile-level regions (organic borders) and narrow meandering game trails.
 
     Trails still cross every chunk north-south and east-west so all four exits connect,
@@ -237,6 +274,9 @@ def _compose_v3(source, spec, key, seed, region, grid, water=None, site=None):
                 row.append(False)
                 continue
             r = grid[y][x]
+            if groves:
+                row.append(_grove_block(seed, gx, gy, 51 if r is None else r.canopy))
+                continue
             density = _noise(seed, gx, gy, 5, "canopy")
             if r is None:
                 row.append(density > 49 and derive_seed(seed, "tree", gx, gy) % 100 < 76)
@@ -327,10 +367,16 @@ def _compose_v3(source, spec, key, seed, region, grid, water=None, site=None):
             elif (x, y) in site_objects and collision[y][x]:
                 obj_row.append(Cell(site_objects[(x, y)], floor.fg, floor.bg))
             elif collision[y][x]:
-                obj_row.append(tree if forest and roll % 11 else rock)
+                if groves:   # v6: boulders lie in piles, not one in eleven trees at random
+                    pile = _smooth_noise(seed, ox + x, oy + y, 7, "boulders")
+                    obj_row.append(rock if not forest or (pile > 74 and roll % 3) or roll % 41 == 0 else tree)
+                else:
+                    obj_row.append(tree if forest and roll % 11 else rock)
             elif site is not None and site.contains(x, y):
                 obj_row.append(None)   # the clearing grows no brush
-            elif not paths[y][x] and not road[y][x] and (roll % 9 == 0 if r is None else roll % 100 < r.brush):
+            elif not paths[y][x] and not road[y][x] and (
+                    (_smooth_noise(seed, ox + x, oy + y, 5, "brush") > 62 and roll % 100 < 3 * (10 if r is None else r.brush))
+                    if groves else (roll % 9 == 0 if r is None else roll % 100 < r.brush)):
                 obj_row.append(brush)
             else:
                 obj_row.append(None)

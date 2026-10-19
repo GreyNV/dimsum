@@ -80,7 +80,7 @@ class PlacementTests(unittest.TestCase):
         w = new_world(SEED)
         before = sites(w)
         saved = json.loads(canonical_json(w.to_dict()))
-        self.assertEqual(saved["schema_version"], 6)
+        self.assertEqual(saved["schema_version"], 7)
         moved = {k: replace(v, weights={r: 1 for r in v.weights}) for k, v in SITES.items()}
         with patch.dict(SITES, moved):
             self.assertEqual(sites(WorldRepository.from_dict(saved)), before, "a catalog edit never moves sites")

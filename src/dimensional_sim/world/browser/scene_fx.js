@@ -6,17 +6,22 @@ import {TILE_W, TILE_H} from './view.js';
 export function tintPicture(chunk, picture) {
   if (!picture) return null;
   if (picture.tint) return picture.tint;
+  // Soft region borders: the per-tile wash is painted on a padded canvas (edge tiles clamped
+  // outward, so neighbouring chunks blend alike), blurred, then cropped to the chunk.
+  const W = chunk.width * TILE_W, H = chunk.height * TILE_H, P = TILE_W * 2;
+  const wide = document.createElement('canvas');
+  wide.width = W + P * 2; wide.height = H + P * 2;
+  const c = wide.getContext('2d');
+  const color = (x, y) => chunk.tint_legend?.[chunk.tint_rows[Math.max(0, Math.min(chunk.height - 1, y))][Math.max(0, Math.min(chunk.width - 1, x))]];
+  for (let y = -2; y < chunk.height + 2; y++) for (let x = -3; x < chunk.width + 3; x++) {
+    const col = color(x, y);
+    if (col) { c.fillStyle = col; c.fillRect(P + x * TILE_W, P + y * TILE_H, TILE_W + .5, TILE_H + .5); }
+  }
   const canvas = document.createElement('canvas');
-  canvas.width = chunk.width * TILE_W; canvas.height = chunk.height * TILE_H;
-  const c = canvas.getContext('2d');
-  chunk.tint_rows.forEach((row, y) => {
-    let start = 0;
-    for (let x = 1; x <= row.length; x++) if (x === row.length || row[x] !== row[start]) {
-      const color = chunk.tint_legend?.[row[start]];
-      if (color) { c.fillStyle = color; c.fillRect(start * TILE_W, y * TILE_H, (x - start) * TILE_W, TILE_H); }
-      start = x;
-    }
-  });
+  canvas.width = W; canvas.height = H;
+  const out = canvas.getContext('2d');
+  out.filter = `blur(${Math.round(TILE_W * .7)}px)`;
+  out.drawImage(wide, -P, -P);
   picture.tint = canvas;
   return canvas;
 }

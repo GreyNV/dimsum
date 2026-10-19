@@ -14,10 +14,12 @@ from .models import (
 )
 from .seeds import canonical_json, content_digest, derive_seed
 
-GENERATOR_VERSION = 5   # v3: tile-level organic region borders (regions.RegionField), game trails
+GENERATOR_VERSION = 6   # v3: tile-level organic region borders (regions.RegionField), game trails
                         # v4: + continuous rivers (water.WaterField), fords and bridges
                         # v5: + landmark sites (sites.site_at, pinned catalog.SITES)
-SUPPORTED_GENERATOR_VERSIONS = (1, 2, 3, 4, 5)
+                        # v6: + natural woods: groves with open clearings, sparse rims, lone
+                        #       trees, boulder piles and clumped brush (open_terrain._grove_block)
+SUPPORTED_GENERATOR_VERSIONS = (1, 2, 3, 4, 5, 6)
 
 
 def validated_dimensions(dimensions):
@@ -229,7 +231,8 @@ class ChunkGenerator:
             site = self.site_for(key) if self.generator_version >= 5 else None
             return Chunk(key, seed, source.id, compose_open(source, spec, key, landscape_seed,
                                                              region=region, region_grid=region_grid,
-                                                             water=water, site=site))
+                                                             water=water, site=site,
+                                                             groves=self.generator_version >= 6))
         terrain = derive_seed(seed, "terrain")
         decoration = derive_seed(seed, "decoration")
         encounter = derive_seed(seed, "encounter")
