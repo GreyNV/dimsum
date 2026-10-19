@@ -18,7 +18,6 @@ from statistics import mean
 from .actions import Context, describe_bucket, explain
 from .autopilot import Expedition
 from .catalog import BY_ID, ENEMIES, ITEMS, REGION_CELL, REGIONS
-from . import economy
 from .encounters import chunk_spots, features
 from .models import ChunkKey
 from .regions import region_cell
@@ -49,6 +48,7 @@ def run(seed, minutes=30, policy="spend", step_ms=1000):
     e = Expedition(Exploration(new_world(seed), "forest"))
     e.crafting_enabled = policy != "hoard"
     lives, start, total, recorded = [], 0, minutes * 60_000, 0
+    ash_before_life = e.ash
     lead_log, crafted_before = set(), dict(e.journal["actions"])
     while e.total_ms < total:
         e.advance(step_ms)
@@ -66,10 +66,11 @@ def run(seed, minutes=30, policy="spend", step_ms=1000):
                           "cause": e.cause or "exhaustion", "depth": e.depth, **e.stats,
                           "regions_visited": len(visited), "leads": leads,
                           "gear": _gear_crafted(e.journal["actions"], crafted_before),
-                          "converted_ash": economy.rebirth_ash(e.inventory, e.depth, e.converted),
+                          "converted_ash": e.ash - ash_before_life,
                           "title": report["title"]})
             lead_log, crafted_before = set(), dict(e.journal["actions"])
             anchor_policy(e, policy)
+            ash_before_life = e.ash
             if policy == "idle" and e.anchor_wait:
                 break  # first return requires the anchor dialogue interaction
             start = e.total_ms if policy != "idle" else e.total_ms + e.anchor_ms
