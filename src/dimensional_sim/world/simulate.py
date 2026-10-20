@@ -8,8 +8,8 @@ USE:
   python -m dimensional_sim.world.cli simulate --seeds 1-10 --minutes 30 --policy spend
   python -m dimensional_sim.world.cli inspect --seed 482910 --x 1 --y 0 --unlock climbing
   python -m dimensional_sim.world.cli regions --seed 482910 --radius 2
-Policies (anchor behaviour; the auto-pilot plays the lives):
-  spend - buy the cheapest available unlock, keep or bind; crafting on.
+Policies (the auto-pilot explores; these scripts make player choices):
+  spend - buy the cheapest anchor offers; choose available camp builds and crafts.
   hoard - same anchor buying, but never crafts (keeps materials for conversion).
   idle  - never acts at the anchor (an absent player); resources still become ash.
 """
@@ -17,6 +17,7 @@ from statistics import mean
 
 from .actions import Context, describe_bucket, explain
 from .autopilot import Expedition
+from .autopilot.constants import POINT
 from .catalog import BY_ID, ENEMIES, ITEMS, REGION_CELL, REGIONS
 from .encounters import chunk_spots, features
 from .models import ChunkKey
@@ -41,16 +42,40 @@ def anchor_policy(e, policy):
     e.anchor_action({"type": "begin_life"})
 
 
+def location_policy(e, policy):
+    """An engaged player's optional camp work and emergency fire, only when present."""
+    if policy != "spend" or e.anchor_ms is not None or e.contact or e.in_prologue or e.task:
+        return
+    if e.at_camp():
+        rows = [row for row in e.location_context()["actions"] if not row["reasons"]]
+        choices = []
+        for row in rows:
+            action = BY_ID[row["id"]]
+            if action.category == "craft" and action.effect is None:
+                # Consumable crafts are a deliberate need choice, not a constant sink.
+                if (action.need_hunger_below is None or e.hunger // POINT >= action.need_hunger_below
+                        or action.need_no_food and e._has_food()):
+                    continue
+            choices.append(action)
+        if choices:
+            choice = min(choices, key=lambda action: (action.category != "build", action.need_priority, action.id))
+            e.use_location_action(choice.id)
+    elif e._hurt_far():
+        context = e.location_context()
+        if context["kind"] == "wild" and not context["actions"][0]["reasons"]:
+            e.use_location_action(context["actions"][0]["id"])
+
+
 def run(seed, minutes=30, policy="spend", step_ms=1000):
     """Play one expedition; returns {"lives": [...], "final": {...}}."""
     if policy not in POLICIES:
         raise ValueError(f"policy must be one of {POLICIES}")
     e = Expedition(Exploration(new_world(seed), "forest"))
-    e.crafting_enabled = policy != "hoard"
     lives, start, total, recorded = [], 0, minutes * 60_000, 0
     ash_before_life = e.ash
     lead_log, crafted_before = set(), dict(e.journal["actions"])
     while e.total_ms < total:
+        location_policy(e, policy)
         e.advance(step_ms)
         lead_log.update((row["id"], row["action"], row["status"]) for row in e.lead_history)
         if e.anchor_ms is not None and recorded != e.life:

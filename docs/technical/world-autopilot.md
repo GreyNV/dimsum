@@ -274,6 +274,7 @@ byte-identical frames (checked by a golden capture of seeded runs, reloads and w
 | outcomes.py | rewards, XP (`_gain_xp`), loot, leads, eating, self actions |
 | vitals.py | hunger/health integer rates |
 | lives.py | death report, anchor interlude, anchor actions (`ANCHOR_FIELDS`), rebirth |
+| locations.py | nearby anchor camp, landmark and campfire choices; validates chosen actions |
 | saves.py | `to_dict`/`from_dict`, field loaders, `MIGRATIONS` (schemas 6, 7, 8 -> 9) |
 | presentation.py | read-only HUD/page/debug views |
 | constants.py | vitals and combat numbers, prologue text, `SCHEMA_VERSION` |

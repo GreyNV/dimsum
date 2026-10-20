@@ -1,6 +1,6 @@
-"""Currency rules: automatic dimensional ash conversion and anchor purchases.
+"""Currency rules: dimensional ash conversion and anchor purchases.
 
-    all carried items --(life ends)--> dimensional ash --(keep)--> recipes found this life, for good
+    offered at anchor camp or carried at death --> dimensional ash --> lasting purchases
     dimensional levels --(automatically)--> new actions (UnlockDef.level)
     a building at the anchor camp --(bind, a lot of ash)--> stands in every later life
     dimensional ash --(unlock)--> skills such as the campfire

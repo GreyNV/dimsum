@@ -1,7 +1,7 @@
 """Death, the anchor interlude between lives, anchor purchases and rebirth."""
 from .. import economy
 from ..catalog import JOURNAL_FAVOR_MASTERY, JOURNAL_GUARANTEE_MASTERY, REGIONS
-from ..catalog import ATTRIBUTES, BUILDINGS, BY_ID, ENEMIES, UNLOCKS
+from ..catalog import ATTRIBUTES, BUILDINGS, BY_ID, ENEMIES, ITEMS, UNLOCKS
 from ..generation import GENERATOR_VERSION
 from ..journal import record_death, validate_journal
 from ..progression import dimensional_level
@@ -65,6 +65,25 @@ class LivesMixin:
             raise ValueError("the anchor is not contacted")
         self.contact = False
         self.contact_ready_ms = self.total_ms + CONTACT_COOLDOWN_MS
+
+    def offer_at_anchor(self, ident, count):
+        """Convert chosen carried or stored items during this life, using lifetime diminishing returns."""
+        if (not self.contact or not self.at_camp() or type(ident) is not str
+                or ident not in ITEMS or type(count) is not int or count < 1):
+            raise ValueError("offer resources while visiting the anchor camp")
+        if self.camp_stock().get(ident, 0) < count:
+            raise ValueError("not enough resources to offer")
+        gained = economy.offer_value(ident, count, self.converted.get(ident, 0))
+        if gained < 1:
+            raise ValueError("this offer would yield no ash; offer more together")
+        self._pay(((ident, count),))
+        self.converted[ident] = self.converted.get(ident, 0) + count
+        self.ash += gained
+        self._entry("purchase", f"Offered {count} {ITEMS[ident].name.lower()} for {gained} dimensional ash.",
+                    items=[(ident, -count)])
+
+    def camp_offer_value(self, ident, count):
+        return economy.offer_value(ident, count, self.converted.get(ident, 0))
 
     def _end_life(self):
         if self.possessing:
@@ -152,7 +171,8 @@ class LivesMixin:
     ANCHOR_FIELDS = {"contact": {"type"}, "resume": {"type"}, "possess": {"type"}, "release": {"type"},
                      "campfire": {"type"}, "begin_life": {"type"}, "unlock": {"type", "id"},
                      "bind": {"type", "id"}, "keep": {"type", "id"}, "journal_favor": {"type", "id", "mode"},
-                     "journal_guarantee": {"type", "id", "region"}}
+                     "journal_guarantee": {"type", "id", "region"},
+                     "location": {"type", "id"}, "offer": {"type", "id", "count"}}
     ANCHOR_ACTIONS = tuple(ANCHOR_FIELDS)
     # Journal controls work at any time (Journal page): they shape chunks not yet rolled.
     JOURNAL_ACTIONS = ("journal_favor", "journal_guarantee")
@@ -162,8 +182,8 @@ class LivesMixin:
         return economy.offers(self)
 
     def anchor_action(self, action):
-        """Skills (contact, possess, campfire) during a life; at the anchor (between lives or
-        contacted mid-life): buy, begin the next life or resume this one. Journal controls work any time."""
+        """Use skills and nearby choices; at the anchor buy, offer, or resume.
+        Journal controls work at any time."""
         if type(action) is not dict:
             raise ValueError("anchor action requires the anchor space")
         kind = action.get("type")
@@ -180,6 +200,14 @@ class LivesMixin:
             return
         if kind == "release":
             self.release()
+            return
+        if kind == "location":
+            if type(action["id"]) is not str:
+                raise ValueError("invalid location action")
+            self.use_location_action(action["id"])
+            return
+        if kind == "offer":
+            self.offer_at_anchor(action["id"], action["count"])
             return
         if kind == "campfire":   # a skill during a life (manual or auto): start making a fire here
             if not self.can_make_fire():

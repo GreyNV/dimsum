@@ -18,6 +18,7 @@ from .constants import (ANCHOR_COUNTDOWN_MS, MAX_EVENTS_PER_ADVANCE, MONSTER_STE
                         POSSESS_COOLDOWN_MS, POSSESS_SPEED_PERCENT, PROLOGUE_MS, PROLOGUE_NEXT,
                         REST_MS, RETREAT_BELOW, SELF_ACTIONS, STAT_KEYS, VITAL_MAX, attribute_table, ceil_div)
 from .lives import LivesMixin
+from .locations import LocationsMixin
 from .navigation import NavigationMixin
 from .night import NightMixin
 from .outcomes import OutcomesMixin
@@ -29,7 +30,7 @@ from .vitals import VitalsMixin
 
 
 class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, OutcomesMixin, VitalsMixin,
-                 LivesMixin, SavesMixin, PresentationMixin, CampMixin, EcologyMixin, NightMixin):
+                 LivesMixin, LocationsMixin, SavesMixin, PresentationMixin, CampMixin, EcologyMixin, NightMixin):
     def __init__(self, game, *, fresh=True, opening=False):
         """fresh=True starts a new expedition (prologue first); loaders pass False.
         opening=True (new games in the browser) starts at the anchor: the player meets
@@ -412,10 +413,6 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         if self.task:
             return self._task_step(cap, allow_prayer)
         if self.goal is None:
-            need = self._need_action(allow_prayer)
-            if need is not None:
-                self._start_self(need)
-                return 0
             self.goal = self._choose_goal()
             if self.goal is None:
                 self._run(cap, InputCommand())

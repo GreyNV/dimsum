@@ -223,3 +223,26 @@ Kept recipes: hide wrap 10 seeds, snare 9, padded jerkin 5, axe 3, spear 2. Live
 longer because the old ash prices (15-70) no longer delay the early actions, and ash now piles up
 by the third or fourth life. Knobs: the `level` gates in `UNLOCKS`, `RECIPE_KEEP_COST`, and new ash
 sinks if the surplus holds in playtest.
+
+## 2026-10-20: long first lives after the berry and eating changes
+
+The earlier 8-12 minute estimate was from older rules and is not a current first-life
+measurement. With four berries per bush, immediate eating when a food's full hunger
+value fits, and 0.2 health/second passive recovery above half hunger, first lives
+in seeds 1-4 lasted 24.65-78.85 minutes (mean 52.0). A player reported reaching day
+11 in life one, about two hours into the 12-minute day cycle. A saved human run
+can differ from a fresh automated run, but the old estimate clearly understates it.
+
+Passive recovery is now 0.05 health/second. The same four seeds lasted 8.35-44.6
+minutes (mean 26.08). Eight seeds under the `idle` simulator policy yielded eight
+completed first lives in 90 minutes: mean 34.21, range 8.35-68.02, five boar deaths
+and three starvation deaths. Seed 482910 ended at 26.2 minutes. Four-berry drops and
+food healing remain. Fights now spend health that cannot be passively restored as
+quickly. These runs choose no camp crafts or gear; human choices can change pacing.
+
+Reproduce with `python -B -m dimensional_sim.world.cli simulate --seeds 1-8
+--minutes 90 --policy idle --lives`. See `autopilot/constants.py` for `REGEN`.
+The simulator's `spend` policy now chooses eligible crafts and buildings only while
+the avatar is at camp. In seeds 1-4 over 90 minutes, it completed 12 lives with
+0.5 crafts per life on average; this is a simple scripted player, not an estimate
+of how often human players will choose to return to camp.

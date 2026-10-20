@@ -105,12 +105,14 @@ class CampfireTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             e.anchor_action({"type": "campfire"})
 
-    def test_the_snapshot_shows_the_fire_and_the_skill(self):
+    def test_the_snapshot_shows_the_fire_and_the_context_choice(self):
         from dimensional_sim.world.session import snapshot
         e = far_and_hurt()
         view = snapshot(e.game, expedition=e)["expedition"]
-        self.assertEqual({k: view["skill_slots"][1][k] for k in ("name", "state", "note")},
-                         {"name": "Make campfire", "state": "ready", "note": "Ready"})
+        self.assertEqual(view["skill_slots"][1]["name"], "Possess")
+        self.assertEqual(view["skill_slots"][2]["name"], "Dimensional Shift")
+        self.assertEqual(view["location_context"]["actions"][0]["name"], "Make a campfire")
+        self.assertFalse(view["location_context"]["actions"][0]["reasons"])
         self.assertIsNone(view["campfire"])
         e._start_self(BY_ID["make_campfire"])
         e.advance(e.task["duration_ms"])

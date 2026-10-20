@@ -250,12 +250,7 @@ class OutcomesMixin:
         return all(self.inventory.get(item, 0) - cost[item] >= need for item, need in FIRE_KIT.items() if item in cost)
 
     def _after_location(self, spot, allow_prayer):
-        """A need-driven craft, else a roll in the after-location bucket (think,
-        contemplate, a rare prayer during live play) or a short pause."""
-        need = self._need_action(allow_prayer)
-        if need is not None:
-            self._start_self(need)
-            return
+        """Roll the after-location bucket (think, contemplate, prayer) or pause."""
         entries = bucket(self.self_context("after_location", allow_prayer))
         total = sum(w for _, w in entries) + AFTER_LOCATION_REST_WEIGHT
         roll = derive_seed(self.game.world.world_seed, "after-location-v6", self.life, spot.id) % total

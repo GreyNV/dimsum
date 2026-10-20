@@ -37,7 +37,7 @@ Each placement keeps its own availability semantics while sharing the same eligi
 |---|---|---|---|
 | `spot` | `chunk_spots` roll on first entry to the current chunk, then screening | yes | until completed or the life ends |
 | `lead` | an `OutcomeDef(kind="lead")` of a completed action, placed by `lead_spot` in the source chunk | no (it is the follow-up of a real spot) | until completed, expired (`ttl_ms`) or the life ends |
-| `self` | `trigger="need"` (recipes/crafts, priority-ordered) or `trigger="after_location"` (reflection, prayer) | no | per use |
+| `self` | Player choice at the anchor camp (craft/build) or in the wilderness (campfire); `trigger="after_location"` still rolls reflection/prayer | no | per use |
 
 ## Lifecycle states (debug overlay, `cli inspect`, `actions.explain()["state"]`)
 

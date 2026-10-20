@@ -80,13 +80,13 @@ class CampMixin:
 
     # ----- camp work (planning) ----------------------------------------------------
     def _camp_work_ready(self):
-        """A craft or building that only needs the avatar at the camp, or a full pack to stow."""
+        """A full material pack can still take an automatic storage trip."""
         if self.at_camp() or self.health < RETREAT_BELOW:
             return False
         if self.has_chest() and sum(n for i, n in self.inventory.items()
                                     if ITEMS[i].kind == "material") >= STOW_TRIP_AT:
             return True
-        return self._need_action(at_camp=True) is not None
+        return False
 
     # ----- campfire ------------------------------------------------------------------
     # One per life, anywhere: resting by it heals like resting at the anchor camp (the

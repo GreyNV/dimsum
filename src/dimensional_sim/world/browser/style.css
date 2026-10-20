@@ -174,8 +174,6 @@ body.page-open .touch-controls,body.page-open .anchor-space,body.page-open .dial
 .skill-bar button[data-state="active"]{border-color:#aad285;background:#263823}
 .skill-bar button[data-state="cooldown"]{border-color:#8b7953;color:#c5b28b}
 .skill-bar button[data-state="locked"],.skill-bar button[data-state="disabled"]{opacity:.78}
-#mode-switch{border-color:#a2c880;background:#273a26;color:#e6f3d5;font-weight:700;letter-spacing:.3px}
-#mode-switch[aria-pressed="true"]{border-color:#d5bc77;background:#514326;color:#fff1c8}
 #bag-toggle{display:none}
 body.active-control .expedition{display:none!important}
 body.active-control .inventory:not(.bag-open){display:none!important}
@@ -208,7 +206,6 @@ body.page-open .controls{display:none!important}
   .controls .keys,.controls .divider,.controls #zoom,.controls #zoom-in,.controls #zoom-out{display:none!important}
   .view-controls{width:100%;justify-content:space-between;gap:4px}
   .view-controls button,#bag-toggle{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:5px 10px;font-size:11px}
-  #mode-switch{flex:1;min-width:124px}
   /* Bag: a centered, always-expanded panel opened by the Bag button (never stacked on the minimap). */
   .inventory{display:none;position:fixed;left:50%;top:50%;right:auto;transform:translate(-50%,-50%);
     width:min(340px,calc(100vw - 32px));padding:12px 14px 14px;z-index:7;background:rgba(8,12,8,.95);
@@ -242,6 +239,40 @@ body.page-open .controls{display:none!important}
   body.prologue .vitals{top:90px;left:8px;right:8px}
 }
 @media(max-width:380px){.location{width:56vw}.map-panel{width:34vw}.region-tip{font-size:8px}}
+
+/* Nearby choices use one small trigger in the location header. Opening the sheet pauses
+   the local expedition; the regular pause card stays out of its way. */
+.location{padding-top:11px;padding-bottom:9px}
+.location .eyebrow{display:none}
+.location h1{margin-bottom:6px}
+.location .location-line{padding-top:5px}
+#context-toggle{display:block;width:100%;min-height:27px;margin-top:4px;padding:3px 7px;text-align:left;
+  border-color:#8b754f;background:#25301be8;color:#e9d6ad;font:10px ui-monospace,Consolas,monospace}
+#context-toggle[hidden]{display:none}
+.context-panel{position:absolute;z-index:6;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:min(440px,calc(100vw - 24px));max-height:min(65vh,560px);overflow:auto;padding:14px 16px;
+  background:#101810f5;border-color:#9e8056;box-shadow:0 16px 70px #000c}
+.context-head{display:flex;align-items:start;justify-content:space-between;gap:12px;margin-bottom:8px}
+.context-head h2{margin:0;font:400 22px Georgia,serif;color:#f1d9ad}
+.context-head .eyebrow{font-size:9px;margin-bottom:3px}
+#context-close{min-width:30px;min-height:30px;font:20px ui-monospace,Consolas,monospace}
+.context-actions{display:grid;gap:6px}
+.context-choice{display:flex;flex-direction:column;gap:3px;align-items:start;width:100%;padding:8px 10px;
+  text-align:left;background:#1a2518;border-color:#687754;font:11px ui-monospace,Consolas,monospace}
+.context-choice b{font-weight:600;color:#e8d6ad}.context-choice small{font-size:10px;line-height:1.4;color:#aebe9d}
+.context-choice:disabled{opacity:.62}
+body.context-open .pause-overlay,body.context-open .controls,body.context-open .skill-bar,
+body.context-open .touch-controls,body.anchor-active .context-panel,body.page-open .context-panel,
+body.prologue .context-panel{display:none!important}
+body.context-open.active-control:not(.page-open):not(.anchor-active) .touch-controls.manual-only{display:none!important}
+.anchor-offer{display:flex;align-items:center;gap:5px;margin:5px 0;text-align:left;
+  font:10px/1.4 ui-monospace,Consolas,monospace}
+.anchor-offer span{flex:1}.anchor-offer button{min-height:30px;padding:4px 7px;font-size:10px}
+#anchor-offerings{margin:12px 0;padding:7px 9px;border:1px solid #577894;text-align:left}
+#anchor-offerings summary{cursor:pointer;font:600 11px ui-monospace,Consolas,monospace;color:#c5dcf2}
+@media(max-width:720px){#context-toggle{font-size:9px;min-height:26px;margin-top:5px}
+  .context-panel{top:45%;max-height:58vh;padding:11px 12px}
+  .anchor-offer{flex-wrap:wrap}.anchor-offer span{flex-basis:100%}}
 
 .bag-head{display:inline-flex;align-items:center}.bag-close{display:none}
 @media(max-width:720px){.bag-close{display:inline-flex}}

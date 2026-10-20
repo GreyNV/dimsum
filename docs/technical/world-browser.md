@@ -92,7 +92,8 @@ Module map (2026-10-07):
   Journal controls, action durations, bonus drops, chains; Achievements). `PAGES[].subtabs` lists them; the
   first subtab is the main view. Journal control buttons carry their session action (`data-journal`) and
   work during a life, not only at the anchor.
-- anchor_ui.js: the anchor panel and its actions. minimap.js. scene_fx.js: region tint,
+- anchor_ui.js: the anchor panel and its actions. location_ui.js: compact nearby choices.
+  minimap.js. scene_fx.js: region tint,
   prologue eyelids, vignette. world_ui.js: region cues, skill slots, control mode.
 The legacy ASCII-cell player sprite and its layered equipment overlay were removed; the
 pixel player is the only avatar art (pixel-tier equipment overlays are still to come).
@@ -152,7 +153,8 @@ the key that carried you there keeps it going, a new press walks on and abandons
 layered character-art canvas. An input with `control: "active"` enables persistent manual
 movement, interaction and attack; `control: "auto"` resumes autopilot from the
 current cell and ongoing encounter. The browser holds one polling loop, and its
-three skill slots (return, campfire, empty) come from `expedition.skill_slots`. Frame has
+three skill slots come from `expedition.skill_slots` (now Contact anchor, Possess,
+and a reserved Dimensional Shift slot). Frame has
 spots/target_kinds/expedition fields; see
 world-autopilot.md for the additive transport contract.
 2026-10-04 movement fix: taps only turned the player (a step needed 120ms of
@@ -167,3 +169,12 @@ frames carry `tint_rows` (one letter per tile) + `tint_legend` so the region was
 follows the per-tile region field (generator v3) instead of whole chunks. Moving in
 Active control abandons a running task; before this, every 50ms input poll during
 a task was a fresh press edge and stepped for free (~2x walking speed).
+
+2026-10-20 location choices: `expedition.location_context` supplies a compact
+"Actions here" prompt. The client pauses while its panel is open, then sends a
+validated `location` action. At the anchor camp this includes manual craft/build
+choices and a visit to the anchor's usual shop. Visiting at camp can convert chosen
+inventory or chest stacks into ash mid-life. In the wilderness the default is
+"Make campfire" once unlocked; nearby live landmark actions replace it. The three
+skills are Contact anchor, Possess, and a locked Dimensional Shift placeholder.
+The footer's duplicate Possess button was removed to free mobile space.

@@ -54,7 +54,7 @@ class PlanningMixin:
     def _choose_goal(self):
         if self.health < RETREAT_BELOW and (self.hunger > 0 or not self._has_food()):
             return self._rest_goal()
-        if self._camp_work_ready():   # a craft or building waits at the camp, or a full pack to stow
+        if self._camp_work_ready():   # a full pack may be stowed at the camp
             return self._home_goal()
         player_field = self._field({self._player()})
         return self._best_candidate(player_field) or self._wander_goal(player_field)

@@ -153,7 +153,7 @@ class PossessionTests(unittest.TestCase):
         self.assertEqual(session.input({**IDLE, "move": "east"}, 0)["expedition"]["control"], "auto")
         frame = session.input({**IDLE, "move": "east", "action": {"type": "possess"}}, 0)
         self.assertEqual(frame["expedition"]["control"], "manual")
-        slot = frame["expedition"]["skill_slots"][2]
+        slot = frame["expedition"]["skill_slots"][1]
         self.assertEqual((slot["name"], slot["state"], slot["remaining_ms"]), ("Possess", "active", ap.POSSESS_MS))
         frame = session.input({**IDLE, "action": {"type": "release"}}, 1)
         self.assertEqual(frame["expedition"]["control"], "auto")

@@ -5,6 +5,7 @@ import {groundMarks, paintChunk, RES, TREE, terrainColor, OBJECT_PAD, clearStamp
 import {ENEMY, ROLE, spriteSize, paintSprite, punchReach, hiddenBehind, occludingTreeTiles, SPOTS, POSE, drawSpot, CAMP, ELDER} from '../src/dimensional_sim/world/browser/actors.js';
 import {activityText, newRewards, ATTRIBUTES, usedAttributes, rewardTexts, reportIsFresh, reportStorageKey, ExpeditionHud, prologueView, shopSections, debugText} from '../src/dimensional_sim/world/browser/hud.js';
 import {anchorAction} from '../src/dimensional_sim/world/browser/anchor_ui.js';
+import {locationAction} from '../src/dimensional_sim/world/browser/location_ui.js';
 import {drawMinimap, visibleAt} from '../src/dimensional_sim/world/browser/minimap.js';
 const pose = (facing, animation='idle', animation_ms=0) => ({facing, animation, animation_ms, active:false});
 const chunk = (x=0,y=0) => ({id:'forest:'+x+':'+y,x,y,width:32,height:16,seed:1234,
@@ -419,7 +420,10 @@ test('anchor clicks map to purchases and begin; Journal controls are not anchor 
   assert.deepEqual(anchorAction(at('button[data-buy]',{buy:'unlock:climbing'})),{type:'unlock',id:'climbing'});
   assert.deepEqual(anchorAction(at('#anchor-begin',{})),{type:'begin_life'});
   assert.deepEqual(anchorAction(at('#anchor-begin',{kind:'contact'})),{type:'resume'},'a contact resumes the life');
+  assert.deepEqual(anchorAction(at('button[data-offer]',{offer:'stick:3'})),{type:'offer',id:'stick',count:3});
   assert.equal(anchorAction(at('button[data-journal-guarantee]',{journalGuarantee:'bramble_berries'})),null);
+  assert.deepEqual(locationAction(at('button[data-location-action]',{locationAction:'build_station'})),
+    {type:'location',id:'build_station'});
 });
 
 test('stick and keys move in eight directions', async () => {

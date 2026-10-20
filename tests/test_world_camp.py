@@ -6,6 +6,8 @@ from dimensional_sim.world import economy
 from dimensional_sim.world.autopilot import SCHEMA_VERSION, Expedition, saves
 from dimensional_sim.world.catalog import BY_ID
 from dimensional_sim.world.runtime import Exploration
+from dimensional_sim.world.session import BrowserSession
+from dimensional_sim.world.simulate import location_policy
 from dimensional_sim.world.seeds import canonical_json
 from dimensional_sim.world.web import new_world
 from camp_fixture import CHEST, STATION, away, to_camp
@@ -126,7 +128,7 @@ class ChestTests(unittest.TestCase):
         restored = Expedition.from_dict(json.loads(dump(e)))
         self.assertEqual(restored.chest, {"stick": 7})
 
-    def test_the_auto_pilot_heads_home_for_camp_work(self):
+    def test_the_auto_pilot_leaves_camp_work_to_the_player(self):
         e = away(fresh())
         e.buildings.add(STATION)
         e.recipes.add("hide_wrap")
@@ -134,7 +136,70 @@ class ChestTests(unittest.TestCase):
         self.assertNotEqual((e._choose_goal() or {}).get("kind"), "home", "nothing to make yet")
         e.goal = None
         e.inventory = {"boar_hide": 2}
-        self.assertEqual(e._choose_goal()["kind"], "home")
+        self.assertNotEqual(e._choose_goal()["kind"], "home")
+
+
+class LocationChoiceTests(unittest.TestCase):
+    def test_camp_build_is_player_chosen_and_spot_work_stays_automatic(self):
+        e = to_camp(fresh(), station=False)
+        e.inventory = {"stick": 12, "boar_hide": 2}
+        context = e.location_context()
+        self.assertEqual(context["kind"], "anchor")
+        row = next(row for row in context["actions"] if row["id"] == "build_station")
+        self.assertFalse(row["reasons"])
+        e._auto_step(1000, True)
+        self.assertNotEqual((e.task or {}).get("type"), "build_station")
+        e.anchor_action({"type": "location", "id": "build_station"})
+        self.assertEqual(e.task["type"], "build_station")
+        e.advance(e.task["duration_ms"])
+        self.assertIn(STATION, e.buildings)
+        self.assertNotIn("build_station", [row["id"] for row in e.location_context()["actions"] if not row["reasons"]])
+
+    def test_anchor_visit_can_convert_now_without_converting_twice_at_death(self):
+        e = to_camp(fresh())
+        e.inventory = {"stick": 3}
+        e.anchor_action({"type": "location", "id": "visit_anchor"})
+        before = e.ash
+        expected = economy.offer_value("stick", 2, e.converted.get("stick", 0))
+        e.anchor_action({"type": "offer", "id": "stick", "count": 2})
+        self.assertEqual(e.ash, before + expected)
+        self.assertEqual(e.inventory["stick"], 1)
+        self.assertEqual(e.converted["stick"], 2)
+        e.anchor_action({"type": "resume"})
+        self.assertGreater(e.contact_ready_ms, e.total_ms)
+        with self.assertRaisesRegex(ValueError, "visiting"):
+            e.anchor_action({"type": "offer", "id": "stick", "count": 1})
+        expected_final = economy.rebirth_ash({"stick": 1}, e.depth, {"stick": 2})
+        before_death = e.ash
+        die(e)
+        self.assertEqual(e.ash, before_death + expected_final)
+        self.assertEqual(e.converted["stick"], 3)
+
+    def test_wilderness_default_is_campfire(self):
+        e = away(fresh())
+        context = e.location_context()
+        self.assertEqual(context["kind"], "wild")
+        self.assertEqual(context["actions"][0]["name"], "Make a campfire")
+
+    def test_browser_session_opens_anchor_and_offers_a_stack(self):
+        e = to_camp(fresh())
+        e.inventory = {"stick": 2}
+        session = BrowserSession(e.game, e)
+        base = {"move": None, "attack": False, "paused": True, "known": []}
+        frame = session.input({**base, "action": {"type": "location", "id": "visit_anchor"}}, 0)
+        self.assertTrue(frame["expedition"]["anchor_space"]["at_camp"])
+        self.assertEqual(frame["expedition"]["anchor_offerings"][0]["count"], 2)
+        frame = session.input({**base, "action": {"type": "offer", "id": "stick", "count": 2}}, 1)
+        self.assertIsNone(frame["expedition"]["action_error"])
+        self.assertFalse(frame["expedition"]["anchor_offerings"])
+
+    def test_spend_simulator_policy_models_an_explicit_camp_choice(self):
+        e = to_camp(fresh(), station=False)
+        e.inventory = {"stick": 12, "boar_hide": 2}
+        location_policy(e, "hoard")
+        self.assertIsNone(e.task)
+        location_policy(e, "spend")
+        self.assertEqual(e.task["type"], "build_station")
 
 
 class CarryLoadTests(unittest.TestCase):

@@ -76,24 +76,26 @@ class SkillSlotTests(unittest.TestCase):
         e, _ = manual_beside_spot()
         e.inventory = {"stick": 1}
         slots = snapshot(e.game, expedition=e)["expedition"]["skill_slots"]
-        contact, fire, possess = slots
+        contact, possess, shift = slots
         self.assertEqual((contact["state"], contact["note"]), ("locked", "Unlock at the anchor (10 ash)"))
         e.unlocked.add("return_anchor")
         contact = snapshot(e.game, expedition=e)["expedition"]["skill_slots"][0]
         self.assertEqual(contact["state"], "ready")
         self.assertIn("without dying", contact["hint"])
-        self.assertEqual(fire["state"], "locked")
-        self.assertIn("25 ash", fire["note"])
-        self.assertIn("heal", fire["hint"])
         self.assertEqual((possess["state"], possess["note"]), ("active", "Possessing"))
+        self.assertEqual((shift["name"], shift["state"]), ("Dimensional Shift", "locked"))
+        from camp_fixture import away
+        away(e)
+        fire = snapshot(e.game, expedition=e)["expedition"]["location_context"]["actions"][0]
+        self.assertTrue(any("25 ash" in reason for reason in fire["reasons"]))
         e.unlocked.add("campfire")
-        fire = snapshot(e.game, expedition=e)["expedition"]["skill_slots"][1]
-        self.assertEqual((fire["state"], fire["note"]), ("disabled", "Needs 3 sticks (have 1)"))
+        fire = snapshot(e.game, expedition=e)["expedition"]["location_context"]["actions"][0]
+        self.assertTrue(any("needs 3" in reason for reason in fire["reasons"]))
         e.inventory = {"stick": 3}
-        self.assertEqual(snapshot(e.game, expedition=e)["expedition"]["skill_slots"][1]["state"], "ready")
+        self.assertFalse(snapshot(e.game, expedition=e)["expedition"]["location_context"]["actions"][0]["reasons"])
         e.contact_ready_ms = e.total_ms + 60_000
         e.release()
-        contact, _, possess = snapshot(e.game, expedition=e)["expedition"]["skill_slots"]
+        contact, possess, _ = snapshot(e.game, expedition=e)["expedition"]["skill_slots"]
         self.assertEqual((contact["state"], contact["remaining_ms"], contact["cooldown_ms"]), ("cooldown", 60_000, 300_000))
         self.assertEqual((possess["state"], possess["remaining_ms"]), ("cooldown", 60_000))
         self.assertTrue(BY_ID["make_campfire"].cost)

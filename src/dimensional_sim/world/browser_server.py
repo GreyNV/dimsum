@@ -17,7 +17,7 @@ from .models import integer
 from .session import (INPUT_LEASE, LOG_ENTRIES, TICK_MS,  # noqa: F401
                       BrowserSession as _BaseSession, snapshot, validate_input)
 CLIENT_MODULES = ("app.js", "art.js", "actors.js", "sprites.js", "player_art.js", "combat_art.js", "place_art.js",
-                  "hud.js", "world_ui.js", "pages.js", "page_ui.js", "anchor_ui.js", "minimap.js", "scene_fx.js", "nature_art.js", "ascii_art.js", "painted.js", "painted_props.js", "natural_ground.js", "sound.js",
+                  "hud.js", "world_ui.js", "pages.js", "page_ui.js", "anchor_ui.js", "location_ui.js", "minimap.js", "scene_fx.js", "nature_art.js", "ascii_art.js", "painted.js", "painted_props.js", "natural_ground.js", "sound.js",
                   "dom.js", "transport.js", "view.js")
 STATIC = {"/": ("index.html", "text/html"), "/style.css": ("style.css", "text/css"),
           **{f"/{name}": (name, "text/javascript") for name in CLIENT_MODULES}}

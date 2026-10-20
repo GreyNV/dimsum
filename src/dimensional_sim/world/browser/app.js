@@ -5,6 +5,7 @@ import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawUnarmedReach, dra
 import {PAGES, needsDetail, pageModel, PANELS, COLLAPSE_KEY, loadCollapsed, toggleCollapsed, defaultCollapsed, subtabsOf} from './pages.js';
 import {debugText, ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
 import {clockText, regionCue, skillSlots, worldMode} from './world_ui.js';
+import {locationAction, renderLocationContext} from './location_ui.js';
 import {$, el, readUi, writeUi} from './dom.js';
 import {hosted, request, releaseInput} from './transport.js';
 import {drawMinimap, visibleAt} from './minimap.js';
@@ -69,6 +70,7 @@ const closedSections = new Set();
 const isMobile = () => matchMedia('(max-width: 720px)').matches;
 let collapsed = loadCollapsed(readUi(COLLAPSE_KEY), isMobile());
 let controlMode = 'auto', bagOpen = false, pendingInteract = false;
+let contextOpen = false, contextPaused = false;
 /* Possession (manual control) comes from the server; the client only times its glow. */
 let possessedSince = null;
 let stickPointer = null;
@@ -115,6 +117,13 @@ function setPause(value) {
   $('pause').innerHTML = (paused ? 'Resume' : 'Pause') + ' <span class="shortcut">P</span>';
   updateActivity();
 }
+function closeContext() {
+  contextOpen = false;
+  document.body.classList.remove('context-open');
+  renderLocationContext(state?.expedition?.location_context, false);
+  if (contextPaused) setPause(false);
+  contextPaused = false;
+}
 function updateActivity() {
   if (!state) return;
   const tile = tileAt([...chunks.values()], state.player.x, state.player.y);
@@ -152,14 +161,8 @@ function adopt(next, sentControl = null) {
   document.body.classList.toggle('active-control', active);
   document.body.classList.toggle('manual-unlocked', active);
   const possession = next.expedition?.possession;
-  $('mode-switch').innerHTML = (active ? 'Release' : 'Possess') + ' <span class="shortcut">Q</span>';
-  $('mode-switch').setAttribute('aria-pressed', String(active));
   $('possess-clock').textContent = active ? clockText(possession?.remaining_ms || 0) : '';
   $('attack-state').textContent = next.expedition?.auto_target ? 'TARGET IN REACH' : 'AUTO STRIKE';
-  $('mode-switch').disabled = !!next.expedition?.prologue || !!next.expedition?.anchor_space
-    || (!active && !!possession?.ready_in_ms);
-  $('mode-switch').title = active ? 'Hand the avatar back to the auto-pilot (Q)'
-    : possession?.ready_in_ms ? `Possess again in ${clockText(possession.ready_in_ms)}` : 'Possess the avatar for 30 seconds (Q)';
   $('region-tip').textContent = regionCue(next.expedition?.region);
   const progress = next.expedition?.activity;
   $('action-name').textContent = progress?.name || (active ? 'Choose your path' : 'Exploring');
@@ -182,6 +185,8 @@ function adopt(next, sentControl = null) {
   if (firstSnapshot && $('report').hidden) setPause(false);
   hud.update(next);
   renderAnchor(next.expedition);
+  if (next.expedition?.anchor_space && contextOpen) closeContext();
+  renderLocationContext(next.expedition?.location_context, contextOpen);
   if (next.expedition?.detail) lastDetail = next.expedition.detail;
   if (page !== 'world') renderPage();
   const position = {x:(next.player.x + .5) * TILE_W, y:(next.player.y + .5) * TILE_H};
@@ -672,11 +677,26 @@ function togglePossession() {
   const ex = state?.expedition;
   if (!ex || pendingAction || paused) return;
   if (controlMode === 'active') { pendingAction = {type: 'release'}; controls.reset(); resetStick(); return; }
-  const slot = skillSlots(ex)[2];
+  const slot = skillSlots(ex)[1];
   if (slot.state !== 'ready') { toast(`Possess: ${slot.note || 'not available'}`); return; }
   pendingAction = {type: 'possess'}; controls.reset(); pendingInteract = false;
 }
-$('mode-switch').addEventListener('click', togglePossession);
+$('context-toggle').addEventListener('click', () => {
+  if (contextOpen) { closeContext(); return; }
+  if (!state?.expedition?.location_context) return;
+  contextOpen = true;
+  contextPaused = !paused;
+  if (contextPaused) setPause(true);
+  document.body.classList.add('context-open');
+  renderLocationContext(state.expedition.location_context, true);
+});
+$('context-close').addEventListener('click', closeContext);
+$('context-actions').addEventListener('click', event => {
+  const action = locationAction(event.target);
+  if (!action || pendingAction) return;
+  pendingAction = action;
+  closeContext();
+});
 function setBag(open) {
   bagOpen = open;
   document.body.classList.toggle('bag-open', bagOpen);
@@ -689,17 +709,16 @@ $('touch-interact').addEventListener('click',()=>{ if (!paused && manualAllowed(
 document.addEventListener('dblclick',event=>event.preventDefault());
 $('report-close').addEventListener('click',()=>{hud.hideReport();setPause(false);canvas.focus();});
 // One anchor action per request: later clicks wait until the server has answered.
-for (const id of ['anchor-begin', 'anchor-shop']) $(id).addEventListener('click', event => {
+for (const id of ['anchor-begin', 'anchor-shop', 'anchor-offerings']) $(id).addEventListener('click', event => {
   const action = anchorAction(event.target);
   if (action && !pendingAction) pendingAction = action;
 });
 $('skill-bar').addEventListener('click', event => {
   const slot = event.target.closest('button[data-skill-slot]');
   if (!slot || pendingAction) return;
-  if (slot.dataset.skillSlot === '2') { togglePossession(); return; }
+  if (slot.dataset.skillSlot === '1') { togglePossession(); return; }
   if (slot.dataset.state !== 'ready') { toast(`${slot.querySelector('span').textContent}: ${slot.dataset.note || 'not available'}`); return; }
   if (slot.dataset.skillSlot === '0') pendingAction = {type: 'contact'};
-  else if (slot.dataset.skillSlot === '1') pendingAction = {type: 'campfire'};
 });
 $('resume').addEventListener('click',()=>{setPause(false);canvas.focus();});
 $('zoom-in').addEventListener('click',()=>changeZoom(.1));

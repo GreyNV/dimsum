@@ -156,6 +156,12 @@ class EncounterTests(unittest.TestCase):
         e._screen()
         plan = e.spot_plans[f"forest:{key.x}:{key.y}"]
         self.assertTrue(any(BY_ID[a].site == "abandoned_camp" for a, _, _ in plan))
+        e.game.player.x, e.game.player.y = p.x, p.y
+        context = e.location_context()
+        self.assertEqual(context["kind"], "landmark")
+        self.assertEqual(context["name"], p.site.name)
+        self.assertTrue(all(BY_ID[e._spot_by_id(row["id"]).encounter].site == p.id
+                            for row in context["actions"]))
         restored = Expedition.from_dict(json.loads(canonical_json(e.to_dict())))
         self.assertEqual(restored.spot_plans, e.spot_plans)
         from dimensional_sim.world.journal import record_action

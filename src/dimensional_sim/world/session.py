@@ -158,8 +158,15 @@ def _expedition_view(e, control, *, debug, detail):
             "depth": e.depth, "best_depth": e.best_depth,
             "anchor_space": None if not shop_open else {
                 "kind": "contact" if e.contact else "opening" if e.opening else "death",
+                "at_camp": bool(e.contact and e.at_camp()),
                 "remaining_ms": e.anchor_ms or 0, "waiting": e.anchor_wait or e.contact,
                 "first_return": e.life == 1 and not e.opening and not e.contact},
+            "location_context": e.location_context(),
+            "anchor_offerings": ([{"id": item, "name": ITEMS[item].name, "count": count,
+                                   "ash": e.camp_offer_value(item, count),
+                                   "ash_one": e.camp_offer_value(item, 1)}
+                                  for item, count in sorted(e.camp_stock().items())]
+                                 if e.contact and e.at_camp() else []),
             "punch_damage": e.punch_damage(), "report": e.report,
             "anchor": {"x": e.anchor[0], "y": e.anchor[1]},
             "control": control, "possession": e.possession(), "clock": e.clock_view(),
@@ -184,14 +191,10 @@ def _expedition_view(e, control, *, debug, detail):
             "item_glints": ITEM_GLINTS}
 
 
-def _plural(n, name):
-    return f"{n} {name}{'s' if n > 1 else ''}"
-
-
 def _skill_slots(e, in_anchor):
     """The three skill buttons: what each does (`hint`), why it can't be used now (`note`),
     and the cooldown or time left (`remaining_ms` of `cooldown_ms`) so the client can draw a timer.
-    Slot 1 contacts the anchor once bought, slot 2 makes a campfire, slot 3 possesses."""
+    Slot 1 contacts the anchor once bought, slot 2 possesses, slot 3 is reserved."""
     busy = in_anchor or e.in_prologue
     contact_unlock = next((u for u in UNLOCKS.values() if u.ability == "contact_anchor"), None)
     if not e.has_ability("contact_anchor"):
@@ -206,23 +209,6 @@ def _skill_slots(e, in_anchor):
                    cooldown_ms=CONTACT_COOLDOWN_MS,
                    hint="Reach the anchor without dying: the world waits while you spend ash, then the life "
                         f"goes on. Recharges for {CONTACT_COOLDOWN_MS // 60_000} minutes after.")
-    kit = dict(BY_ID["make_campfire"].cost)
-    have = {item: e.inventory.get(item, 0) for item in kit}
-    short = [f"{_plural(n, ITEMS[i].name.lower())} (have {have[i]})" for i, n in kit.items() if have[i] < n]
-    fire_unlock = next((u for u in UNLOCKS.values() if u.ability == "make_campfire"), None)
-    if not e.has_ability("make_campfire"):
-        fire = {"state": "locked", "note": f"Unlock at the anchor ({fire_unlock.cost} ash)" if fire_unlock else "Locked"}
-    elif busy:
-        fire = {"state": "disabled", "note": "Not now"}
-    elif short:
-        fire = {"state": "disabled", "note": "Needs " + ", ".join(short)}
-    elif e.task is not None:
-        fire = {"state": "disabled", "note": "Busy"}
-    else:
-        fire = {"state": "ready", "note": "Ready"}
-    fire.update(name="Make campfire", remaining_ms=0, cooldown_ms=0,
-                hint="Set down a fire here (" + ", ".join(_plural(n, ITEMS[i].name.lower()) for i, n in kit.items())
-                     + "). Stand still beside it to heal as fast as at the anchor camp.")
     p = e.possession()
     if p["active"]:
         possess = {"state": "active", "note": "Possessing", "remaining_ms": p["remaining_ms"], "cooldown_ms": p["duration_ms"]}
@@ -236,7 +222,10 @@ def _skill_slots(e, in_anchor):
     possess.update(name="Possess", hint=f"Take the avatar's hands for {p['duration_ms'] // 1000} seconds: move with WASD, "
                    f"act with Space and E; it moves and works {POSSESS_SPEED_PERCENT - 100}% faster with you. "
                    f"Recharges for {POSSESS_COOLDOWN_MS // 1000} seconds after.")
-    return [contact, fire, possess]
+    shift = {"name": "Dimensional Shift", "state": "locked", "note": "Coming later",
+             "hint": "A future skill for entering a fighting dimension.",
+             "remaining_ms": 0, "cooldown_ms": 0}
+    return [contact, possess, shift]
 
 
 def _meta_view(e):
