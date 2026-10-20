@@ -211,17 +211,23 @@ def _skill_slots(e, in_anchor):
                         f"goes on. Recharges for {CONTACT_COOLDOWN_MS // 60_000} minutes after.")
     p = e.possession()
     if p["active"]:
-        possess = {"state": "active", "note": "Possessing", "remaining_ms": p["remaining_ms"], "cooldown_ms": p["duration_ms"]}
+        possess = {"state": "active", "note": f"{(p['remaining_ms'] + 999) // 1000}s left",
+                   "remaining_ms": p["remaining_ms"], "cooldown_ms": p["duration_ms"]}
     elif busy:
         possess = {"state": "disabled", "note": "Not now", "remaining_ms": 0, "cooldown_ms": POSSESS_COOLDOWN_MS}
-    elif p["ready_in_ms"]:
-        possess = {"state": "cooldown", "note": "Recharging", "remaining_ms": p["ready_in_ms"],
+    elif not p["charge_ms"]:
+        possess = {"state": "cooldown", "note": "Charging", "remaining_ms": 1,
                    "cooldown_ms": POSSESS_COOLDOWN_MS}
     else:
-        possess = {"state": "ready", "note": "Ready", "remaining_ms": 0, "cooldown_ms": POSSESS_COOLDOWN_MS}
-    possess.update(name="Possess", hint=f"Take the avatar's hands for {p['duration_ms'] // 1000} seconds: move with WASD, "
+        available = p["available_ms"]
+        possess = {"state": "ready", "note": "<1s available" if available < 1000 else
+                   f"{(available + 999) // 1000}s available",
+                   "remaining_ms": 0, "cooldown_ms": POSSESS_COOLDOWN_MS}
+    possess["charge_ms"] = p["charge_ms"]
+    possess["charge_max_ms"] = p["charge_max_ms"]
+    possess.update(name="Possess", hint=f"Take the avatar's hands for up to {p['duration_ms'] // 1000} seconds at full charge: move with WASD, "
                    f"act with Space and E; it moves and works {POSSESS_SPEED_PERCENT - 100}% faster with you. "
-                   f"Recharges for {POSSESS_COOLDOWN_MS // 1000} seconds after.")
+                   "Release early to save charge. An empty meter refills in one minute.")
     shift = {"name": "Dimensional Shift", "state": "locked", "note": "Coming later",
              "hint": "A future skill for entering a fighting dimension.",
              "remaining_ms": 0, "cooldown_ms": 0}

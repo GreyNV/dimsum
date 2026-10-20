@@ -142,8 +142,9 @@ class HuntTests(unittest.TestCase):
 
     def test_schema_nineteen_saves_start_with_nobody_hunting(self):
         e, _ = boar_beside()
-        old = {k: v for k, v in e.to_dict().items() if k != "hunting"}
-        old["schema_version"] = 19
+        old = {k: v for k, v in e.to_dict().items() if k not in ("hunting", "possess_charge",
+               "possess_charge_at_ms", "possess_drain_duration_ms")}
+        old.update(schema_version=19, possess_ready_ms=0)
         self.assertEqual(Expedition.from_dict(json.loads(json.dumps(old))).hunting, {})
 
 

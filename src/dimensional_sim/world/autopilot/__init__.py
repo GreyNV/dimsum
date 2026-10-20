@@ -42,9 +42,9 @@ actions earn Journal mastery.
 
 The anchor: a new expedition opens there (opening=True), every death returns there,
 and the player can contact it mid-life (contact: the world waits, the shop opens, the
-life resumes). Manual control is possession: for POSSESS_MS the player's god steers
-the avatar (moving and actions POSSESS_SPEED_PERCENT faster), then the auto-pilot takes
-back over and possession recharges for POSSESS_COOLDOWN_MS. Adapters must ignore
+life resumes). Manual control is possession: a full meter gives POSSESS_MS of control
+at base Willpower (moving and actions POSSESS_SPEED_PERCENT faster). Releasing early
+saves the unused charge; an empty meter refills over POSSESS_COOLDOWN_MS. Adapters ignore
 movement/attack input while the avatar is not possessed.
 
 Package layout (Expedition is assembled from one mixin per concern):

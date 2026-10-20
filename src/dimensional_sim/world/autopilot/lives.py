@@ -276,11 +276,12 @@ class LivesMixin:
         new = cls(game, fresh=False)
         new.dimensional = dict(old.dimensional)
         for name in ("ash", "best_depth", "total_ms", "sequence", "decisions",
-                     "contact_ready_ms", "possess_ready_ms"):
+                     "contact_ready_ms"):
             setattr(new, name, getattr(old, name))
         if old.possessing:
             old._end_possession()
-        new.possess_ready_ms = old.possess_ready_ms
+        new.possess_charge = old.possession_charge()
+        new.possess_charge_at_ms = old.total_ms
         carried = old._converting() if old.anchor_ms is None else {}
         if old.anchor_ms is None:
             new.ash += economy.rebirth_ash(carried, old.depth, old.converted)

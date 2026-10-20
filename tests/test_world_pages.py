@@ -159,12 +159,12 @@ class UpgradeAndRebuildTests(unittest.TestCase):
 
     def test_rebuilt_world_keeps_meta_and_changes_seed(self):
         e = played(60_000)
-        e.ash, e.possess_ready_ms = 10, e.total_ms + 5_000
+        e.ash, e.possess_charge, e.possess_charge_at_ms = 10, 55_000, e.total_ms
         e.unlocked.add("climbing")
         new = Expedition.rebuilt(e, Exploration(new_world(1234), "forest"))
         self.assertEqual(new.game.world.world_seed, 1234)
         self.assertGreaterEqual(new.ash, 10)
-        self.assertEqual(new.possess_ready_ms, e.possess_ready_ms)
+        self.assertEqual(new.possession_charge(), e.possession_charge())
         self.assertEqual(new.dimensional, e.dimensional)
         self.assertEqual(new.journal, e.journal)
         self.assertIn("climbing", new.unlocked)

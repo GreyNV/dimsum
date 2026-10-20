@@ -316,7 +316,7 @@ class LifeTests(unittest.TestCase):
                        lambda d: d["budget"].pop("bramble_boar"),
                        lambda d: d.update(admitted=[["enc:x", "dragon"]]),
                        lambda d: d.update(screened_chunks=[1]),
-                       lambda d: d["regular"].update(charisma=1), lambda d: d.update(possess_ready_ms=-1),
+                       lambda d: d["regular"].update(charisma=1), lambda d: d.update(possess_charge=-1),
                        lambda d: d.update(hunger=ap.VITAL_MAX + 1), lambda d: d.update(inventory=[["gold", 1]]),
                        lambda d: d.update(inventory=[["stick", 21]]), lambda d: d.update(cause="dragon"),
                        lambda d: d.update(best_depth=-1),

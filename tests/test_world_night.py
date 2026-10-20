@@ -1,13 +1,11 @@
-"""Day and night (schema 19) and tree kinds: the world clock runs on simulation time; at
-night wolves come to an avatar out exploring - never at the anchor camp or in a campfire's
-light - and slink off at dawn. Tree kinds are presentation picked per region."""
+"""Day and night: wolves grow likelier across a life and raid even firelit camps."""
 import json
 import pathlib
 import re
 import unittest
 
 from dimensional_sim.world import tuning
-from dimensional_sim.world.autopilot import Expedition, night
+from dimensional_sim.world.autopilot import Expedition, night, saves
 from dimensional_sim.world.catalog import BY_ID, ENEMIES, REGION_TREES, REGIONS, TREE_KINDS
 from dimensional_sim.world.models import ChunkKey
 from dimensional_sim.world.runtime import Exploration
@@ -68,7 +66,7 @@ class ClockTests(unittest.TestCase):
 
 
 class NightSpawnTests(unittest.TestCase):
-    def test_wolves_come_only_at_night_and_only_out_exploring(self):
+    def test_wolves_come_only_at_night(self):
         e = out_in_the_dark()
         e.health = e.hunger = 10**9   # keep it alive; only spawning is under test
         e.total_ms = NIGHTFALL - 40_000
@@ -92,13 +90,13 @@ class NightSpawnTests(unittest.TestCase):
         px, py = e._player()
         self.assertGreaterEqual(abs(gx - px) + abs(gy - py), tuning.NIGHT_SPAWN_NEAR)
 
-    def test_never_at_the_camp_or_by_a_campfire_and_capped_by_ring(self):
+    def test_camp_and_campfire_can_be_raided_and_depth_sets_the_cap(self):
         camp = started()
         camp.total_ms = NIGHTFALL
         for _ in range(12):
             camp.total_ms += tuning.NIGHT_SPAWN_EVERY_MS
             camp._night_watch()
-        self.assertEqual(wolves(camp), [], "the anchor camp is safe")
+        self.assertTrue(wolves(camp), "the anchor camp can be raided")
         fire = out_in_the_dark()
         px, py = fire._player()
         fire.campfire = {"dimension": fire.dimension, "x": px, "y": py, "fire_x": px + 1, "fire_y": py}
@@ -106,18 +104,21 @@ class NightSpawnTests(unittest.TestCase):
         for _ in range(12):
             fire.total_ms += tuning.NIGHT_SPAWN_EVERY_MS
             fire._night_watch()
-        self.assertEqual(wolves(fire), [], "a campfire's light is safe")
+        self.assertTrue(wolves(fire), "a campfire can be raided")
         e = out_in_the_dark()
         e.total_ms = NIGHTFALL
         for _ in range(12):
             e.total_ms += tuning.NIGHT_SPAWN_EVERY_MS
             e._night_watch()
-        self.assertLessEqual(len(e.night_foes()), night.night_cap(e.ring(e.game.player.chunk)))
+        self.assertLessEqual(len(e.night_foes()), night.night_cap(e.depth))
         self.assertEqual(night.night_cap(0), 1)
         self.assertEqual(night.night_cap(7), 3)
+        self.assertEqual(night.night_chance(0), 60)
+        self.assertEqual(night.night_chance(tuning.DAY_MS), 65)
+        self.assertEqual(night.night_chance(20 * tuning.DAY_MS), 90)
 
-    def test_wolves_fear_fire_and_slink_off_at_dawn(self):
-        self.assertTrue(ENEMIES["wolf"].fears_fire)
+    def test_wolves_ignore_fire_and_slink_off_at_dawn(self):
+        self.assertFalse(ENEMIES["wolf"].fears_fire)
         self.assertEqual(BY_ID[night.NIGHT_ACTION].placement, "lead")
         e = out_in_the_dark()
         e.total_ms = NIGHTFALL
@@ -134,6 +135,34 @@ class NightSpawnTests(unittest.TestCase):
         self.assertNotIn(wolf["id"], e.game.targets)
         self.assertIn("slinks back", e.log[-1]["text"])
 
+    def test_wolf_bites_a_resting_avatar_inside_camp_and_scales_with_life_depth(self):
+        e = started()
+        e.depth = 3
+        e.total_ms = NIGHTFALL
+        e.night_tick = night.world_clock(e.total_ms) // tuning.NIGHT_SPAWN_EVERY_MS
+        for _ in range(8):
+            e.total_ms += tuning.NIGHT_SPAWN_EVERY_MS
+            e._night_watch()
+            if wolves(e):
+                break
+        self.assertTrue(wolves(e))
+        lead = wolves(e)[0]
+        e._settle()
+        target = e.game.targets[lead["id"]]
+        shallow = e.enemy_hit(target.chunk, ENEMIES["wolf"])
+        e.depth = 0
+        self.assertGreater(shallow, e.enemy_hit(target.chunk, ENEMIES["wolf"]))
+        e.depth = 3
+        px, py = e._player()
+        target.chunk = e.game.player.chunk
+        target.x, target.y = px % e.game.current_chunk().asset.width + 1, py % e.game.current_chunk().asset.height
+        e.task = {"type": "rest", "spot": None, "elapsed_ms": 0, "duration_ms": 10_000}
+        before = e.health
+        e.monster_ms = 300
+        e._pursue()
+        self.assertLess(e.health, before)
+        self.assertIsNone(e.task, "the raid interrupts rest")
+
     def test_a_night_replays_exactly_in_any_slicing_and_survives_reload(self):
         a, b = out_in_the_dark(), out_in_the_dark()
         for e in (a, b):
@@ -149,7 +178,8 @@ class NightSpawnTests(unittest.TestCase):
 
     def test_schema_eighteen_saves_start_watching_from_now(self):
         e = started()
-        old = {k: v for k, v in e.to_dict().items() if k not in ("night_tick", "hunting")}
+        old = {k: v for k, v in e.to_dict().items() if k not in ("night_tick", "hunting") + saves.V21_FIELDS}
+        old["possess_ready_ms"] = 0
         old["schema_version"] = 18
         loaded = Expedition.from_dict(json.loads(json.dumps(old)))
         self.assertEqual(loaded.night_tick, night.world_clock(e.total_ms) // tuning.NIGHT_SPAWN_EVERY_MS)

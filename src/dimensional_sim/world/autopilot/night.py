@@ -1,11 +1,9 @@
-"""Day and night: the world clock, nightfall, and the wolves that come to whoever walks
-beyond the firelight.
+"""Day and night: the world clock and increasingly likely night incursions.
 
 The clock is simulation time (total_ms + DAY_START_MS), so it runs through lives and the
 anchor alike and replays exactly. At night, every NIGHT_SPAWN_EVERY_MS of world time the
-avatar may draw a wolf: only while it is out exploring (never at the anchor camp, never in
-a campfire's light, never during the prologue, at the anchor or while the anchor is
-contacted), never more than NIGHT_FOES_BY_RING allows. A wolf is a fight lead (catalog
+avatar may draw a wolf, including at the anchor camp or a campfire, but not during the
+prologue or an anchor interaction. Never more than NIGHT_FOES_BY_RING allows. A wolf is a fight lead (catalog
 `night_wolf`) that expires at dawn, so leads already give it saving, drawing, pursuit and
 rewards. Steps are capped at clock ticks (night_step_cap), so any slicing of time gives the
 same wolves. TESTS: tests/test_world_night.py.
@@ -15,7 +13,8 @@ from ..encounters import night_spot
 from ..models import chunk_ident
 from ..seeds import derive_seed
 from ..tuning import (DAY_MS, DAY_START_MS, FIRE_LIGHT_RADIUS, NIGHT_FOES_BY_RING, NIGHT_MS, NIGHT_SPAWN_EVERY_MS,
-                      NIGHT_SPAWN_FAR, NIGHT_SPAWN_NEAR, NIGHT_SPAWN_PERCENT, TWILIGHT_MS)
+                      NIGHT_SPAWN_FAR, NIGHT_SPAWN_GROWTH, NIGHT_SPAWN_MAX, NIGHT_SPAWN_NEAR,
+                      NIGHT_SPAWN_PERCENT, TWILIGHT_MS)
 
 NIGHT_ACTION = next(a.id for a in BY_ID.values() if "night" in a.tags and a.category == "fight")
 NIGHT_START_MS = DAY_MS - NIGHT_MS
@@ -51,6 +50,11 @@ def night_cap(ring):
     return max(n for start, n in NIGHT_FOES_BY_RING if ring >= start)
 
 
+def night_chance(life_elapsed_ms):
+    """Chance per watch tick rises with full days survived in the current life."""
+    return min(NIGHT_SPAWN_MAX, NIGHT_SPAWN_PERCENT + NIGHT_SPAWN_GROWTH * (life_elapsed_ms // DAY_MS))
+
+
 class NightMixin:
     def is_night(self):
         return is_night(self.total_ms)
@@ -73,7 +77,7 @@ class NightMixin:
                 and abs(gx - fire["fire_x"]) + abs(gy - fire["fire_y"]) <= FIRE_LIGHT_RADIUS)
 
     def in_firelight(self, gx, gy):
-        """The anchor camp or a campfire: where night creatures never come."""
+        """The anchor camp or a campfire; enemies that fear fire avoid this area."""
         return self._near_camp(gx, gy) or self._near_fire(gx, gy)
 
     def night_step_cap(self):
@@ -94,11 +98,11 @@ class NightMixin:
         if not self.is_night() or self.anchor_ms is not None or self.in_prologue or self.contact:
             return
         if time_of_day(self.total_ms) // NIGHT_SPAWN_EVERY_MS == NIGHT_START_MS // NIGHT_SPAWN_EVERY_MS:
-            self._entry("night", "Night falls. Wolves hunt beyond the firelight - the camp and a campfire are safe.")
+            self._entry("night", "Night falls. Wolves can follow you even into the camp and firelight.")
         px, py = self._player()
-        if self.in_firelight(px, py) or len(self.night_foes()) >= night_cap(self.ring(self.game.player.chunk)):
+        if len(self.night_foes()) >= night_cap(self.depth):
             return
-        if derive_seed(self.game.world.world_seed, "night-spawn", self.life, tick) % 100 >= NIGHT_SPAWN_PERCENT:
+        if derive_seed(self.game.world.world_seed, "night-spawn-v2", self.life, tick) % 100 >= night_chance(self.game.elapsed_ms):
             return
         key = self.game.player.chunk
         chunk = self.game.world.peek(key)
@@ -107,9 +111,6 @@ class NightMixin:
         spot = night_spot(chunk, NIGHT_ACTION, self.life, tick, (self.game.player.x, self.game.player.y),
                           NIGHT_SPAWN_NEAR, NIGHT_SPAWN_FAR)
         if spot is None or spot.id in self.completed or any(row["id"] == spot.id for row in self.leads):
-            return
-        sx, sy = self._global(key, spot.x, spot.y)
-        if self.in_firelight(sx, sy):
             return
         lead = {"id": spot.id, "action": NIGHT_ACTION, "source": "night",
                 "dimension": key.dimension, "chunk_x": key.x, "chunk_y": key.y,

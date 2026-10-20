@@ -82,7 +82,7 @@ class SkillSlotTests(unittest.TestCase):
         contact = snapshot(e.game, expedition=e)["expedition"]["skill_slots"][0]
         self.assertEqual(contact["state"], "ready")
         self.assertIn("without dying", contact["hint"])
-        self.assertEqual((possess["state"], possess["note"]), ("active", "Possessing"))
+        self.assertEqual((possess["state"], possess["charge_ms"]), ("active", 60_000))
         self.assertEqual((shift["name"], shift["state"]), ("Dimensional Shift", "locked"))
         from camp_fixture import away
         away(e)
@@ -97,7 +97,7 @@ class SkillSlotTests(unittest.TestCase):
         e.release()
         contact, possess, _ = snapshot(e.game, expedition=e)["expedition"]["skill_slots"]
         self.assertEqual((contact["state"], contact["remaining_ms"], contact["cooldown_ms"]), ("cooldown", 60_000, 300_000))
-        self.assertEqual((possess["state"], possess["remaining_ms"]), ("cooldown", 60_000))
+        self.assertEqual((possess["state"], possess["charge_ms"]), ("ready", 60_000))
         self.assertTrue(BY_ID["make_campfire"].cost)
 
 

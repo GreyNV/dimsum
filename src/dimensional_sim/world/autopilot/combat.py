@@ -40,13 +40,21 @@ class CombatMixin:
         """Health one bite of `enemy` takes in chunk `key`: biome danger by ring, softened by
         Endurance and by enemy_hit_percent effects."""
         biome = self.biome(key)
-        ring = min(self.ring(key), biome.ring_cap)
-        hit = enemy.hit * POINT * biome.danger_num ** ring // biome.danger_den ** ring * 1000 // self.speed("endurance")
+        if enemy.life_depth_hit_percent:
+            ring = min(self.depth, biome.ring_cap)
+            hit = enemy.hit * POINT * (100 + enemy.life_depth_hit_percent * ring) // 100
+        else:
+            ring = min(self.ring(key), biome.ring_cap)
+            hit = enemy.hit * POINT * biome.danger_num ** ring // biome.danger_den ** ring
+        hit = hit * 1000 // self.speed("endurance")
         return effects.scale(hit, self.equipped, "enemy_hit_percent")
 
     def enemy_hp(self, action, key):
         """Hit points of the fight spot `action` placed in chunk `key`."""
         biome = self.biome(key)
+        enemy = ENEMIES[action.enemy]
+        if enemy.life_depth_hp_per_ring:
+            return action.hp + enemy.life_depth_hp_per_ring * min(self.depth, biome.ring_cap)
         return action.hp + biome.hp_per_ring * min(self.ring(key), biome.ring_cap)
 
     def fight_damage(self, ring, action):
@@ -182,11 +190,11 @@ class CombatMixin:
     def _pursue(self):
         """Enemies hunt the avatar one step per MONSTER_STEP_MS (docs/design/PURSUIT.md).
 
-        An enemy that notices the avatar (within its aggro radius, the avatar out of the camp
-        and firelight) becomes a hunter: it chases wherever the avatar goes - no aggro limit,
+        An enemy that notices the avatar within its aggro radius becomes a hunter:
+        it chases wherever the avatar goes - no aggro limit,
         no territory - and cannot be outrun, only left behind beyond the loaded area around
         the avatar (its chunk out of the resident 3x3), where it is unloaded. If the avatar
-        reaches the anchor camp or a campfire, every hunter takes fright: it flees until it
+        reaches the anchor camp or a campfire, fire-fearing hunters flee until they
         is out of range and unloaded (or, cornered, after FLEE_UNLOAD_MS it is gone anyway).
         Reaching the avatar, a hunter bites first and interrupts whatever it was doing."""
         if self.monster_ms < MONSTER_STEP_MS:
@@ -197,9 +205,10 @@ class CombatMixin:
         self._unload_far_enemies()
         px, py = self._player()
         safe = self.in_firelight(px, py)
-        quiet = not self.hunting and (safe or not any(
+        quiet = not self.hunting and not any(
             self._hostile(t) and self._steps_to(t, px, py) <= self.enemy_of(t).aggro_radius
-            for t in self.game.targets.values()))
+            and not (safe and self.enemy_of(t).fears_fire)
+            for t in self.game.targets.values())
         if quiet:   # cheap check first: most steps nothing is close and nothing hunts
             return
         grid = self._grid()
@@ -213,11 +222,12 @@ class CombatMixin:
             distance = abs(tx - px) + abs(ty - py)
             mode = self.hunting.get(target.id, {}).get("mode")
             if mode is None:
-                if safe or distance > enemy.aggro_radius or self.in_firelight(tx, ty):
+                if (safe and enemy.fears_fire) or distance > enemy.aggro_radius \
+                        or (enemy.fears_fire and self.in_firelight(tx, ty)):
                     continue
                 mode = "hunt"
                 self.hunting[target.id] = {"mode": "hunt", "since": self.total_ms}
-            if mode == "hunt" and safe:
+            if mode == "hunt" and safe and enemy.fears_fire:
                 mode = "flee"
                 self.hunting[target.id] = {"mode": "flee", "since": self.total_ms}
                 self._entry("lore", f"The {enemy.name.lower()} shies from the "
@@ -254,18 +264,19 @@ class CombatMixin:
                 if self.health > self.fight_damage(self.ring(target.chunk), self.target_action(target.id)):
                     self.goal = {"kind": "target", "id": target.id, "x": tx, "y": ty}
                     self._entry("ambush", f"A {name} attacks you!")
-                else:   # this fight would kill: run for the camp - it cannot follow you in
+                else:   # this fight would kill: retreat and seek recovery
                     self.goal = self._home_goal()
-                    self._entry("ambush", f"A {name} attacks you - too hurt to fight, you run for the camp!")
+                    self._entry("ambush", f"A {name} attacks you - too hurt to fight, you retreat!")
                 break
 
     def _enemy_step(self, target, grid, w, h, px, py, *, field=None, away=False):
         """One step of a hunter toward the avatar (down the distance field when it is near,
-        otherwise any step that closes in) or of a frightened enemy away from it. Never into
-        the camp or a campfire's light, never onto the avatar, only over loaded ground.
+        otherwise any step that closes in) or of a frightened enemy away from it. Fire-fearing
+        enemies avoid the camp and campfire; none step onto the avatar, only over loaded ground.
         Returns the new global cell, or None when no step helps."""
         tx, ty = self._global(target.chunk, target.x, target.y)
         here = abs(tx - px) + abs(ty - py)
+        fears_fire = self.enemy_of(target).fears_fire
         blocked = self._blocked()
         choices = []
         for direction in DIRECTIONS:
@@ -273,7 +284,8 @@ class CombatMixin:
             nx, ny = tx + dx, ty + dy
             key = ChunkKey(self.dimension, nx // w, ny // h)
             if (nx, ny) == (px, py) or key not in self.game.initialized_chunks \
-                    or not self._can_move(grid, blocked, tx, ty, direction) or self.in_firelight(nx, ny):
+                    or not self._can_move(grid, blocked, tx, ty, direction) \
+                    or (fears_fire and self.in_firelight(nx, ny)):
                 continue
             there = abs(nx - px) + abs(ny - py)
             if away:

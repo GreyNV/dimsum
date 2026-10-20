@@ -1,8 +1,10 @@
 # Day and night, wolves, tree kinds (schema 19, 2026-10-17)
 
 Decisions (Andrew, 2026-10-17): a 12-minute day (8 day / 4 night); at night new night-only
-creatures come to whoever explores - never at the camp or a campfire; several tree kinds,
+creatures come to whoever explores; several tree kinds,
 mixed by region, looks only (same collision and gameplay).
+
+Revised 2026-10-20: wolves can enter the camp and campfire light and attack a resting avatar.
 
 ## Clock
 - World clock = simulation time + `DAY_START_MS` (a new game starts a minute after dawn), so it
@@ -13,13 +15,14 @@ mixed by region, looks only (same collision and gameplay).
   (day/dusk/night/dawn), darkness 0-1000, until_ms}.
 
 ## Night creatures
-- `EnemyDef("wolf")`: hit 9, aggro 10, quick (step 250 ms), `fears_fire=True` (never chases into
-  the camp or within `FIRE_LIGHT_RADIUS` of a campfire). Fight action `night_wolf` (placement
+- `EnemyDef("wolf")`: hit 9, aggro 10, quick (step 250 ms), `fears_fire=False` (pursues into
+  the camp and campfire light). Bite and HP grow linearly with the deepest ring reached this life.
+  Fight action `night_wolf` (placement
   "lead", tag "night", 60 Strength XP, wolf fang 45%).
 - Night watch (`_night_watch`, from `_settle`): once per world-clock tick (`NIGHT_SPAWN_EVERY_MS`,
-  30 s; `night_tick` saved), at night, while the avatar is out (not the camp, not a campfire's light,
-  not the prologue, the anchor or a contact), below `NIGHT_FOES_BY_RING` (1 / 2 from ring 2 / 3 from
-  ring 5), with `NIGHT_SPAWN_PERCENT` (40%): a wolf appears 7-13 steps away (`encounters.night_spot`)
+  30 s; `night_tick` saved), at night, outside the prologue and anchor interactions, below
+  `NIGHT_FOES_BY_RING` (1 / 2 from maximum life ring 2 / 3 from ring 5), with a 60% first-day
+  chance per tick that grows by 5 points per day to 90%: a wolf appears 7-13 steps away (`encounters.night_spot`)
   as a fight lead that expires at dawn ("slinks back into the trees"). Steps end at clock ticks
   (`night_step_cap`), so any slicing of time gives the same wolves.
 - Logs: "Night falls..." (type `night`, nightfall chime) and "A wolf howls close by." (howl).

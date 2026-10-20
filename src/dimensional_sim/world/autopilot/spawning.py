@@ -270,7 +270,7 @@ class SpawningMixin:
                     self.drought[category] = 0
                     taken = [(s.x, s.y) for s in self._spots(chunk)]
         for target in sorted(self.game.targets.values(), key=lambda t: t.id):
-            if target.id.startswith("enc:") or target.id in self.screened_targets:
+            if target.id.startswith(("enc:", "lead:")) or target.id in self.screened_targets:
                 continue
             self.screened_targets.add(target.id)
             target.hp = 0

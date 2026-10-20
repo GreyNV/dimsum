@@ -54,7 +54,9 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.contact_ready_ms = 0  # contact-the-anchor cooldown deadline (simulation time)
         self.contact = False       # the anchor is contacted mid-life: the world waits (not saved)
         self.possess_end_ms = None # possession (manual control) ends at this simulation time
-        self.possess_ready_ms = 0  # possession recharges until this simulation time
+        self.possess_charge = POSSESS_COOLDOWN_MS  # full meter; one unit refills per simulated ms
+        self.possess_charge_at_ms = 0
+        self.possess_drain_duration_ms = 0  # full-meter duration fixed when control begins
         self.opening = False       # a new expedition waiting at the anchor before its first life
         self.night_tick = 0        # last world-clock tick the night watch looked at (autopilot/night.py)
         self.knowledge = set()     # discoveries persist across lives
@@ -127,6 +129,16 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
     def manual_control(self):
         return self.possessing
 
+    def possession_charge(self):
+        """Charge at the current simulation time, independent of advance partitioning."""
+        elapsed = self.total_ms - self.possess_charge_at_ms
+        if self.possessing:
+            if self.total_ms >= self.possess_end_ms:
+                return 0
+            used = elapsed * POSSESS_COOLDOWN_MS // self.possess_drain_duration_ms
+            return max(0, self.possess_charge - used)
+        return min(POSSESS_COOLDOWN_MS, self.possess_charge + elapsed)
+
     def possess_block(self):
         """Why possession cannot start now, or None."""
         if self.anchor_ms is not None or self.contact:
@@ -135,7 +147,7 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
             return "Not yet"
         if self.possessing:
             return "Already possessed"
-        if self.total_ms < self.possess_ready_ms:
+        if self.possession_charge() == 0:
             return "Recharging"
         return None
 
@@ -145,18 +157,25 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         if reason is not None:
             raise ValueError(f"cannot possess: {reason.lower()}")
         self.interrupt()
-        self.possess_end_ms = self.total_ms + self.possess_duration_ms()
+        charge = self.possession_charge()
+        duration = self.possess_duration_ms()
+        self.possess_charge = charge
+        self.possess_charge_at_ms = self.total_ms
+        self.possess_drain_duration_ms = duration
+        self.possess_end_ms = self.total_ms + ceil_div(charge * duration, POSSESS_COOLDOWN_MS)
         self._entry("possess", "You reach into the avatar and take its hands. It moves quicker with you.")
 
     def release(self):
-        """End possession early; the auto-pilot takes over and possession recharges."""
+        """End possession early; unused charge begins refilling immediately."""
         if not self.possessing:
             raise ValueError("the avatar is not possessed")
         self._end_possession()
 
     def _end_possession(self):
+        self.possess_charge = self.possession_charge()
+        self.possess_charge_at_ms = self.total_ms
+        self.possess_drain_duration_ms = 0
         self.possess_end_ms = None
-        self.possess_ready_ms = self.total_ms + POSSESS_COOLDOWN_MS
         self.auto_hold = None
         self.goal = None
         if self.task and self.task["type"] in ("pause", "rest"):

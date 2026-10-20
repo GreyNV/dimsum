@@ -31,9 +31,11 @@ export function skillSlots(expedition) {
     const state = ['ready', 'active', 'cooldown', 'disabled', 'locked'].includes(slot.state)
       ? slot.state : 'disabled';
     const remaining = Math.max(0, slot.remaining_ms || 0), total = Math.max(0, slot.cooldown_ms || 0);
-    const note = state === 'cooldown' ? `Ready in ${clockText(remaining)}` : slot.note || '';
+    const note = slot.note || (state === 'cooldown' ? `Ready in ${clockText(remaining)}` : '');
+    const charge = slot.charge_max_ms ? Math.max(0, Math.min(1, slot.charge_ms / slot.charge_max_ms))
+      : state === 'cooldown' && total ? 1 - remaining / total : 1;
     return {name: slot.name || 'Empty', state, usable: state === 'ready', note, hint: slot.hint || '',
-      charge: state === 'cooldown' && total ? 1 - remaining / total : 1};
+      charge};
   });
 }
 

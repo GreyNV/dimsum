@@ -56,3 +56,13 @@ test('skill slots carry a note, a hint and a cooldown charge', () => {
   assert.equal(fire.usable, false);
   assert.equal(clockText(61_000), '1:01');
 });
+
+test('possession shows partial charge while ready or active', () => {
+  const [ready, active] = skillSlots({skill_slots: [
+    {name: 'Possess', state: 'ready', note: '15s available', charge_ms: 30_000, charge_max_ms: 60_000},
+    {name: 'Possess', state: 'active', note: '10s left', charge_ms: 20_000, charge_max_ms: 60_000}]});
+  assert.equal(ready.charge, .5);
+  assert.equal(ready.usable, true);
+  assert.equal(active.charge, 1 / 3);
+  assert.equal(active.note, '10s left');
+});

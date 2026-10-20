@@ -178,3 +178,9 @@ inventory or chest stacks into ash mid-life. In the wilderness the default is
 "Make campfire" once unlocked; nearby live landmark actions replace it. The three
 skills are Contact anchor, Possess, and a locked Dimensional Shift placeholder.
 The footer's duplicate Possess button was removed to free mobile space.
+
+2026-10-20 possession charge: the Possess skill bar shows its remaining meter.
+Base Willpower gives 30 seconds from full charge; Willpower extends that full-meter
+duration, and an empty meter refills in 60 seconds of simulation time. Release
+preserves unused charge, which starts refilling immediately. Partial charge can be
+used. Night wolves can reach either camp and interrupt rest.

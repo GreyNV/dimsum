@@ -246,3 +246,23 @@ The simulator's `spend` policy now chooses eligible crafts and buildings only wh
 the avatar is at camp. In seeds 1-4 over 90 minutes, it completed 12 lives with
 0.5 crafts per life on average; this is a simple scripted player, not an estimate
 of how often human players will choose to return to camp.
+
+## 2026-10-20: night raids and shorter first lives
+
+Wolves now appear at night even when the avatar rests at the anchor camp or by a campfire.
+They pursue into firelight. Each 30-second night watch has a 60% admission chance on the
+first day, +5 percentage points for each full day survived in the current life, capped at
+90%. The simultaneous wolf cap and wolf bite/HP rise with the deepest ring reached in
+the current life. Bite and HP use linear ring growth so an early visit to a deep ring
+does not make every later camp raid overwhelming.
+
+In eight seeded unattended first lives (seeds 1-8, `idle` policy), the 50% variant
+averaged 17.69 minutes: four wolves, three starvation deaths and one boar. The chosen
+60% variant averaged 12.94 minutes: seven wolves and one starvation death. The old
+fire-safe version averaged 34.21 minutes on these seeds. These are scripted, unarmed
+first lives; active play, gear, and possession can change survival substantially.
+
+Reproduce with `python -B -m dimensional_sim.world.cli simulate --seeds 1-8
+--minutes 90 --policy idle --lives`. Controls: `NIGHT_SPAWN_PERCENT`,
+`NIGHT_SPAWN_GROWTH`, `NIGHT_SPAWN_MAX`, and `NIGHT_FOES_BY_RING` in `tuning.py`;
+the wolf's `life_depth_hit_percent` and `life_depth_hp_per_ring` in `catalog.py`.

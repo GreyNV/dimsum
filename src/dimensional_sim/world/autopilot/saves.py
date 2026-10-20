@@ -36,7 +36,9 @@ V18_SAVE_FIELDS = tuple(f for f in V17_SAVE_FIELDS if f not in V18_DROPPED) + V1
 V19_FIELDS = ("night_tick",)       # schema 19: the night watch's last world-clock tick
 V19_SAVE_FIELDS = V18_SAVE_FIELDS + V19_FIELDS
 V20_FIELDS = ("hunting",)          # schema 20: enemies hunting or fleeing the avatar
-SAVE_FIELDS = V19_SAVE_FIELDS + V20_FIELDS
+V20_SAVE_FIELDS = V19_SAVE_FIELDS + V20_FIELDS
+V21_FIELDS = ("possess_charge", "possess_charge_at_ms", "possess_drain_duration_ms")
+SAVE_FIELDS = tuple(f for f in V20_SAVE_FIELDS if f != "possess_ready_ms") + V21_FIELDS
 V7_FIELDS = ("journal",)                       # added by schema 7
 V8_FIELDS = ("equipped", "knowledge", "recipes", "journal_disabled", "journal_favor",
              "leads", "lead_history")         # added by schema 8
@@ -234,9 +236,28 @@ def _from_v19(data):
     return {**data, "schema_version": 20, "hunting": {}, "night_tick": tick}
 
 
+def _from_v20(data):
+    """Preserve remaining control or cooldown as charge in the reusable meter."""
+    fields(data, V20_SAVE_FIELDS)
+    total = integer(data["total_ms"], "total time", 0)
+    ready = integer(data["possess_ready_ms"], "possession cooldown", 0, total + POSSESS_COOLDOWN_MS)
+    end = data["possess_end_ms"]
+    if end is None:
+        charge = POSSESS_COOLDOWN_MS - max(0, ready - total)
+        drain = 0
+    else:
+        end = integer(end, "possession end", total + 1, total + 60_000)
+        drain = max(30_000, end - total)  # old saves did not freeze activation duration
+        charge = min(POSSESS_COOLDOWN_MS,
+                     -(-(end - total) * POSSESS_COOLDOWN_MS // drain))
+    return {**{k: v for k, v in data.items() if k != "possess_ready_ms"},
+            "schema_version": 21, "possess_charge": charge,
+            "possess_charge_at_ms": total, "possess_drain_duration_ms": drain}
+
+
 MIGRATIONS = {6: _from_v6, 7: _from_v7, 8: _from_v8, 9: _from_v9, 10: _from_v10, 11: _from_v11, 12: _from_v12,
               13: _from_v13, 14: _from_v14, 15: _from_v15, 16: _from_v16,
-              17: _from_v17, 18: _from_v18, 19: _from_v19}
+              17: _from_v17, 18: _from_v18, 19: _from_v19, 20: _from_v20}
 
 
 def upgrade(data):
@@ -365,11 +386,17 @@ def _load_life(result, data):
                         for item, count in data["converted"].items()}
     result.contact_ready_ms = integer(data["contact_ready_ms"], "contact cooldown", 0,
                                       result.total_ms + CONTACT_COOLDOWN_MS)
-    result.possess_ready_ms = integer(data["possess_ready_ms"], "possession cooldown", 0,
-                                      result.total_ms + POSSESS_COOLDOWN_MS)
+    result.possess_charge = integer(data["possess_charge"], "possession charge", 0, POSSESS_COOLDOWN_MS)
+    result.possess_charge_at_ms = integer(data["possess_charge_at_ms"], "possession charge time", 0,
+                                          result.total_ms)
+    result.possess_drain_duration_ms = integer(data["possess_drain_duration_ms"], "possession drain", 0, 60_000)
     if data["possess_end_ms"] is not None:
         integer(data["possess_end_ms"], "possession end", result.total_ms + 1,
-                result.total_ms + result.possess_duration_ms())
+                result.total_ms + 60_000)
+        if not result.possess_charge or result.possess_drain_duration_ms < 30_000:
+            raise ValueError("invalid active possession charge")
+    elif result.possess_drain_duration_ms:
+        raise ValueError("inactive possession cannot drain charge")
     result.possess_end_ms = data["possess_end_ms"]
     if type(data["opening"]) is not bool or (data["opening"] and (data["anchor_ms"] is None or result.life != 1)):
         raise ValueError("invalid opening")
@@ -556,7 +583,9 @@ class SavesMixin:
                 "spot_plans": {k: [list(row) for row in v] for k, v in sorted(self.spot_plans.items())},
                 "anchor_ms": self.anchor_ms, "anchor_wait": self.anchor_wait,
                 "contact_ready_ms": self.contact_ready_ms, "possess_end_ms": self.possess_end_ms,
-                "possess_ready_ms": self.possess_ready_ms, "opening": self.opening, "night_tick": self.night_tick,
+                "possess_charge": self.possess_charge, "possess_charge_at_ms": self.possess_charge_at_ms,
+                "possess_drain_duration_ms": self.possess_drain_duration_ms,
+                "opening": self.opening, "night_tick": self.night_tick,
                 "hunting": {k: dict(v) for k, v in sorted(self.hunting.items())},
                 "journal_guarantee": self.journal_guarantee,
                 "journal_guarantee_region": self.journal_guarantee_region,

@@ -170,6 +170,8 @@ body.page-open .touch-controls,body.page-open .anchor-space,body.page-open .dial
 .skill-bar button[data-state="cooldown"] small{color:#e5c772}
 .skill-bar button[data-state="cooldown"]::after{content:'';position:absolute;left:0;bottom:0;height:3px;
   width:calc(var(--charge,1)*100%);background:#e5c772;opacity:.8}
+.skill-bar button[data-skill-slot="1"]::after{content:'';position:absolute;left:0;bottom:0;height:3px;
+  width:calc(var(--charge,1)*100%);background:#e5c772;opacity:.9}
 .skill-bar button[data-state="disabled"],.skill-bar button[data-state="locked"]{cursor:help}
 .skill-bar button[data-state="active"]{border-color:#aad285;background:#263823}
 .skill-bar button[data-state="cooldown"]{border-color:#8b7953;color:#c5b28b}

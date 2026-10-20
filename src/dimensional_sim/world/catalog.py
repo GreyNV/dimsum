@@ -431,7 +431,9 @@ class EnemyDef:
     sprite: str                    # client art key (combat_art.js ENEMY_SPRITES)
     step_ms: int = 300             # one chasing step this often (lower = faster)
     drains: str = "health"         # what a touch takes: "health" (a bite) or "hunger" (it feeds on you)
-    fears_fire: bool = False       # never chases into the light of the anchor camp's or a campfire's flames
+    fears_fire: bool = True        # stays out of the anchor camp and campfire light
+    life_depth_hit_percent: int = 0  # linear bite growth per deepest ring this life; replaces biome curve
+    life_depth_hp_per_ring: int = 0   # linear HP growth per deepest ring this life
 
     def __post_init__(self):
         identifier(self.id, "enemy ID")
@@ -442,6 +444,8 @@ class EnemyDef:
         integer(self.step_ms, "enemy step", 100, 2000)
         if type(self.fears_fire) is not bool:
             raise ValueError(f"fears_fire must be boolean: {self.id}")
+        integer(self.life_depth_hit_percent, "life depth hit growth", 0, 100)
+        integer(self.life_depth_hp_per_ring, "life depth HP growth", 0, 100)
         if self.drains not in ("health", "hunger"):
             raise ValueError(f"enemy drains health or hunger: {self.id}")
         if not 1 <= len(self.name) <= 40 or not 1 <= len(self.cause_text) <= 60:
@@ -460,9 +464,10 @@ ENEMIES = {e.id: e for e in (
     # Gentle but draining: it does not bite, it feeds - each touch takes hunger, not health.
     EnemyDef("pale_wisp", "Pale wisp", hit=6, aggro_radius=6, cause="wisp",
              cause_text="a pale wisp", sprite="wisp", step_ms=350, drains="hunger"),
-    # Night only: quick and keen-nosed, it hunts whoever walks the dark, but keeps out of firelight.
+    # Night only: quick and keen-nosed, it follows the avatar into firelight.
     EnemyDef("wolf", "Wolf", hit=9, aggro_radius=10, cause="wolf", cause_text="a wolf in the night",
-             sprite="wolf", step_ms=250, fears_fire=True),
+             sprite="wolf", step_ms=250, fears_fire=False,
+             life_depth_hit_percent=15, life_depth_hp_per_ring=1),
 )}
 # Enemies placed by map assets (not by spot rolls) count against this fight spot's window.
 ASSET_ENEMY_ACTION = "bramble_boar"
@@ -859,7 +864,7 @@ ACTIONS = (
               "A river lurker, out of its burrow and angry.", "Drove off a river lurker from its burrow.",
               hp=2, enemy="river_lurker", loot=(L("river_fish", 1, 1, 50),), drops="lurker_spoils",
               roles=("lead", "combat", "contextual"), art="river_lurker", interaction="Fighting the lurker"),
-    # --- the night: wolves come to whoever walks beyond the firelight (autopilot/night.py) ----
+    # --- the night: wolves pursue the avatar even at camp (autopilot/night.py) ----
     ActionDef("night_wolf", "Wolf", "fight", "lead", "strength", 60, 1, 1,
               "A wolf out of the dark. It hunts at night and slinks away at dawn.", "Drove off a wolf in the dark.",
               hp=3, enemy="wolf", loot=(L("wolf_fang", 1, 1, 45),), tags=("night",),

@@ -107,10 +107,15 @@ class PresentationMixin:
                 "x": gx, "y": gy, "progress": progress, **_style(entry)}
 
     def possession(self):
-        """Possession (manual control) for the HUD: time left, or the recharge."""
-        return {"active": self.possessing, "duration_ms": self.possess_duration_ms(), "cooldown_ms": POSSESS_COOLDOWN_MS,
-                "remaining_ms": self.possess_end_ms - self.total_ms if self.possessing else 0,
-                "ready_in_ms": 0 if self.possessing else max(0, self.possess_ready_ms - self.total_ms),
+        """Possession charge and available control time for the HUD."""
+        charge = self.possession_charge()
+        duration = self.possess_duration_ms()
+        return {"active": self.possessing, "duration_ms": duration, "cooldown_ms": POSSESS_COOLDOWN_MS,
+                "charge_ms": charge, "charge_max_ms": POSSESS_COOLDOWN_MS,
+                "remaining_ms": max(0, self.possess_end_ms - self.total_ms) if self.possessing else 0,
+                "available_ms": 0 if self.possessing else -(-charge * duration // POSSESS_COOLDOWN_MS),
+                "full_in_ms": 0 if self.possessing else POSSESS_COOLDOWN_MS - charge,
+                "ready_in_ms": 0 if self.possessing or charge else 1,
                 "speed_percent": POSSESS_SPEED_PERCENT}
 
     def mode(self):

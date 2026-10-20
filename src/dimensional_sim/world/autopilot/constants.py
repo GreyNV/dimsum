@@ -10,7 +10,7 @@ DIRECTION_DELTAS = tuple(DELTAS[d] for d in DIRECTIONS)
 CONTACT_COOLDOWN_MS = 300_000     # contacting the anchor mid-life (the world waits while it is open)
 # Possession: the god takes the avatar's hands for a while (manual control).
 POSSESS_MS = 30_000
-POSSESS_COOLDOWN_MS = 60_000      # counted from the moment possession ends
+POSSESS_COOLDOWN_MS = 60_000      # charge units and time to refill an empty meter
 POSSESS_SPEED_PERCENT = 120       # moving and every action are this much faster while possessed
 LOG_LIMIT = 16
 ANCHOR_COUNTDOWN_MS = 30_000
@@ -71,7 +71,7 @@ ELDER_LINES = (
 LOG_TYPES = ("encounter", "eat", "rest", "life", "possess", "night", "lore", "trade", "ambush",
              "craft", "reflect", "purchase", "rebirth", "build", "stow")
 TASK_TYPES = ("perform", "pause", "rest", *SELF_ACTIONS, *PROLOGUE_MS)
-SCHEMA_VERSION = 20                # 20: hunting enemies; 19: night watch tick; 18: no blessing/boons/skills, contact + possession, campfire bought, opening at the anchor; 17: recipes found this life, level unlocks; 16: shimmer cells; 15: ecological pressure (14: campfire; 13: camp buildings, chest; 12: sites)
+SCHEMA_VERSION = 21                # 21: reusable possession charge; 20: hunting enemies; 19: night watch tick; 18: contact + possession; 17: recipes found this life; 16: shimmer cells; 15: ecological pressure
 
 
 def attribute_table():

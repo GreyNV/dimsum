@@ -5,7 +5,7 @@ import json
 import unittest
 
 from dimensional_sim.world import autopilot as ap
-from dimensional_sim.world.autopilot import Expedition
+from dimensional_sim.world.autopilot import Expedition, saves
 from dimensional_sim.world.catalog import BY_ID
 from dimensional_sim.world.runtime import Exploration, InputCommand
 from dimensional_sim.world.seeds import canonical_json
@@ -108,7 +108,7 @@ class ContactTests(unittest.TestCase):
 
 
 class PossessionTests(unittest.TestCase):
-    def test_possession_lasts_thirty_seconds_then_recharges_for_a_minute(self):
+    def test_possession_spends_charge_and_refills_in_a_minute(self):
         e = started()
         e.anchor_action({"type": "possess"})
         self.assertTrue(e.possessing)
@@ -117,13 +117,38 @@ class PossessionTests(unittest.TestCase):
         self.assertTrue(e.possessing)
         e.advance_manual(1)
         self.assertFalse(e.possessing)
-        self.assertEqual(e.possession()["ready_in_ms"], ap.POSSESS_COOLDOWN_MS)
+        self.assertEqual(e.possession()["charge_ms"], 0)
+        self.assertEqual(e.possession()["full_in_ms"], ap.POSSESS_COOLDOWN_MS)
         with self.assertRaisesRegex(ValueError, "recharging"):
             e.possess()
-        e.advance(ap.POSSESS_COOLDOWN_MS)
+        e.advance(30_000)
+        self.assertEqual(e.possession()["charge_ms"], 30_000)
         e.possess()
+        self.assertEqual(e.possession()["remaining_ms"], 15_000)
+        e.advance_manual(5_000)
         e.release()
-        self.assertEqual(e.possession()["ready_in_ms"], ap.POSSESS_COOLDOWN_MS, "an early release recharges from then")
+        self.assertEqual(e.possession()["charge_ms"], 20_000, "early release keeps unused charge")
+        e.advance(10_000)
+        self.assertEqual(e.possession()["charge_ms"], 30_000)
+        e.possess()
+        self.assertEqual(e.possession()["remaining_ms"], 15_000)
+
+    def test_partial_charge_and_release_survive_reload_and_time_slicing(self):
+        a, b = started(), started()
+        for e in (a, b):
+            e.possess()
+        a.advance_manual(8_000)
+        for _ in range(80):
+            b.advance_manual(100)
+        a.release(); b.release()
+        self.assertEqual(a.possession()["charge_ms"], 44_000)
+        self.assertEqual(dump(a), dump(b))
+        loaded = Expedition.from_dict(json.loads(dump(a)))
+        self.assertEqual(dump(loaded), dump(a))
+        loaded.advance(2_000)
+        self.assertEqual(loaded.possession()["charge_ms"], 46_000)
+        loaded.possess()
+        self.assertEqual(loaded.possession()["remaining_ms"], 23_000)
 
     def test_possession_is_partition_independent_and_crosses_into_the_autopilot(self):
         a, b = started(), started()
@@ -177,6 +202,24 @@ class PossessionTests(unittest.TestCase):
 
 
 class MigrationTests(unittest.TestCase):
+    def test_schema_twenty_cooldown_becomes_partial_charge(self):
+        e = started()
+        old = {k: v for k, v in e.to_dict().items() if k not in saves.V21_FIELDS}
+        old.update(schema_version=20, possess_ready_ms=e.total_ms + 30_000)
+        loaded = Expedition.from_dict(json.loads(json.dumps(old)))
+        self.assertEqual(loaded.possession()["charge_ms"], 30_000)
+        self.assertEqual(loaded.possession()["available_ms"], 15_000)
+        self.assertNotIn("possess_ready_ms", loaded.to_dict())
+
+    def test_schema_twenty_active_possession_keeps_remaining_time(self):
+        e = started()
+        old = {k: v for k, v in e.to_dict().items() if k not in saves.V21_FIELDS}
+        old.update(schema_version=20, possess_ready_ms=0, possess_end_ms=e.total_ms + 20_000)
+        loaded = Expedition.from_dict(json.loads(json.dumps(old)))
+        self.assertEqual(loaded.possession()["remaining_ms"], 20_000)
+        loaded.advance_manual(20_000)
+        self.assertEqual(loaded.possession()["charge_ms"], 0)
+
     def test_schema_seventeen_preserves_the_paid_return_skill(self):
         e = started()
         old = v17(e.to_dict())
