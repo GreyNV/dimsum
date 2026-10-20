@@ -163,6 +163,36 @@ class NightSpawnTests(unittest.TestCase):
         self.assertLess(e.health, before)
         self.assertIsNone(e.task, "the raid interrupts rest")
 
+    def test_cornered_at_the_camp_the_avatar_fights_back_and_never_heals_through_bites(self):
+        """Regression: badly hurt at the camp, a wolf alongside, the auto-pilot kept "retreating"
+        to where it already stood and rested; rest healing matched the bites, so for minutes
+        nobody won (health hovered at 1)."""
+        e = started()
+        e.depth = 3
+        e.total_ms = NIGHTFALL
+        e.night_tick = night.world_clock(e.total_ms) // tuning.NIGHT_SPAWN_EVERY_MS
+        for _ in range(8):
+            e.total_ms += tuning.NIGHT_SPAWN_EVERY_MS
+            e._night_watch()
+            if wolves(e):
+                break
+        lead = wolves(e)[0]
+        e._settle()
+        target = e.game.targets[lead["id"]]
+        px, py = e._player()
+        target.chunk = e.game.player.chunk
+        target.x, target.y = px % e.game.current_chunk().asset.width + 1, py % e.game.current_chunk().asset.height
+        self.assertTrue(e.at_camp())
+        e.health = 2 * e.enemy_hit(target.chunk, ENEMIES["wolf"])   # one bite from death's door
+        e.goal, e.task = e._home_goal(), {"type": "rest", "spot": None, "elapsed_ms": 0, "duration_ms": 10_000}
+        hp, life = target.hp, e.life
+        e.advance(1000)
+        self.assertTrue(e.life > life or e.anchor_ms is not None or (e.goal or {}).get("kind") == "target",
+                        "cornered, it turns on the wolf")
+        e.advance(60_000)
+        self.assertTrue(e.anchor_ms is not None or e.life > life or target.hp < hp or lead["id"] in e.completed,
+                        "a minute later somebody has won or lost")
+
     def test_a_night_replays_exactly_in_any_slicing_and_survives_reload(self):
         a, b = out_in_the_dark(), out_in_the_dark()
         for e in (a, b):

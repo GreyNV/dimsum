@@ -181,3 +181,64 @@ export function drawNight(ctx, width, height, alpha, lights = [], {clock = 0, re
   ctx.restore();
 }
 
+
+/* ---------- the colour of the day (cosmetic) ----------
+ * Keyframes over the day (fraction of DAY_MS, dawn = 0): a rose-gold dawn that warms and pales
+ * into neutral daylight over about three minutes, a golden afternoon, a red sunset, a violet dusk,
+ * a cool blue night and a grey-violet hour before dawn. `tint` is laid over the scene in
+ * soft-light (it colours without blacking out), `dim` darkens a little more (early morning
+ * haze, late dusk), `sun` is a low warm glow from the horizon (east at dawn, west at dusk). */
+const DAY_KEYS = [
+  [0.000, [255, 112, 122], .36, .14, .55],
+  [0.045, [255, 148, 92], .32, .10, .65],
+  [0.100, [255, 188, 112], .22, .05, .45],
+  [0.190, [255, 226, 170], .09, .01, .15],
+  [0.260, [255, 255, 255], 0, 0, 0],
+  [0.500, [255, 255, 255], 0, 0, 0],
+  [0.560, [255, 212, 142], .08, 0, .10],
+  [0.600, [255, 162, 82], .22, .02, .45],
+  [0.635, [240, 112, 92], .30, .06, .60],
+  [0.690, [118, 84, 172], .26, .10, .15],
+  [0.780, [72, 96, 176], .12, 0, 0],
+  [0.940, [96, 92, 170], .14, 0, 0],
+  [0.975, [176, 104, 150], .24, .10, .25],
+  [1.000, [255, 112, 122], .36, .14, .55],
+];
+
+/** Pure (tested): {r, g, b, tint, dim, sun, east} for a frame clock ({time_ms, day_ms}). */
+export function dayGrade(clock) {
+  if (!clock || !clock.day_ms) return {r: 255, g: 255, b: 255, tint: 0, dim: 0, sun: 0, east: true};
+  const f = ((clock.time_ms % clock.day_ms) + clock.day_ms) % clock.day_ms / clock.day_ms;
+  let i = 0;
+  while (i < DAY_KEYS.length - 2 && DAY_KEYS[i + 1][0] <= f) i++;
+  const [f0, c0, t0, d0, s0] = DAY_KEYS[i], [f1, c1, t1, d1, s1] = DAY_KEYS[i + 1];
+  const k = f1 > f0 ? (f - f0) / (f1 - f0) : 0, e = k * k * (3 - 2 * k);   // smoothstep: no visible seams
+  const mix = (a, b) => a + (b - a) * e;
+  return {r: Math.round(mix(c0[0], c1[0])), g: Math.round(mix(c0[1], c1[1])), b: Math.round(mix(c0[2], c1[2])),
+    tint: mix(t0, t1), dim: mix(d0, d1), sun: mix(s0, s1), east: f < .4};
+}
+
+/** Lay the day's colour over the scene (screen px, after the world, before night and the HUD). */
+export function drawDayGrade(ctx, width, height, grade) {
+  if (!grade || (grade.tint <= .004 && grade.dim <= .004 && grade.sun <= .004)) return;
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const scale = ctx.canvas.width / width, w = width * scale, h = height * scale;
+  const rgb = `${grade.r},${grade.g},${grade.b}`;
+  if (grade.tint > .004) {
+    ctx.globalCompositeOperation = 'soft-light';
+    ctx.fillStyle = `rgba(${rgb},${Math.min(1, grade.tint * 1.7)})`; ctx.fillRect(0, 0, w, h);
+  }
+  if (grade.dim > .004) {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = `rgba(14,12,26,${grade.dim})`; ctx.fillRect(0, 0, w, h);
+  }
+  if (grade.sun > .004) {   // the low sun: a broad warm wash from the horizon side
+    ctx.globalCompositeOperation = 'lighter';
+    const sx = grade.east ? w * 1.05 : -w * .05, sy = h * .15;
+    const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, Math.max(w, h) * .95);
+    g.addColorStop(0, `rgba(${rgb},${.20 * grade.sun})`); g.addColorStop(.5, `rgba(${rgb},${.07 * grade.sun})`);
+    g.addColorStop(1, `rgba(${rgb},0)`);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  }
+  ctx.restore();
+}

@@ -1,6 +1,6 @@
 /** Browser adapter: snapshots in, character art out. Python owns all game rules. */
 import {TILE_W, TILE_H, ZOOM, clamp, residentBounds, cameraView, follow, glide, retainResident, tileAt, visualHash, stickDirection, Controls} from './view.js';
-import {PALETTE, OBJECT_PAD, paintChunk, treeAt, treeKind, drawObjects, canopyFade, pathCover, trailFade, put, setResolution} from './art.js';
+import {PALETTE, OBJECT_PAD, paintChunk, treeAt, treeKind, drawObjects, canopyFade, pathCover, trailFade, put, putSwayed, setResolution} from './art.js';
 import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawUnarmedReach, drawDamage, drawFloat, drawReveal, drawSpot, drawSpotCompletion, drawCamp, drawBuildings, drawCampfire, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
 import {PAGES, needsDetail, pageModel, PANELS, COLLAPSE_KEY, loadCollapsed, toggleCollapsed, defaultCollapsed, subtabsOf} from './pages.js';
 import {debugText, ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
@@ -11,8 +11,9 @@ import {hosted, request, releaseInput} from './transport.js';
 import {drawMinimap, visibleAt} from './minimap.js';
 import {anchorAction, renderAnchor} from './anchor_ui.js';
 import {buildTabs, journalAction, renderSection, renderSubtabs} from './page_ui.js';
-import {drawNight, nightAlpha, drawEdgeMarker, drawEyelids, drawPossessionAura, drawPossessionGround, drawPossessionTint, drawVignette, edgePoint, possessionGlow, tintPicture} from './scene_fx.js';
+import {dayGrade, drawDayGrade, drawNight, nightAlpha, drawEdgeMarker, drawEyelids, drawPossessionAura, drawPossessionGround, drawPossessionTint, drawVignette, edgePoint, possessionGlow, tintPicture} from './scene_fx.js';
 import {drawMotes, drawReflection, drawWaterGlints, isWater} from './nature_art.js';
+import {drawBlownLeaves, swayKind, windShear} from './wind.js';
 import {ACTOR_FOOT} from './sprites.js';
 import {SOUND_KEY, SoundEngine, VOLUMES, loadSettings, soundEvents, surfaceOf} from './sound.js';
 
@@ -223,7 +224,7 @@ function observeCombat(next) {
       const lost = Math.round(((state?.expedition?.vitals?.health ?? 0) - (next.expedition?.vitals?.health ?? 0)) / 100);
       const fed = Math.round(((state?.expedition?.vitals?.hunger ?? 0) - (next.expedition?.vitals?.hunger ?? 0)) / 100);
       if (lost <= 0 && fed > 0) rewards.push({text: `-${fed} hunger`, color: '#b9cfff', at: now});
-      else rewards.push({text: lost > 0 ? `-${lost} health` : 'Gored!', color: '#ff7a63', at: now});
+      else rewards.push({text: lost > 0 ? `-${lost} health` : 'Struck!', color: '#ff7a63', at: now});
     }
     strikesSeen.set(target.id, target.strikes || 0);
   }
@@ -359,12 +360,13 @@ function repaintCanopies(tx, ty, resident, alpha = 1, box = null) {
     if (chunk.tiles[ly][lx] !== 'T') continue;
     const t = treeAt(tile.x * TILE_W, tile.y * TILE_H, visualHash(tile.x, tile.y, chunk.seed), undefined, treeKind(chunk, lx, ly));
     const ax = actor ? actor.x / TILE_W - .5 : 0, ay = actor ? actor.y / TILE_H - .5 : 0;
+    t.shear = reducedMotion ? 0 : windShear(tile.x, tile.y, frameNow, 'tree');   // same wind as the ground pass
     t.fade = actor && !state?.expedition?.anchor_space   // same rule as the ground pass
       ? Math.min(canopyFade(tile.x - ax, tile.y - ay), trailFade(pathCover(chunk, lx, ly), ax, ay)) : 1;
     if (t.x < bx1 && t.x + t.canvas.lw > bx0 && t.y < by1 && t.y + t.canvas.lh > by0) trees.push(t);
   }
   if (!trees.length) return;
-  if (alpha >= 1) { for (const t of trees) { ctx.globalAlpha = t.fade; put(ctx, t.canvas, t.x, t.y); } ctx.globalAlpha = 1; return; }
+  if (alpha >= 1) { for (const t of trees) { ctx.globalAlpha = t.fade; putSwayed(ctx, t.canvas, t.x, t.y, t.shear); } ctx.globalAlpha = 1; return; }
   // See-through leaves: the overlapping trees are composed at full strength off-screen (so
   // nearer canopies still hide farther trunks), then laid over the actor at `alpha`.
   const m = ctx.getTransform();
@@ -383,7 +385,7 @@ function repaintCanopies(tx, ty, resident, alpha = 1, box = null) {
   g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, X1 - X0, Y1 - Y0);
   g.setTransform(m.a, 0, 0, m.d, m.e - X0, m.f - Y0);
   g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'low';
-  for (const t of trees) { g.globalAlpha = t.fade; put(g, t.canvas, t.x, t.y); }
+  for (const t of trees) { g.globalAlpha = t.fade; putSwayed(g, t.canvas, t.x, t.y, t.shear); }
   g.globalAlpha = 1;
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = alpha;
   ctx.drawImage(canopyLayer, 0, 0, X1 - X0, Y1 - Y0, X0, Y0, X1 - X0, Y1 - Y0);
@@ -447,7 +449,9 @@ function waterTiles(chunk) {
   }));
   return picture.water;
 }
+let frameNow = 0;   // this frame's clock, shared by every wind-swayed pass
 function render(now) {
+  frameNow = now;
   const dt=Math.min(100,now-lastFrame || 16); lastFrame=now;
   ctx.setTransform(dpr,0,0,dpr,0,0); ctx.fillStyle=PALETTE.void; ctx.fillRect(0,0,width,height);
   if (state?.expedition?.anchor_space && state.expedition.anchor_space.kind !== 'contact') {
@@ -558,7 +562,8 @@ function render(now) {
       const ax=actor.x/TILE_W-.5, ay=actor.y/TILE_H-.5;
       drawObjects(ctx,pictures.get(chunk.id),chunk.x*chunk.width*TILE_W,chunk.y*chunk.height*TILE_H,(tx,ty)=>rows?.[ty]?.[tx]==='1',
         (tx,ty,item)=>chunk.tiles[ty][tx]==='T' && !state.expedition?.anchor_space
-          ? Math.min(canopyFade(chunk.x*chunk.width+tx-ax, chunk.y*chunk.height+ty-ay), trailFade(item.cover, ax, ay)) : 1);
+          ? Math.min(canopyFade(chunk.x*chunk.width+tx-ax, chunk.y*chunk.height+ty-ay), trailFade(item.cover, ax, ay)) : 1,
+        reducedMotion ? null : (tx,ty,item)=>windShear(chunk.x*chunk.width+tx, chunk.y*chunk.height+ty, now, swayKind(item, chunk.tiles[ty][tx])));
     }
     if (!state.expedition?.anchor_space) revealTrail(revealed, fog);
     const anchor = state.expedition?.anchor;
@@ -649,6 +654,8 @@ function render(now) {
         const at=enemyXY(t,now); drawDamage(ctx,at.x,at.y-44,hit.amount,reducedMotion?0:now-hit.at);
       }
     }
+    if(!reducedMotion && !state.expedition?.anchor_space) drawBlownLeaves(ctx,view.x-width/view.scale/2,view.y-height/view.scale/2,
+      view.x+width/view.scale/2,view.y+height/view.scale/2,now,{tileW:TILE_W,tileH:TILE_H});
     if(!reducedMotion) drawMotes(ctx,view.x-width/view.scale/2,view.y-height/view.scale/2,
       view.x+width/view.scale/2,view.y+height/view.scale/2,state.clock_ms,
       ...(state.expedition?.region?.shimmer ? [2.4, ['#b493ff', '#efe4ff']] : []));
@@ -661,6 +668,8 @@ function render(now) {
         {color: rewards[i].color, duration: 1600, size: rewards[i].glint ? 11 : 9});
     }
     ctx.setTransform(dpr,0,0,dpr,0,0);
+    // The colour of the day: rose dawn warming into daylight, golden afternoon, red sunset, violet dusk.
+    if (!state.expedition?.anchor_space && !prologue) drawDayGrade(ctx, width, height, dayGrade(state.expedition?.clock));
     // Night: darkness with holes of light around the avatar, the anchor camp and a campfire.
     const dark = nightAlpha(state.expedition?.clock);
     if (dark > 0) {

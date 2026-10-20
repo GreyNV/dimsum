@@ -170,6 +170,8 @@ class CombatMixin:
         """One enemy attack on the avatar (its counter feeds the client's lunge animation)."""
         enemy = self.enemy_of(target)
         self.strikes[target.id] = self.strikes.get(target.id, 0) + 1
+        if self.task and self.task["type"] == "rest":
+            self.task = None   # nobody rests through a bite: healing stops while something bites
         if enemy.drains == "hunger":   # it feeds: hunger runs down (starving is the vitals' job)
             self.hunger = max(0, self.hunger - self.enemy_hit(target.chunk, enemy))
             return
@@ -251,7 +253,8 @@ class CombatMixin:
                 distance = abs(tx - px) + abs(ty - py)
             # An enemy that catches a fleeing avatar bites it in passing but does not stop it;
             # retreat is safer than a losing fight, never free.
-            if distance == 1 and (self.goal or {}).get("kind") == "home":
+            cornered = distance == 1 and self.at_rest_place()   # nowhere left to run to
+            if distance == 1 and (self.goal or {}).get("kind") == "home" and not cornered:
                 self._enemy_bites(target)
                 if self.health == 0:
                     break
@@ -261,9 +264,15 @@ class CombatMixin:
                 self.task = None
                 self._enemy_bites(target)
                 name = enemy.name.lower()
+                if self.health == 0:
+                    break
                 if self.health > self.fight_damage(self.ring(target.chunk), self.target_action(target.id)):
                     self.goal = {"kind": "target", "id": target.id, "x": tx, "y": ty}
                     self._entry("ambush", f"A {name} attacks you!")
+                elif cornered:   # already at the camp or the fire: running gains nothing, so fight
+                    self.goal = {"kind": "target", "id": target.id, "x": tx, "y": ty}
+                    self._entry("ambush", f"A {name} corners you by the "
+                                f"{'camp' if self.at_camp() else 'fire'} - you fight back!")
                 else:   # this fight would kill: retreat and seek recovery
                     self.goal = self._home_goal()
                     self._entry("ambush", f"A {name} attacks you - too hurt to fight, you retreat!")

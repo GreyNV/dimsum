@@ -41,6 +41,18 @@ Night darkness with holes of light (avatar, larger while possessed; warm flicker
 anchor camp and a campfire) in `scene_fx.js drawNight`; the HUD clock "☀ Day 2 · night in 3:10" /
 "☾ Night · dawn in 1:12"; wolf sprite (`combat_art.js WOLF`).
 
+The colour of the day (`scene_fx.js dayGrade`, `drawDayGrade`, cosmetic): smoothstepped keyframes
+over the day - a rose dawn that warms to gold and pales into neutral daylight over about three
+minutes (with a little morning haze lifting), a golden afternoon, a red sunset, a violet dusk, a cool
+blue night and a grey-violet hour before dawn. A soft-light tint, a slight dim and a low sun glow
+from the east (morning) or west (evening).
+
+Wind (`wind.js`, cosmetic): one field of slow sway, gust fronts rolling west to east and a quick
+flutter. Trees and undergrowth (bush, sapling, ferns) are drawn sheared about their base, so roots
+stay put and tops lean downwind; stones, mushrooms, rocks and structures stand still. The canopy
+repaint over actors uses the same field and frame clock, so the two passes never disagree. A few
+leaves blow across the view. All of it is off under reduced motion.
+
 ## Save migration 18 -> 19
 Adds `night_tick` = the current clock tick (no retroactive wolves).
 

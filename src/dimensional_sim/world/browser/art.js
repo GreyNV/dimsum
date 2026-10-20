@@ -299,14 +299,25 @@ export function paintChunk(chunk, createCanvas = defaultCanvas) {
   return {ground, objects};
 }
 /** Draw a painted chunk's objects with the chunk's top-left at (ox, oy). */
-export function drawObjects(ctx, picture, ox, oy, shown = null, alpha = null) {
+export function drawObjects(ctx, picture, ox, oy, shown = null, alpha = null, sway = null) {
   for (const item of picture.objects) {
     if (shown && !shown(item.tx, item.ty)) continue;
     const a = alpha ? alpha(item.tx, item.ty, item) : 1;
     if (a <= 0) continue;
-    if (a < 1) { ctx.globalAlpha = a; put(ctx, item.canvas, ox + item.x, oy + item.y); ctx.globalAlpha = 1; }
-    else put(ctx, item.canvas, ox + item.x, oy + item.y);
+    const shear = sway ? sway(item.tx, item.ty, item) : 0;
+    if (a < 1) { ctx.globalAlpha = a; putSwayed(ctx, item.canvas, ox + item.x, oy + item.y, shear); ctx.globalAlpha = 1; }
+    else putSwayed(ctx, item.canvas, ox + item.x, oy + item.y, shear);
   }
+}
+/** Draw `canvas` at (x, y) leaning by `shear` about its bottom edge (a plant's root): the
+ * wind (wind.js) bends grass and treetops while the base stays where it grows. */
+export function putSwayed(ctx, canvas, x, y, shear = 0) {
+  if (!shear || Math.abs(shear) < .002) { put(ctx, canvas, x, y); return; }
+  const base = y + (canvas.lh ?? canvas.height);
+  ctx.save();
+  ctx.transform(1, 0, shear, 1, -shear * base, 0);
+  put(ctx, canvas, x, y);
+  ctx.restore();
 }
 /** Leaves thin out around the avatar: trees rooted just south of it and a few columns aside
  * (the ones whose canopies cover the ground it stands on) fade, so the way ahead stays readable

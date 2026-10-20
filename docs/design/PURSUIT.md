@@ -21,3 +21,10 @@ fear the anchor camp and campfires; night wolves can pursue and attack there.
 - Code: `autopilot/combat.py` (`_pursue`, `_enemy_step`, `_unload_far_enemies`, `_unload`).
   Tests: tests/test_world_pursuit.py.
 - Sims (8 seeds x 90 min): mean life 19.4 min (18.9 before); deaths boar 15, starvation 16.
+
+## Cornered at the camp or a fire
+Night wolves follow into the camp and firelight, so a retreat that ends where the avatar already
+stands is no retreat: a hunter beside an avatar at its rest place makes it fight back, even when
+the fight looks lost. Every bite also ends a rest, so healing never outpaces a biting wolf (before
+this, rest healing and bites cancelled out and the two stood together for minutes at 1 health).
+Test: `test_world_night.test_cornered_at_the_camp_the_avatar_fights_back_and_never_heals_through_bites`.
