@@ -8,7 +8,7 @@ import time
 
 from .animation import rotate
 from .autopilot import INVENTORY_SLOTS, Expedition
-from .autopilot.constants import CONTACT_COOLDOWN_MS, POSSESS_COOLDOWN_MS, POSSESS_MS, POSSESS_SPEED_PERCENT
+from .autopilot.constants import CONTACT_COOLDOWN_MS, POSSESS_COOLDOWN_MS, POSSESS_SPEED_PERCENT
 from . import details
 from .catalog import BY_ID, DEFAULT_TREES, ENEMIES, ITEMS, REGION_TREES, REGIONS, TREE_KINDS, UNLOCKS, rarity_glint
 from .models import ChunkKey, chunk_ident, integer
@@ -225,7 +225,7 @@ def _skill_slots(e, in_anchor):
                      + "). Stand still beside it to heal as fast as at the anchor camp.")
     p = e.possession()
     if p["active"]:
-        possess = {"state": "active", "note": "Possessing", "remaining_ms": p["remaining_ms"], "cooldown_ms": POSSESS_MS}
+        possess = {"state": "active", "note": "Possessing", "remaining_ms": p["remaining_ms"], "cooldown_ms": p["duration_ms"]}
     elif busy:
         possess = {"state": "disabled", "note": "Not now", "remaining_ms": 0, "cooldown_ms": POSSESS_COOLDOWN_MS}
     elif p["ready_in_ms"]:
@@ -233,7 +233,7 @@ def _skill_slots(e, in_anchor):
                    "cooldown_ms": POSSESS_COOLDOWN_MS}
     else:
         possess = {"state": "ready", "note": "Ready", "remaining_ms": 0, "cooldown_ms": POSSESS_COOLDOWN_MS}
-    possess.update(name="Possess", hint=f"Take the avatar's hands for {POSSESS_MS // 1000} seconds: move with WASD, "
+    possess.update(name="Possess", hint=f"Take the avatar's hands for {p['duration_ms'] // 1000} seconds: move with WASD, "
                    f"act with Space and E; it moves and works {POSSESS_SPEED_PERCENT - 100}% faster with you. "
                    f"Recharges for {POSSESS_COOLDOWN_MS // 1000} seconds after.")
     return [contact, fire, possess]
@@ -315,7 +315,7 @@ class BrowserSession:
 
     With an expedition, the auto-pilot drives the character. Player move/attack
     input steers only while the avatar is possessed (the Possess skill, an anchor
-    action); possession ends by itself after POSSESS_MS of simulation time.
+    action); possession ends after its current Willpower based duration.
     Without an expedition the session is the original manual adapter.
     """
     def __init__(self, game, expedition=None, *, start_paused=False):

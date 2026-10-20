@@ -81,7 +81,8 @@ class DetailTests(unittest.TestCase):
         self.assertEqual(set(d["character"]), {
             "life", "depth", "best_depth", "frontier", "health", "hunger", "punch_damage", "gear",
             "threats", "hunger_per_minute", "regen_per_minute",
-            "rest_regen_per_minute", "inventory_slots", "currencies", "unlocked", "camp", "load", "openings"})
+            "rest_regen_per_minute", "inventory_slots", "currencies", "unlocked", "camp", "load", "openings",
+            "sight_radius", "possession_seconds"})
         self.assertEqual(set(d["multipliers"]), {"actions", "hunger_drain", "enemy_hit", "punch_damage", "punch_parts"})
         self.assertEqual(set(d["rolls"]), {"life", "windows", "spots_per_chunk", "tiers", "pity", "stats", "loot"})
         self.assertEqual(set(d["journal"]), {"actions", "items", "deaths", "best_life_min", "lives", "best_depth",

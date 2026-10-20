@@ -13,7 +13,7 @@ from ..journal import new_journal, validate_journal
 from ..models import ChunkKey, chunk_ident, fields, identifier, integer
 from ..runtime import Exploration
 from ..tuning import CHEST_SLOTS, DAY_START_MS, NIGHT_SPAWN_EVERY_MS, PITY_CHUNKS
-from .constants import (ANCHOR_COUNTDOWN_MS, CONTACT_COOLDOWN_MS, FOOD_COOLDOWN_MS, POSSESS_COOLDOWN_MS, POSSESS_MS, INVENTORY_SLOTS, LEGACY_MONSTER_MAX_MS, LOG_LIMIT,
+from .constants import (ANCHOR_COUNTDOWN_MS, CONTACT_COOLDOWN_MS, FOOD_COOLDOWN_MS, POSSESS_COOLDOWN_MS, INVENTORY_SLOTS, LEGACY_MONSTER_MAX_MS, LOG_LIMIT,
                         LOG_TYPES, MONSTER_STEP_MS, SCHEMA_VERSION, SELF_ACTIONS, STACK_LIMIT, STAT_KEYS,
                         TASK_TYPES, VITAL_MAX)
 from .ecology import valid_pressure, valid_shimmer
@@ -368,7 +368,8 @@ def _load_life(result, data):
     result.possess_ready_ms = integer(data["possess_ready_ms"], "possession cooldown", 0,
                                       result.total_ms + POSSESS_COOLDOWN_MS)
     if data["possess_end_ms"] is not None:
-        integer(data["possess_end_ms"], "possession end", result.total_ms + 1, result.total_ms + POSSESS_MS)
+        integer(data["possess_end_ms"], "possession end", result.total_ms + 1,
+                result.total_ms + result.possess_duration_ms())
     result.possess_end_ms = data["possess_end_ms"]
     if type(data["opening"]) is not bool or (data["opening"] and (data["anchor_ms"] is None or result.life != 1)):
         raise ValueError("invalid opening")

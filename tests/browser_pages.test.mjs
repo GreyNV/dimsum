@@ -11,7 +11,8 @@ const detail = {
     regen_per_minute: 12, rest_regen_per_minute: 60, inventory_slots: [3, 12], currencies: {ash: 2}, unlocked: ['Climbing'],
     openings: [{name: 'Snare lines', description: 'Hunter cabins.', attribute: 'perception', level: 3, have: 2, open: false}],
     camp: {buildings: [{id: 'crafting_station', name: 'Crafting station', bound: true}], chest: [{item: 'stick', name: 'Stick', count: 7}], at_camp: false},
-    load: {percent: 118, carried: 28, free: 10, per_item: 1, max: 60, relief_permille: 1000}},
+    load: {percent: 118, carried: 28, free: 10, per_item: 1, max: 60, relief_permille: 1000},
+    sight_radius: 6, possession_seconds: 38},
   stats: ['strength', 'endurance', 'agility', 'intelligence', 'perception', 'willpower'].map(stat),
   multipliers: {actions: [{id: 'bramble_berries', name: 'Bramble berries', attribute: 'perception', speed: 1410, base_ms: 2400, effective_ms: 1703}],
     hunger_drain: 0.909, enemy_hit: [['Endurance', 0.909], ['Hide wrap', 0.7]], punch_damage: 2, punch_parts: [['Base', 1], ['Strength levels', 1]]},
@@ -91,6 +92,9 @@ test('stats: the camp section lists buildings, the chest and carry load; unused 
 test('stats: character is the main view with multipliers; statistics holds every count', () => {
   const character = pageModel('stats', state).sections.map(x => x.title);
   assert.deepEqual(character.slice(0, 4), ['Levels', 'Vitals', 'Combat', 'Attribute speed']);
+  const exploration = pageModel('stats', state).sections.find(x => x.title === 'Exploration and control').rows;
+  assert.equal(exploration[0][1], '6 cells');
+  assert.equal(exploration[1][1], '38 seconds');
   const combat = pageModel('stats', state).sections.find(x => x.title === 'Combat').rows;
   assert.ok(combat.some(([k, v]) => k === 'Damage taken' && v === '×0.636'));
   const stats = pageModel('stats', state, null, 'statistics').sections;

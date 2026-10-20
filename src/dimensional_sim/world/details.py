@@ -15,7 +15,7 @@ from .drops import SCALE, table_chances, tier_chances
 from .encounters import spawn_window
 from .journal import achievements
 from .models import ChunkKey
-from .progression import attribute_report, dimensional_level, scaled_ms, speed_permille
+from .progression import attribute_report, dimensional_level, scaled_ms, sight_radius, speed_permille
 from .tuning import CARRY_FREE, CARRY_MAX_PERCENT, CARRY_PERCENT_PER_ITEM, PITY_CHUNKS, SPOTS_PER_CHUNK
 
 
@@ -52,6 +52,8 @@ def character(e):
         "load": {"percent": e.load_percent(), "carried": e.carried_units(), "free": CARRY_FREE,
                  "per_item": CARRY_PERCENT_PER_ITEM, "max": CARRY_MAX_PERCENT,
                  "relief_permille": (e.speed("endurance") + e.speed("strength")) // 2},
+        "sight_radius": sight_radius(e.regular, e.dimensional),
+        "possession_seconds": e.possess_duration_ms() // 1000,
     }
 
 

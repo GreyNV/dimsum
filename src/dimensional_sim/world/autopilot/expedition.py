@@ -8,14 +8,14 @@ impact), so any slicing of the same total time gives the same state.
 from ..catalog import BUILDINGS, BY_ID
 from ..journal import new_journal
 from ..models import DELTAS, DIRECTIONS, integer
-from ..progression import scaled_ms, speed_permille
+from ..progression import possession_duration_ms, scaled_ms, sight_radius, speed_permille
 from ..runtime import InputCommand, Target
 from ..tuning import PITY_CHUNKS
 from .camp import CampMixin
 from .combat import CombatMixin
 from .ecology import EcologyMixin
 from .constants import (ANCHOR_COUNTDOWN_MS, MAX_EVENTS_PER_ADVANCE, MONSTER_STEP_MS, PAUSE_BETWEEN_PUNCHES_MS,
-                        POSSESS_COOLDOWN_MS, POSSESS_MS, POSSESS_SPEED_PERCENT, PROLOGUE_MS, PROLOGUE_NEXT,
+                        POSSESS_COOLDOWN_MS, POSSESS_SPEED_PERCENT, PROLOGUE_MS, PROLOGUE_NEXT,
                         REST_MS, RETREAT_BELOW, SELF_ACTIONS, STAT_KEYS, VITAL_MAX, attribute_table, ceil_div)
 from .lives import LivesMixin
 from .navigation import NavigationMixin
@@ -139,12 +139,12 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         return None
 
     def possess(self):
-        """Take the avatar's hands for POSSESS_MS of simulation time."""
+        """Take the avatar's hands for a duration set by Willpower."""
         reason = self.possess_block()
         if reason is not None:
             raise ValueError(f"cannot possess: {reason.lower()}")
         self.interrupt()
-        self.possess_end_ms = self.total_ms + POSSESS_MS
+        self.possess_end_ms = self.total_ms + self.possess_duration_ms()
         self._entry("possess", "You reach into the avatar and take its hands. It moves quicker with you.")
 
     def release(self):
@@ -198,6 +198,9 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         speed = speed_permille(self.regular[attribute], self.dimensional[attribute])
         return speed * POSSESS_SPEED_PERCENT // 100 if self.possessing else speed
 
+    def possess_duration_ms(self):
+        return possession_duration_ms(self.regular, self.dimensional)
+
     # ----- tasks ---------------------------------------------------------
     def _start_task(self, kind, duration_ms, spot=None):
         """Begin a timed task: perform | pause | rest | a self action | a prologue stage."""
@@ -216,6 +219,10 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         if self.health == 0:
             self._die()
             return True
+        radius = sight_radius(self.regular, self.dimensional)
+        if self.game.reveal_radius != radius:
+            self.game.reveal_radius = radius
+            self.game._reveal()
         here = self.ring(self.game.player.chunk)
         if here > self.depth:
             self.depth = here

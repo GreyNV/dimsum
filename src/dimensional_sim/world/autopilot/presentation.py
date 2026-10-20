@@ -6,7 +6,7 @@ from ..catalog import BUILDINGS, BY_ID, ITEMS, rarity_glint
 from ..equipment import is_equipped
 from ..models import chunk_ident
 from ..tuning import PITY_CHUNKS
-from .constants import (ELDER_LINES, FOOD_COOLDOWN_MS, MEMORIES, POSSESS_COOLDOWN_MS, POSSESS_MS,
+from .constants import (ELDER_LINES, FOOD_COOLDOWN_MS, MEMORIES, POSSESS_COOLDOWN_MS,
                         POSSESS_SPEED_PERCENT, PROLOGUE_MS, PROLOGUE_NAMES, SELF_ACTIONS)
 
 
@@ -108,7 +108,7 @@ class PresentationMixin:
 
     def possession(self):
         """Possession (manual control) for the HUD: time left, or the recharge."""
-        return {"active": self.possessing, "duration_ms": POSSESS_MS, "cooldown_ms": POSSESS_COOLDOWN_MS,
+        return {"active": self.possessing, "duration_ms": self.possess_duration_ms(), "cooldown_ms": POSSESS_COOLDOWN_MS,
                 "remaining_ms": self.possess_end_ms - self.total_ms if self.possessing else 0,
                 "ready_in_ms": 0 if self.possessing else max(0, self.possess_ready_ms - self.total_ms),
                 "speed_percent": POSSESS_SPEED_PERCENT}

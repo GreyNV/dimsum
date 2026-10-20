@@ -79,6 +79,19 @@ def combined_level(regular_xp, dimensional_xp):
     return softcapped_level(regular_level(regular_xp)) + softcapped_level(dimensional_level(dimensional_xp))
 
 
+def sight_radius(regular, dimensional):
+    """Nearby fog radius: Perception and Willpower each contribute, capped at eight cells."""
+    levels = combined_level(regular["perception"], dimensional["perception"])
+    levels += combined_level(regular["willpower"], dimensional["willpower"])
+    return 5 + min(3, int(levels) // 4)
+
+
+def possession_duration_ms(regular, dimensional):
+    """Thirty seconds plus two per effective Willpower level, capped at one minute."""
+    levels = combined_level(regular["willpower"], dimensional["willpower"])
+    return 30_000 + min(30_000, 2_000 * int(levels))
+
+
 def scaled_ms(base_ms, permille):
     """Duration at a speed: ceil(base / speed), never below 1 ms."""
     return max(1, -(-base_ms * 1000 // permille))

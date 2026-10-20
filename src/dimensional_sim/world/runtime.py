@@ -92,6 +92,7 @@ class Exploration:
         self.targets = {}
         self.initialized_chunks = set()
         self.seen = {}
+        self.reveal_radius = REVEAL_RADIUS  # owner may derive a larger radius from attributes
         self.elapsed_ms = 0
         self.move_elapsed_ms = 0
         self.last_move = None
@@ -108,9 +109,10 @@ class Exploration:
         width, height = asset.width, asset.height
         gx = self.player.chunk.x * width + self.player.x
         gy = self.player.chunk.y * height + self.player.y
-        for dy in range(-REVEAL_RADIUS, REVEAL_RADIUS + 1):
-            for dx in range(-REVEAL_RADIUS, REVEAL_RADIUS + 1):
-                if dx * dx + dy * dy > REVEAL_RADIUS * REVEAL_RADIUS:
+        radius = self.reveal_radius
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                if dx * dx + dy * dy > radius * radius:
                     continue
                 x, y = gx + dx, gy + dy
                 key = ChunkKey(self.player.chunk.dimension, x // width, y // height)
@@ -532,6 +534,7 @@ class Exploration:
             result.world.stream(result.player.chunk)
             result.world.get(result.player.chunk)
             result.seen = {}
+            result.reveal_radius = REVEAL_RADIUS  # derived again by the expedition on its next step
             if version == 1:
                 # Old saves revealed every visited chunk. Keep that progress on upgrade.
                 specs = {spec.id: spec for spec in result.world.dimensions}

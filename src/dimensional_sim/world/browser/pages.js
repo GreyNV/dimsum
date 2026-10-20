@@ -73,6 +73,10 @@ function character(d) {
       rows: rows.map(r => [label(r.name), r.level, r.dim_level, times(r.speed_regular_only),
         times(r.speed_dimensional_only), times(r.speed)]),
       note: 'Speed multiplies every action using that attribute. Regular levels reset each life; dimensional levels stay.'},
+    {title: 'Exploration and control', kind: 'rows', rows: [
+      ['Fog reveal', `${c.sight_radius} cells`, 'Perception and Willpower widen the area uncovered as you move (max 8)'],
+      ['Possession', `${c.possession_seconds} seconds`, 'Willpower extends direct control (max 60 seconds)'],
+    ]},
     {title: 'Anchor camp', kind: 'rows', rows: [
       ...(camp.buildings.length ? camp.buildings.map(b => [b.name, b.bound ? 'bound - stands in every life' : 'this life only',
         b.bound ? '' : 'bind it with ash at the anchor to keep it']) : [['Buildings', 'none yet', 'build a crafting station at the camp (primitive crafting)']]),
