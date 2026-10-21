@@ -45,8 +45,7 @@ Andrew: following a trail in deep woods, the path was only visible on the minima
 (2-4x a person) hid it.
 - Trodden trails: a walkable cell hemmed in by trees (4+ of 8 neighbours) gets a ragged patch of
   path earth in the ground picture; patches join into a strip. Undergrowth never grows there.
-- Trail cut (`app.revealTrail`): around the avatar (6.5 tiles) the walkable ground under a canopy
-  is drawn back over the leaves through feathered blobs, lit a little warmer, fading with distance.
-  Built in world space once per avatar cell and zoom, then copied each frame (headless: 16 fps vs
-  17.5 without; a per-frame blur version ran at 1.6 fps and was replaced).
-- Crowns over any path are drawn slightly see-through everywhere (`art.pathCover`, `trailFade`).
+- Trail cut over the leaves and always-on see-through crowns were removed (2026-10-22, Andrew: they
+  smudged the canopy and thinned trees the avatar was nowhere near). A crown over a trail is thinned
+  only while the avatar stands under it (`art.pathCover`, `trailFade`); the usual `canopyFade`
+  around the avatar still applies.

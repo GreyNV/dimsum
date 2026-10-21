@@ -338,14 +338,14 @@ export function pathCover(chunk, x, y) {
   }
   return out;
 }
-/** How see-through a tree is: crowns over a path are always thinned (the trail reads as a lighter
- * corridor through the woods) and nearly clear around the avatar. `cover` is pathCover's list,
+/** How see-through a tree is because of the trail under it: only a crown the avatar is actually
+ * standing under (on one of the walkable cells it hangs over) is thinned; every other crown stays
+ * solid, so trails never leave see-through trees around the scene. `cover` is pathCover's list,
  * (ax, ay) the avatar in tiles. */
 export function trailFade(cover, ax, ay) {
   if (!cover || !cover.length) return 1;
-  let d = Infinity;
-  for (const [x, y] of cover) d = Math.min(d, Math.hypot(x - ax, (y - ay) * 1.15));
-  return d <= 3 ? .45 : d <= 9 ? .45 + (d - 3) / 6 * .33 : .78;
+  for (const [x, y] of cover) if (Math.abs(x - ax) < .75 && Math.abs(y - ay) < .75) return .45;
+  return 1;
 }
 export function canopyFade(dx, dy) {
   if (dy < -1 || dy > 6) return 1;

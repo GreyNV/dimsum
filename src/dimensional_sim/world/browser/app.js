@@ -279,82 +279,6 @@ function attackPhase(player) {
 }
 /** Canopies south of an actor are repainted over it; over the avatar they are see-through,
  * so it never vanishes into the leaves while walking behind a tree. */
-/** Under a closed canopy the way ahead is cut clear: the walkable ground around the avatar is
- * drawn back over the leaves through soft round blobs, so a forest trail reads as a path the
- * avatar walks along instead of a wall of crowns (only the minimap showed it before). Uses the
- * cached ground pictures; cells only, never trunks (they stand on blocked cells). The cut is
- * built in world space once per avatar cell (and zoom) and then just copied each frame. */
-const TRAIL_R = 6.5;   // tiles
-let trailCut = null;   // {key, canvas, x, y, w, h} in world px
-let blobSprite = null;
-function softBlob() {   // a feathered ellipse, drawn once
-  if (blobSprite) return blobSprite;
-  blobSprite = document.createElement('canvas'); blobSprite.width = 64; blobSprite.height = 64;
-  const b = blobSprite.getContext('2d'), grad = b.createRadialGradient(32, 32, 8, 32, 32, 32);
-  grad.addColorStop(0, '#000'); grad.addColorStop(.62, '#000'); grad.addColorStop(1, 'rgba(0,0,0,0)');
-  b.fillStyle = grad; b.fillRect(0, 0, 64, 64);
-  return blobSprite;
-}
-function buildTrailCut(revealed, fog, tx0, ty0, scale) {
-  const x = (tx0 - TRAIL_R) * TILE_W, y = (ty0 - TRAIL_R) * TILE_H;
-  const w = (TRAIL_R * 2 + 1) * TILE_W, h = (TRAIL_R * 2 + 1) * TILE_H;
-  const cells = [];
-  const at = new Map(revealed.map(c => [`${c.x}:${c.y}`, c]));
-  const chunkOf = (tx, ty) => at.get(`${Math.floor(tx / state.chunk_width)}:${Math.floor(ty / state.chunk_height)}`);
-  const glyph = (tx, ty) => { const c = chunkOf(tx, ty); return c ? c.tiles[ty - c.y * c.height]?.[tx - c.x * c.width] : null; };
-  const visible = (tx, ty) => {
-    const c = chunkOf(tx, ty);
-    return !!c && fog[`${c.x}:${c.y}`]?.[ty - c.y * c.height]?.[tx - c.x * c.width] === '1';
-  };
-  for (let ty = Math.floor(ty0 - TRAIL_R); ty <= Math.ceil(ty0 + TRAIL_R); ty++)
-    for (let tx = Math.floor(tx0 - TRAIL_R); tx <= Math.ceil(tx0 + TRAIL_R); tx++) {
-      const chunk = chunkOf(tx, ty);
-      if (!chunk) continue;
-      const lx = tx - chunk.x * chunk.width, ly = ty - chunk.y * chunk.height;
-      if (chunk.collision?.[ly]?.[lx] === '1' || !visible(tx, ty) || isWater(chunk.tiles[ly][lx])) continue;
-      let shaded = false;   // under a canopy: a tree within three rows south
-      for (let dy = 1; dy <= 3 && !shaded; dy++) for (let dx = -1; dx <= 1; dx++) if (glyph(tx + dx, ty + dy) === 'T') { shaded = true; break; }
-      if (shaded) cells.push([tx, ty]);
-    }
-  if (!cells.length) return {canvas: null};
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.ceil(w * scale); canvas.height = Math.ceil(h * scale);
-  const g = canvas.getContext('2d');
-  g.setTransform(scale, 0, 0, scale, -x * scale, -y * scale);
-  g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'low';
-  for (const chunk of revealed) put(g, pictures.get(chunk.id).ground, chunk.x * chunk.width * TILE_W, chunk.y * chunk.height * TILE_H);
-  // trodden earth catches the light that falls through the gap in the crowns
-  g.globalCompositeOperation = 'screen'; g.fillStyle = 'rgba(112, 96, 58, .5)'; g.fillRect(x, y, w, h);
-  // keep only soft blobs over the cells (neighbouring blobs merge into a winding strip)
-  const mask = document.createElement('canvas'); mask.width = canvas.width; mask.height = canvas.height;
-  const mk = mask.getContext('2d'); mk.setTransform(scale, 0, 0, scale, -x * scale, -y * scale);
-  const blob = softBlob();
-  for (const [tx, ty] of cells) {
-    const hsh = visualHash(tx, ty, 0x7a11);
-    mk.drawImage(blob, (tx + .5) * TILE_W + (hsh % 5) - 2 - TILE_W * .95, (ty + .55) * TILE_H + ((hsh >>> 3) % 5) - 2 - TILE_H * .9, TILE_W * 1.9, TILE_H * 1.8);
-  }
-  // and fade out with distance from the avatar's cell
-  mk.globalCompositeOperation = 'destination-in';
-  const cx = (tx0 + .5) * TILE_W, cy = (ty0 + .5) * TILE_H, r = TRAIL_R * TILE_W;
-  const grad = mk.createRadialGradient(cx, cy, r * .15, cx, cy, r);
-  grad.addColorStop(0, 'rgba(0,0,0,.92)'); grad.addColorStop(.55, 'rgba(0,0,0,.7)'); grad.addColorStop(1, 'rgba(0,0,0,0)');
-  mk.fillStyle = grad; mk.fillRect(x, y, w, h);
-  g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'destination-in'; g.drawImage(mask, 0, 0);
-  // Soft blobs spill across tile edges. Keep the overlay inside the exact explored fog mask.
-  g.setTransform(scale, 0, 0, scale, -x * scale, -y * scale);
-  for (let ty = Math.floor(y / TILE_H); ty < Math.ceil((y + h) / TILE_H); ty++)
-    for (let tx = Math.floor(x / TILE_W); tx < Math.ceil((x + w) / TILE_W); tx++)
-      if (!visible(tx, ty)) g.clearRect(tx * TILE_W, ty * TILE_H, TILE_W, TILE_H);
-  return {canvas, x, y, w, h};
-}
-function revealTrail(revealed, fog) {
-  if (!actor) return;
-  const tx0 = Math.round(actor.x / TILE_W - .5), ty0 = Math.round(actor.y / TILE_H - .5);
-  const scale = Math.min(3, ctx.getTransform().a);
-  const key = `${tx0}:${ty0}:${scale.toFixed(2)}:${revealed.length}`;
-  if (!trailCut || trailCut.key !== key) trailCut = {key, ...buildTrailCut(revealed, fog, tx0, ty0, scale)};
-  if (trailCut.canvas) ctx.drawImage(trailCut.canvas, trailCut.x, trailCut.y, trailCut.w, trailCut.h);
-}
 let canopyLayer = null;
 /** Repaint the canopies that stand in front of an actor at tile (tx, ty), only over `box`
  * (the actor's own picture, world px [x0, y0, x1, y1]; default: around the tile). */
@@ -574,7 +498,6 @@ function render(now) {
           ? Math.min(canopyFade(chunk.x*chunk.width+tx-ax, chunk.y*chunk.height+ty-ay), trailFade(item.cover, ax, ay)) : 1,
         reducedMotion ? null : (tx,ty,item)=>windShear(chunk.x*chunk.width+tx, chunk.y*chunk.height+ty, now, swayKind(item, chunk.tiles[ty][tx])));
     }
-    if (!state.expedition?.anchor_space) revealTrail(revealed, fog);
     const anchor = state.expedition?.anchor;
     if (anchor && inSight(anchor.x,anchor.y)) {
       drawAmbushSite(ctx, (anchor.x+.5)*TILE_W, (anchor.y+.5)*TILE_H);
