@@ -302,12 +302,16 @@ function buildTrailCut(revealed, fog, tx0, ty0, scale) {
   const at = new Map(revealed.map(c => [`${c.x}:${c.y}`, c]));
   const chunkOf = (tx, ty) => at.get(`${Math.floor(tx / state.chunk_width)}:${Math.floor(ty / state.chunk_height)}`);
   const glyph = (tx, ty) => { const c = chunkOf(tx, ty); return c ? c.tiles[ty - c.y * c.height]?.[tx - c.x * c.width] : null; };
+  const visible = (tx, ty) => {
+    const c = chunkOf(tx, ty);
+    return !!c && fog[`${c.x}:${c.y}`]?.[ty - c.y * c.height]?.[tx - c.x * c.width] === '1';
+  };
   for (let ty = Math.floor(ty0 - TRAIL_R); ty <= Math.ceil(ty0 + TRAIL_R); ty++)
     for (let tx = Math.floor(tx0 - TRAIL_R); tx <= Math.ceil(tx0 + TRAIL_R); tx++) {
       const chunk = chunkOf(tx, ty);
       if (!chunk) continue;
       const lx = tx - chunk.x * chunk.width, ly = ty - chunk.y * chunk.height;
-      if (chunk.collision?.[ly]?.[lx] === '1' || fog[`${chunk.x}:${chunk.y}`]?.[ly]?.[lx] !== '1' || isWater(chunk.tiles[ly][lx])) continue;
+      if (chunk.collision?.[ly]?.[lx] === '1' || !visible(tx, ty) || isWater(chunk.tiles[ly][lx])) continue;
       let shaded = false;   // under a canopy: a tree within three rows south
       for (let dy = 1; dy <= 3 && !shaded; dy++) for (let dx = -1; dx <= 1; dx++) if (glyph(tx + dx, ty + dy) === 'T') { shaded = true; break; }
       if (shaded) cells.push([tx, ty]);
@@ -336,6 +340,11 @@ function buildTrailCut(revealed, fog, tx0, ty0, scale) {
   grad.addColorStop(0, 'rgba(0,0,0,.92)'); grad.addColorStop(.55, 'rgba(0,0,0,.7)'); grad.addColorStop(1, 'rgba(0,0,0,0)');
   mk.fillStyle = grad; mk.fillRect(x, y, w, h);
   g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'destination-in'; g.drawImage(mask, 0, 0);
+  // Soft blobs spill across tile edges. Keep the overlay inside the exact explored fog mask.
+  g.setTransform(scale, 0, 0, scale, -x * scale, -y * scale);
+  for (let ty = Math.floor(y / TILE_H); ty < Math.ceil((y + h) / TILE_H); ty++)
+    for (let tx = Math.floor(x / TILE_W); tx < Math.ceil((x + w) / TILE_W); tx++)
+      if (!visible(tx, ty)) g.clearRect(tx * TILE_W, ty * TILE_H, TILE_W, TILE_H);
   return {canvas, x, y, w, h};
 }
 function revealTrail(revealed, fog) {
