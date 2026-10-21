@@ -21,7 +21,7 @@ class PlanningMixin:
         for chunk in self._resident():
             for spot in self._live(chunk):
                 entry = BY_ID[spot.encounter]
-                if spot.id in self.completed or entry.kind == "fight":
+                if spot.id in self.completed or entry.kind == "fight" or self.story_spent(entry):
                     continue
                 found.append(("spot", spot.id, entry, *self._global(spot.chunk, spot.x, spot.y)))
         kinds = self.target_kinds()
@@ -46,7 +46,7 @@ class PlanningMixin:
             if not cells:
                 continue
             d = min(player_field[c] for c in cells)
-            rank = (0 if hungry and entry.feeds else 1, d, ident)
+            rank = (0 if hungry and entry.feeds else 1 if entry.placement == "story" else 2, d, ident)
             if best is None or rank < best[0]:
                 best = (rank, {"kind": kind, "id": ident, "x": gx, "y": gy})
         return best[1] if best else None

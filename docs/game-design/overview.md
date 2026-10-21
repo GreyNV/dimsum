@@ -16,6 +16,8 @@ The world build plays this as the first scene of the first life:
 2. **Stand up.** The forest appears around the anchor. The avatar rises.
 3. **The old man.** A traveller standing nearby speaks: he has witnessed the birth of a dimensional avatar. The gods saved you, but now you must worship them. Explore the world, and don't forget to pray; maybe the gods will bestow blessings. May the path be smooth; only you will know what destiny awaits.
 
+Revised 2026-10-22 (docs/design/STORY.md): before the first life the anchor tells who it is, what the avatar is, what ash buys and that the land is walled, in four short beats, before its shop appears. The old man no longer asks you to worship the gods; he names the stone and points you to his camp, the first story place.
+
 He walks off, the rest of the interface fades in and the auto-pilot begins. Prayer at shrines grants blessing power. Later lives return to the anchor with a life report, as before. The earlier "dies old, power dismissed" framing and its system report are superseded for the world build; the idle simulator text has not been changed yet.
 
 The confirmed base attributes are Strength, Endurance, Agility, Intelligence, Perception and Willpower, each with regular and dimensional experience.

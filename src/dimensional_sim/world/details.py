@@ -207,4 +207,4 @@ def journal(e):
 
 def detail(e):
     return {"character": character(e), "stats": stats(e), "multipliers": multipliers(e),
-            "rolls": rolls(e), "journal": journal(e)}
+            "rolls": rolls(e), "journal": journal(e), "story": e.story_view()}

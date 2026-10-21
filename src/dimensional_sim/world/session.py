@@ -177,6 +177,7 @@ def _expedition_view(e, control, *, debug, detail):
             "campfire": None if in_anchor or e.campfire is None or e.campfire["dimension"] != e.dimension
             else {"x": e.campfire["fire_x"], "y": e.campfire["fire_y"]},
             "prologue": e.prologue(),
+            "story": None if e.opening else e.story_view(),
             "region": _region_view(e),
             "meta": _meta_view(e),
             "shop": e.anchor_offers() if shop_open else None,

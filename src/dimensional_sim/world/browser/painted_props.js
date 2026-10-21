@@ -191,6 +191,20 @@ export const SPOT_ART = {
   split_shadow_tree: [44, 35, (c, w, h) => { for (const d of [-1, 1]) patch(c, 22 + d * 14, 32, 8, 2.4, 'rgba(22, 19, 31, .7)');
     smallTree(c, 22, h - 2, 30); sparkle(c, 9, 6, 1.4, '#e2d2ff'); sparkle(c, 35, 6, 1.4, '#e2d2ff'); }],
   mossy_stone: [36, 28, (c, w, h) => { ground(c, w, h); stone(c, 18, 17, 11, 9, {moss: true}); stone(c, 28, 23, 4, 3); tuft(c, 7, 26, 4); }],
+  // Main story places.
+  watch_post: [36, 32, (c, w, h) => { ground(c, w, h); plank(c, 4, 9, 2.6, 21, {nails: false}); plank(c, 29, 9, 2.6, 21, {nails: false});
+    fill(c, P([[1, 11], [18, 3], [35, 11], [33, 13], [3, 13]]), '#6b6a62', {sheen: .35}); plank(c, 9, 17, 18, 9, {color: '#7a6a52'});
+    fill(c, R(14, 19, 8, 5, .8), '#3b2a1c', {edge: .5}); line(c, '#e6d6aa', .6, 15, 21, 21, 21); line(c, '#e6d6aa', .6, 15, 22.6, 20, 22.6); }],
+  grey_wall: [44, 42, (c, w, h) => { for (let i = 0; i < 4; i++) glow(c, 11 + i * 7.3, 24 - (i % 2) * 6, 10, 'rgba(214, 220, 230, .4)');
+    for (let i = 0; i < 9; i++) line(c, 'rgba(238, 241, 246, .65)', .7, 3 + i * 4.6, h - 3, 5 + i * 4.6 + (i % 2 ? 2 : -2), 6 + (i % 3) * 3);
+    sparkle(c, 14, 10, 1.3, '#eef1f6'); sparkle(c, 30, 15, 1.1, '#eef1f6'); }],
+  dead_gate: [44, 42, (c, w, h) => { ground(c, w, h, 20); for (const x of [8, 36]) fill(c, P([[x - 4, h - 2], [x - 3, 9], [x, 6], [x + 3, 9], [x + 4, h - 2]], true), STONE, {sheen: .4, shade: .55});
+    block(c, 5, 4, 34, 6, {moss: true}); fill(c, E(22, 7, 4, 2.6), '#2a2620', {edge: .5});
+    for (const [x, y] of [[8, 18], [36, 18], [8, 28], [36, 28]]) rune(c, x, y, 1.3, '#9aa3ad'); }],
+  elder: [24, 42, (c, w, h) => { ground(c, w, h, 7); line(c, WOOD_DARK, 1.2, 19, h - 2, 18, 9);
+    fill(c, P([[7, h - 2], [9, 16], [12, 12], [15, 16], [17, h - 2]], true), '#6b5a44', {sheen: .35, shade: .55});
+    fill(c, E(12, 11, 3.6, 3.8), '#d9b896', {sheen: .4}); fill(c, P([[7.6, 11], [12, 4.6], [16.4, 11], [12, 9]], true), '#8a7a62', {sheen: .35});
+    line(c, '#e8dcc4', 1, 10.6, 14, 12, 18, 13.4, 14); }],
   old_carvings: [36, 28, (c, w, h) => { ground(c, w, h); block(c, 9, 5, 18, 21, {moss: true}); for (const [x, y] of [[14, 12], [22, 12], [18, 19]]) rune(c, x, y, 1.6, '#f2d27a'); glow(c, 18, 15, 9, 'rgba(242, 210, 122, .25)'); }],
   moonlit_pool: [36, 28, (c, w, h) => { pool(c, 18, 16, 14, 7.5, {moon: true, color: '#3c6f8f'}); sparkle(c, 12, 4, 1.4, '#e8f5ff'); sparkle(c, 25, 3, 1.8, '#e8f5ff'); }],
   mushroom_ring: [36, 28, (c, w, h) => { patch(c, 18, 19, 15, 6, 'rgba(160, 200, 120, .18)');

@@ -6,7 +6,7 @@ import {LABEL} from './hud.js';
 export const PAGES = Object.freeze([
   {id: 'world', label: 'World', icon: '◈'},
   {id: 'stats', label: 'Stats', icon: '▤', subtabs: [{id: 'character', label: 'Character'}, {id: 'statistics', label: 'Statistics'}]},
-  {id: 'journal', label: 'Journal', icon: '✎', subtabs: [{id: 'encounters', label: 'Encounters'}, {id: 'achievements', label: 'Achievements'}]},
+  {id: 'journal', label: 'Journal', icon: '✎', subtabs: [{id: 'encounters', label: 'Encounters'}, {id: 'story', label: 'Story'}, {id: 'achievements', label: 'Achievements'}]},
   {id: 'settings', label: 'Settings', icon: '⚙'},
 ]);
 /** Subtabs of a page ([] when it has none); the first one is the page's main view. */
@@ -234,7 +234,23 @@ function settings(state, host, prefs = {}) {
   return sections;
 }
 
-const BUILDERS = {stats: {character, statistics}, journal: {encounters, achievements: achievementsPage}};
+/** Journal · Story: what to do next, the wall, and every story step found, newest first. */
+function story(d) {
+  const s = d.story, sections = [];
+  if (!s) return sections;
+  const c = s.current;
+  if (c) sections.push({title: `Chapter ${c.chapter} · ${c.chapter_name}`, kind: 'rows', rows: [
+    ['Now', c.objective, c.waits.length ? `Waiting: ${c.waits.join('; ')}` : c.here ? 'It is close.'
+      : `Somewhere in ring${c.rings[0] === c.rings[1] ? ` ${c.rings[0]}` : `s ${c.rings[0]}-${c.rings[1]}`}`]]});
+  if (s.next) sections.push({title: 'What comes next', kind: 'rows', rows: [['Next', s.next]]});
+  if (s.wall) sections.push({title: s.wall.name, kind: 'rows', rows: [['Where', `ring ${s.wall.ring}`,
+    s.wall.open ? 'It lets you through.' : 'Nothing goes past it yet.']]});
+  for (const step of [...s.done].reverse()) sections.push({title: step.name, kind: 'lore', lines: step.lore});
+  if (!s.done.length) sections.push({title: 'Found so far', kind: 'rows', rows: [['Nothing yet', 'Story places glow gold.']]});
+  return sections;
+}
+
+const BUILDERS = {stats: {character, statistics}, journal: {encounters, story, achievements: achievementsPage}};
 
 /** {title, subtabs, sub, sections} for one page (sub defaults to the main subtab), or
  * {title, loading: true} while the detail block is on its way. */

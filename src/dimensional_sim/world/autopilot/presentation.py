@@ -153,12 +153,13 @@ class PresentationMixin:
         for chunk in self._resident():
             for spot in self._live(chunk):
                 entry = BY_ID[spot.encounter]
-                if spot.id in self.completed or entry.kind == "fight":
+                if spot.id in self.completed or entry.kind == "fight" or self.story_spent(entry):
                     continue
                 gx, gy = self._global(spot.chunk, spot.x, spot.y)
                 result.append({"id": spot.id, "encounter": spot.encounter, "name": entry.name,
                                "kind": entry.kind, "x": gx, "y": gy, "art": entry.sprite,
-                               "seal": entry.style.seal, "glint": rarity_glint(entry.rarity)})
+                               "seal": entry.style.seal, "glint": rarity_glint(entry.rarity),
+                               "story": entry.placement == "story"})
         return result
 
     def camp_view(self):

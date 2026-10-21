@@ -373,7 +373,7 @@ DROP_TABLES = {t.id: t for t in (
 #   "self": something the avatar does wherever it stands (after-location bucket or a need).
 CATEGORIES = ("forage", "gather", "observe", "climb", "drink", "meditate", "study", "scavenge",
               "pray", "fight", "hunt", "craft", "reflect", "build", "camp")
-PLACEMENTS = ("spot", "lead", "self", "site")   # site: rolled inside a landmark (SITES)
+PLACEMENTS = ("spot", "lead", "self", "site", "story")   # site: inside a landmark (SITES); story: main quest (STORY)
 NEAR = (None, "T", "^", "w")   # spot needs a tree / rock / water (river or ford) beside its cell
 TRIGGERS = (None, "after_location", "need")   # self actions only
 
@@ -482,7 +482,8 @@ OUTCOME_KINDS = ("knowledge", "recipe", "lead", "note", "reveal", "shimmer", "re
 ECOLOGY = ("wood", "berries", "game", "fungi", "eggs", "fish")   # see autopilot/ecology.py
 PLACEABLES = ("campfire",)   # things a self action sets down in the world for the rest of the life
 NEED_FLAGS = ("hurt_far",)   # hurt_far: badly hurt and far from the anchor camp and any campfire
-ACTION_ROLES = ("base", "unlockable", "discovery", "lead", "contextual", "craft", "combat", "reflection", "site")
+ACTION_ROLES = ("base", "unlockable", "discovery", "lead", "contextual", "craft", "combat", "reflection", "site",
+                "story")
 
 
 @dataclass(frozen=True)
@@ -667,7 +668,7 @@ class ActionDef:
                 groups[o.group] = groups.get(o.group, 0) + o.chance
         if any(total > 100 for total in groups.values()):
             raise ValueError(f"outcome group chances exceed 100: {self.id}")
-        if self.placement in ("spot", "lead", "site"):   # placed things are named as things, done as interactions
+        if self.placement in ("spot", "lead", "site", "story"):   # placed things are named as things, done as interactions
             if not isinstance(self.interaction, str) or not 1 <= len(self.interaction) <= 60:
                 raise ValueError(f"placed action needs an interaction: {self.id}")
         elif self.interaction is not None and (not isinstance(self.interaction, str)
@@ -1151,6 +1152,44 @@ ACTIONS = (
               builds="storage_chest", workplace="crafting_station", trigger="need", need_priority=6,
               roles=("craft", "contextual"), requirements=(Requirement("knowledge", "primitive_crafting"),)),
 )
+# ----- the main story: placed, guaranteed, permanent ----------------------------------------
+# Story actions (placement "story") never enter a bucket. The current step of STORY (the first
+# whose knowledge is not yet held) is placed once a life in the first chunk entered inside its
+# rings (autopilot/story.py); finishing it teaches the step's knowledge, which every later life
+# keeps. Story text: docs/design/STORY.md.
+STORY_ACTIONS = (
+    ActionDef("old_man_camp", "The old man's camp", "study", "story", "intelligence", 60, 5000, 1,
+              "A cold fire, a bedroll and a page pinned under a stone.",
+              "Read the old man's notes by his cold fire.", art="camp_firepit", roles=("story",),
+              outcomes=(OutcomeDef("knowledge", "story_camp"),), interaction="Reading the old man's notes"),
+    ActionDef("summoner_mark", "Summoner's mark", "study", "story", "intelligence", 90, 6000, 1,
+              "The anchor stone's circle, cut into a boulder by the road.",
+              "Traced a summoner's mark. Its arrow points away from the anchor.", art="old_carvings",
+              unlock="road_lore", roles=("story",),
+              outcomes=(OutcomeDef("knowledge", "story_mark"),), interaction="Tracing the old mark"),
+    ActionDef("watch_post", "Wall watchers' post", "study", "story", "intelligence", 120, 7000, 1,
+              "A lean-to of grey planks with a log book nailed shut in a box.",
+              "Read the wall watchers' log.", art="watch_post", roles=("story",),
+              outcomes=(OutcomeDef("knowledge", "story_watch"),), interaction="Reading the watch log"),
+    ActionDef("grey_wall", "The grey wall", "meditate", "story", "willpower", 150, 6000, 1,
+              "A wall of grey mist, cold and still, humming like the anchor stone.",
+              "Touched the grey wall. It pushed back.", art="grey_wall", roles=("story",),
+              outcomes=(OutcomeDef("knowledge", "story_wall"),), interaction="Touching the grey wall"),
+    ActionDef("old_man", "The old man", "observe", "story", "intelligence", 120, 12000, 1,
+              "The old man from the road, waiting by a fallen log.",
+              "Listened to the old man's story of the summoners.", art="elder", roles=("story",),
+              outcomes=(OutcomeDef("knowledge", "story_elder"),), interaction="Listening to the old man"),
+    ActionDef("wall_crossing", "The grey wall", "meditate", "story", "willpower", 300, 30000, 1,
+              "Stand in the mist with a strong enough will and it will learn you.",
+              "Walked into the grey wall and came out the other side.", art="grey_wall", roles=("story",),
+              requirements=(Requirement("level", "willpower", 3),),
+              outcomes=(OutcomeDef("knowledge", "wall_open"),), interaction="Walking into the wall"),
+    ActionDef("dead_gate", "Dead gate", "study", "story", "intelligence", 250, 9000, 1,
+              "A ring of standing stones taller than a house. Its keystone has three empty sockets.",
+              "Studied the dead gate beyond the wall.", art="dead_gate", roles=("story",),
+              outcomes=(OutcomeDef("knowledge", "story_gate"),), interaction="Studying the dead gate"),
+)
+ACTIONS = ACTIONS + STORY_ACTIONS
 BY_ID = {action.id: action for action in ACTIONS}
 
 
@@ -1548,6 +1587,128 @@ def validate_catalog():
 
 
 validate_catalog()
+
+
+# ----- story steps and walls ----------------------------------------------------------------
+@dataclass(frozen=True)
+class StoryStepDef:
+    """One step of the main story. `action` is its story ActionDef (placement "story"), whose
+    knowledge outcome must be `id`. `rings` is (lowest, highest) chunk ring where it may be placed;
+    a ring may be "wall" (the wall ring) or "wall+N". `objective` is the HUD line while it is the
+    current step; `lore` lines are logged when it is finished and kept on the Story page."""
+    id: str
+    chapter: int
+    action: str
+    rings: tuple
+    objective: str
+    lore: tuple
+
+    def __post_init__(self):
+        identifier(self.id, "story step ID")
+        integer(self.chapter, "story chapter", 1, 99)
+        if type(self.rings) is not tuple or len(self.rings) != 2:
+            raise ValueError(f"story rings must be a pair: {self.id}")
+        if not isinstance(self.objective, str) or not 1 <= len(self.objective) <= 90:
+            raise ValueError(f"invalid story objective: {self.id}")
+        if type(self.lore) is not tuple or not self.lore or any(
+                not isinstance(line, str) or not 1 <= len(line) <= 220 for line in self.lore):
+            raise ValueError(f"invalid story lore: {self.id}")
+
+
+@dataclass(frozen=True)
+class WallDef:
+    """The grey wall around a land: nothing enters a chunk past `ring` until the `opened_by`
+    knowledge is held (moving inward is always allowed)."""
+    dimension: str
+    name: str
+    ring: int
+    opened_by: str
+
+    def __post_init__(self):
+        identifier(self.dimension, "wall dimension")
+        integer(self.ring, "wall ring", 1, 1000)
+        identifier(self.opened_by, "wall knowledge")
+
+
+# Placed at the ring where auto-pilot lives level off (docs/design/STORY.md, measurements).
+WALLS = {w.dimension: w for w in (
+    WallDef("forest", "The grey wall", 5, "wall_open"),
+)}
+STORY_CHAPTERS = {1: "The grey wall"}
+STORY_NEXT = "Chapter 2 is not written yet: find the keystones."
+STORY = (
+    StoryStepDef("story_camp", 1, "old_man_camp", (1, 3), "Find the old man's camp along the road",
+                 ("A cold fire, a bedroll, and a page pinned under a stone: a rubbing of the anchor stone's carvings.",
+                  "Under it, in a shaky hand: \"The marks on the old road were cut by the same hands. Follow them.\"")),
+    StoryStepDef("story_mark", 1, "summoner_mark", (2, 5), "Find a summoner's mark on the old road",
+                 ("The same circle as on the anchor stone, cut deep into a boulder by the road.",
+                  "An arrow under it points away from the anchor. Every mark points the same way: out.")),
+    StoryStepDef("story_watch", 1, "watch_post", (4, "wall"), "Follow the marks out to the wall watchers' post",
+                 ("A log kept by the wall watch, the ink gone brown.",
+                  "\"Night forty. The grey wall stands where the summoners raised it. Nothing has crossed.\"",
+                  "\"The gates beyond have been dark since the keystones were taken.\"")),
+    StoryStepDef("story_wall", 1, "grey_wall", ("wall", "wall"), "Reach the grey wall at the edge of the land",
+                 ("A wall of grey mist, cold and still. It hums like the anchor stone.",
+                  "You push. It pushes back, gently, the way the anchor pulls you home.")),
+    StoryStepDef("story_elder", 1, "old_man", (1, 2), "Find the old man near the anchor and tell him",
+                 ("\"So you found the wall. Then you've earned the rest.\"",
+                  "\"This land had summoners once. They built stone gates to call help from other lands, "
+                  "and anchors to call their own back from death.\"",
+                  "\"One night the gates would not close. What came through still walks: the pale lights, "
+                  "the dead at the mounds.\"",
+                  "\"The last summoners raised the wall, pulled the keystones out of the gates and carried "
+                  "each one away to another land.\"",
+                  "\"The wall lets through only what an anchor can call back. Stand in it with a strong "
+                  "enough will and it will let you pass.\"")),
+    StoryStepDef("wall_open", 1, "wall_crossing", ("wall", "wall"), "Walk into the grey wall (needs Willpower 3)",
+                 ("The mist closes over you, colder than river water, and lets you go.",
+                  "Behind you the wall is only mist now. It will let you through from now on.")),
+    StoryStepDef("story_gate", 1, "dead_gate", ("wall+1", "wall+2"), "Find what the wall was hiding",
+                 ("A ring of standing stones taller than a house, carved with the summoning circle.",
+                  "The keystone has three sockets, all empty: one for each land the summoners walled away.",
+                  "\"Find the keystones,\" the old man said. \"Then you will see what a summoner can call.\"")),
+)
+STORY_BY_ID = {step.id: step for step in STORY}
+STORY_BY_ACTION = {step.action: step for step in STORY}
+
+
+def story_rings(step, wall_ring):
+    """(lowest, highest) ring of a story step, with "wall"/"wall+N" resolved."""
+    def resolve(value):
+        if isinstance(value, int):
+            return value
+        return wall_ring + (int(value[5:]) if value != "wall" else 0)
+    return resolve(step.rings[0]), resolve(step.rings[1])
+
+
+def _validate_story():
+    if len(STORY_BY_ID) != len(STORY) or len(STORY_BY_ACTION) != len(STORY):
+        raise ValueError("story steps and their actions must be unique")
+    for step in STORY:
+        action = BY_ID.get(step.action)
+        if action is None or action.placement != "story":
+            raise ValueError(f"story step {step.id} needs a story action")
+        if not any(o.kind == "knowledge" and o.id == step.id for o in action.outcomes):
+            raise ValueError(f"story action {action.id} must teach its step's knowledge")
+        if step.chapter not in STORY_CHAPTERS:
+            raise ValueError(f"story step {step.id} names an unknown chapter")
+        for value in step.rings:
+            if isinstance(value, int):
+                integer(value, "story ring", 1, 1000)
+            elif not (isinstance(value, str) and (value == "wall" or value.startswith("wall+") and value[5:].isdecimal())):
+                raise ValueError(f"invalid story ring: {step.id}")
+        low, high = story_rings(step, 100)
+        if low > high:
+            raise ValueError(f"story rings out of order: {step.id}")
+    for action in ACTIONS:
+        if action.placement == "story" and action.id not in STORY_BY_ACTION:
+            raise ValueError(f"story action {action.id} belongs to no story step")
+    for wall in WALLS.values():
+        if wall.opened_by not in STORY_BY_ID:
+            raise ValueError(f"nothing opens the wall in {wall.dimension}")
+
+
+_validate_story()
 
 
 # ----- journal achievements ------------------------------------------------------

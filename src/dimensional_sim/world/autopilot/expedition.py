@@ -26,11 +26,13 @@ from .planning import PlanningMixin
 from .presentation import PresentationMixin
 from .saves import SavesMixin
 from .spawning import SpawningMixin
+from .story import StoryMixin
 from .vitals import VitalsMixin
 
 
 class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, OutcomesMixin, VitalsMixin,
-                 LivesMixin, LocationsMixin, SavesMixin, PresentationMixin, CampMixin, EcologyMixin, NightMixin):
+                 LivesMixin, LocationsMixin, SavesMixin, PresentationMixin, CampMixin, EcologyMixin, NightMixin,
+                 StoryMixin):
     def __init__(self, game, *, fresh=True, opening=False):
         """fresh=True starts a new expedition (prologue first); loaders pass False.
         opening=True (new games in the browser) starts at the anchor: the player meets
@@ -196,7 +198,8 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         choices = []
         for chunk in self._resident():
             for spot in self._live(chunk):
-                if spot.id in self.completed or BY_ID[spot.encounter].category == "fight":
+                if spot.id in self.completed or BY_ID[spot.encounter].category == "fight" \
+                        or self.story_spent(BY_ID[spot.encounter]):
                     continue
                 sx, sy = self._global(spot.chunk, spot.x, spot.y)
                 distance = abs(px - sx) + abs(py - sy)
@@ -243,6 +246,7 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         if self.game.reveal_radius != radius:
             self.game.reveal_radius = radius
             self.game._reveal()
+        self._hold_wall()
         here = self.ring(self.game.player.chunk)
         if here > self.depth:
             self.depth = here

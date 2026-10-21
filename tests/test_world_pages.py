@@ -65,7 +65,7 @@ class DetailTests(unittest.TestCase):
     def test_detail_has_every_page_and_is_json(self):
         e = played(60_000)
         d = detail(e)
-        self.assertEqual(set(d), {"character", "stats", "multipliers", "rolls", "journal"})
+        self.assertEqual(set(d), {"character", "stats", "multipliers", "rolls", "journal", "story"})
         json.dumps(d)
         self.assertEqual(len(d["stats"]), 7)
         for w in d["rolls"]["windows"]:

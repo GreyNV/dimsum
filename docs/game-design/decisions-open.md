@@ -17,3 +17,4 @@ These are intentionally unresolved until the first prototype produces useful evi
 - Blessing power (from prayer): what it buys, and whether gods differ.
 - Spawn window tuning: food is capped, but boars still cause every death in samples.
 - Bandit ambush: replace the placeholder memory lines with the original text from the earlier game.
+- Story phase 2 (docs/design/STORY.md): death in the second land, keystone permanence, how summoning is learned.

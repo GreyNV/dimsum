@@ -50,6 +50,11 @@ const detail = {
     achievements: [{id: 'first_steps', name: 'First steps', description: 'Complete an action.', progress: 1, threshold: 1, done: true},
       {id: 'woodsman', name: 'Woodsman', description: 'Gather 25 times.', progress: 3, threshold: 25, done: false}]},
 };
+detail.story = {
+  current: {id: 'story_wall', chapter: 1, chapter_name: 'The grey wall', objective: 'Reach the grey wall',
+    name: 'The grey wall', rings: [6, 6], waits: ['you can safely go as far as ring 5'], here: false},
+  done: [{id: 'story_camp', chapter: 1, name: "The old man's camp", lore: ['A cold fire.', 'A page.']}],
+  next: null, wall: {name: 'The grey wall', ring: 6, open: false}};
 const state = {world_seed: '482910', expedition: {detail}};
 
 const allSections = () => PAGES.flatMap(p => (subtabsOf(p.id).length ? subtabsOf(p.id).map(t => t.id) : [null])
@@ -58,7 +63,7 @@ const allSections = () => PAGES.flatMap(p => (subtabsOf(p.id).length ? subtabsOf
 test('pages: every tab and subtab has a model, world has none, detail pages wait for data', () => {
   assert.deepEqual(PAGE_IDS, ['world', 'stats', 'journal', 'settings']);
   assert.deepEqual(subtabsOf('stats').map(t => t.id), ['character', 'statistics']);
-  assert.deepEqual(subtabsOf('journal').map(t => t.id), ['encounters', 'achievements']);
+  assert.deepEqual(subtabsOf('journal').map(t => t.id), ['encounters', 'story', 'achievements']);
   assert.equal(pageModel('world', state), null);
   assert.equal(pageModel('nope', state), null);
   for (const p of PAGES.filter(p => needsDetail(p.id))) {
@@ -70,7 +75,7 @@ test('pages: every tab and subtab has a model, world has none, detail pages wait
       assert.equal(model.sub, t.id);
       assert.ok(model.sections.length >= 1, `${p.id}/${t.id}`);
       for (const s of model.sections) {
-        assert.ok(['rows', 'table', 'progress', 'actions', 'controls', 'tree'].includes(s.kind));
+        assert.ok(['rows', 'table', 'progress', 'actions', 'controls', 'tree', 'lore'].includes(s.kind));
         assert.ok(JSON.stringify(s).length > 10);
         if (s.kind === 'table') for (const row of s.rows) assert.equal(row.length, s.head.length, `${p.id}:${s.title}`);
       }
@@ -178,4 +183,11 @@ test('stats: what opens as you grow; journal: found recipes', () => {
   assert.ok(open && JSON.stringify(open).includes('Snare lines'));
   const j = JSON.stringify(pageModel('journal', state, null, 'encounters'));
   assert.ok(j.includes('Found this life') && j.includes('Snare'), 'found recipes are listed');
+});
+
+test('journal story: the objective and why it waits, the wall, then the lore found, newest first', () => {
+  const sections = pageModel('journal', state, null, 'story').sections;
+  assert.deepEqual(sections[0].rows[0], ['Now', 'Reach the grey wall', 'Waiting: you can safely go as far as ring 5']);
+  assert.deepEqual(sections[1].rows[0], ['Where', 'ring 6', 'Nothing goes past it yet.']);
+  assert.deepEqual(sections[2], {title: "The old man's camp", kind: 'lore', lines: ['A cold fire.', 'A page.']});
 });

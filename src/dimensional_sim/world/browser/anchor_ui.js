@@ -8,8 +8,16 @@ import {shopSections} from './hud.js';
 export const ANCHOR_TEXT = Object.freeze({
   opening: {
     eyebrow: 'Before your first life', title: 'The anchor',
-    dialogue: '“I am the anchor. When your avatar falls, I pull you back here. Whatever it carries when it falls turns into dimensional ash, and ash buys what lasts: crafts you learn, camp buildings, new skills. Visit at camp, or buy Contact anchor to reach me from anywhere.”',
+    // Told one beat at a time before the shop appears; each beat sets up something the shop sells.
+    beats: [
+      '“You answered. I am an anchor, a stone the old summoners cut. I have slept under the old road for a hundred years, waiting for someone to answer.”',
+      '“Tonight a traveller was killed on that road. I have bound you to the body. Through it you can walk this land: it is your avatar. When it takes your hands, it moves quicker.”',
+      '“When it falls, I pull it back to me. What it carries burns to dimensional ash on the way. Ash is all I can hold, and with ash I keep for you what should outlast a life: crafts it learns, the camp it builds, ways to reach me.”',
+      '“This land is closed. Long ago the summoners raised a grey wall around it, and the old gates beyond it went dark. Grow strong. Find the old man who watches the road. He remembers why.”',
+    ],
+    dialogue: '“Spend ash here on what should last. Then go.”',
     hint: 'Skill 1: Contact anchor. Skill 2: Possess. Make campfire appears in nearby choices once bought.',
+    next: 'Continue',
     begin: 'Begin your first life'},
   death: {
     eyebrow: 'Between lives', title: 'The anchor holds you',
@@ -23,8 +31,17 @@ export const ANCHOR_TEXT = Object.freeze({
     begin: 'Resume this life'},
 });
 
+/** Which opening beat is showing (client only: a reload starts the story again, which is harmless). */
+let openingBeat = 0, lastExpedition = null;
+/** The beat to show for expedition `ex`, or null once the beats are done (the shop shows). */
+export function openingBeatText(ex, beat = openingBeat) {
+  const beats = ANCHOR_TEXT.opening.beats;
+  return ex?.anchor_space?.kind === 'opening' && beat < beats.length ? beats[beat] : null;
+}
+
 /** Show or hide the anchor panel for expedition `ex`; rebuilds buttons only when rows change. */
 export function renderAnchor(ex) {
+  lastExpedition = ex;
   const anchor = ex?.anchor_space, panel = $('anchor-space');
   panel.hidden = !anchor;
   document.body.classList.toggle('anchor-active', !!anchor);
@@ -35,9 +52,23 @@ export function renderAnchor(ex) {
     : anchor.waiting ? 'The next life waits for your choice.'
     : `Next life in ${Math.ceil(anchor.remaining_ms / 1000)}s.`;
   $('anchor-ash').textContent = String(ex.meta?.ash ?? 0);
-  const signature = JSON.stringify([ex.shop, ex.meta, ex.anchor_offerings, anchor.kind, anchor.at_camp, anchor.first_return]);
+  const beat = openingBeatText(ex);
+  const signature = JSON.stringify([ex.shop, ex.meta, ex.anchor_offerings, anchor.kind, anchor.at_camp, anchor.first_return, openingBeat]);
   if (panel.dataset.inventory === signature) return;
   panel.dataset.inventory = signature;
+  panel.classList.toggle('anchor-telling', !!beat);
+  for (const id of ['anchor-hint', 'anchor-shop', 'anchor-countdown']) $(id).hidden = !!beat;
+  if (beat) {   // the story first: one beat, a Continue button, no shop yet
+    $('anchor-eyebrow').textContent = ANCHOR_TEXT.opening.eyebrow;
+    $('anchor-title').textContent = ANCHOR_TEXT.opening.title;
+    $('anchor-dialogue').hidden = false;
+    $('anchor-dialogue').textContent = beat;
+    $('anchor-recipe-note').hidden = true;
+    $('anchor-offerings').hidden = true;
+    $('anchor-begin').textContent = `${ANCHOR_TEXT.opening.next} (${openingBeat + 1}/${ANCHOR_TEXT.opening.beats.length})`;
+    $('anchor-begin').dataset.kind = 'beat';
+    return;
+  }
   $('anchor-eyebrow').textContent = text.eyebrow;
   $('anchor-title').textContent = text.title;
   const dialogue = anchor.kind === 'opening' || anchor.first_return ? text.dialogue : '';
@@ -92,6 +123,11 @@ function shopButton(row) {
 /** The anchor action a click inside the shop/begin controls asks for, or null. */
 export function anchorAction(target) {
   const begin = target.closest('#anchor-begin');
+  if (begin && begin.dataset.kind === 'beat') {   // the next opening beat: nothing to ask the server
+    openingBeat += 1;
+    if (lastExpedition) renderAnchor(lastExpedition);
+    return null;
+  }
   if (begin) return {type: begin.dataset.kind === 'contact' ? 'resume' : 'begin_life'};
   const offer = target.closest('button[data-offer]')?.dataset.offer;
   if (offer) {

@@ -45,7 +45,14 @@ export function renderSection(section, {page, closed, armed}) {
   return box;
 }
 
-const SECTION_KINDS = {rows, table, progress, actions, controls, tree};
+const SECTION_KINDS = {rows, table, progress, actions, controls, tree, lore};
+
+/** Story text: one quiet paragraph per line. */
+function lore(section) {
+  const box = el('div', 'lore');
+  for (const line of section.lines) box.append(el('p', '', line));
+  return box;
+}
 
 /* Tree nodes the player opened (by node key). Pages re-render twice a second while open,
  * so the open state lives here, not in the DOM. Branches start open, encounters closed. */

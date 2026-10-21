@@ -286,3 +286,20 @@ body.context-open.active-control:not(.page-open):not(.anchor-active) .touch-cont
 .tree-badge{color:#a9a37f;font-size:11px;white-space:nowrap}.tree-tier{font-size:10px;text-transform:uppercase;letter-spacing:.5px;padding:0 4px;border:1px solid #5a5236;color:#c9b46a}
 .tier-uncommon>summary .tree-tier{color:#8fc0e6;border-color:#3d5a72}.tier-rare>summary .tree-tier{color:#e2a4f0;border-color:#6a4372}
 .tree-body{padding:2px 0 6px 12px}.tree-body .rows{margin:2px 0 4px}.tree-hidden{color:#7f7b62;font:italic 11px ui-monospace,Consolas,monospace;margin:4px 0 2px 12px}
+
+/* The main story: objective line under the location; the opening's told beats */
+.story-line{margin:0 0 6px;padding:4px 6px;border-left:2px solid #e8c45e;background:rgba(232,196,94,.08);color:#f1dfa4;font:10px/1.4 ui-monospace,Consolas,monospace}
+.story-line b{display:block;font-weight:600}
+.story-line small{display:block;color:#bfae7c}
+.anchor-telling blockquote{font-size:1.05em;line-height:1.55;min-height:6.5em}
+.lore{margin:0;padding:0 0 0 10px;border-left:2px solid #6a5a32}
+.lore p{margin:4px 0;color:#e4d6ae;font-style:italic}
+@media(max-width:700px){.story-line{font-size:9px}}
+.story-card{border-color:#c9a648}
+.story-card .eyebrow{color:#e8c45e}
+.story-card-foot{display:flex;align-items:center;gap:8px;margin-top:6px}
+.story-card-foot .dialogue-pips{flex:1}
+.story-card-foot button{font:inherit;font-size:11px;padding:3px 10px;background:#2a2416;color:#f1dfa4;border:1px solid #6a5a32;border-radius:3px;cursor:pointer}
+.story-card{bottom:118px}
+#story-card-text{margin:0;color:#f1e6c8;font:italic 15px/1.5 Georgia,serif}
+@media(max-width:720px){.story-card{bottom:150px}#story-card-text{font-size:13px}}

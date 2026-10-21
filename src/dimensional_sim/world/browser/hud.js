@@ -204,7 +204,7 @@ export class ExpeditionHud {
       const head = this.doc.createElement('b');
       head.textContent = entry.type === 'encounter'
         ? `+${entry.xp} ${LABEL[entry.attribute]}` + (entry.dim_xp ? ` (◆+${entry.dim_xp})` : '')
-        : {eat: 'Ate', rest: 'Rested', life: 'Anchor', possess: 'Possessed', night: 'Night', lore: 'The road', trade: 'Offered',
+        : {eat: 'Ate', rest: 'Rested', life: 'Anchor', possess: 'Possessed', night: 'Night', lore: 'The road', story: 'Story', trade: 'Offered',
           ambush: 'Ambush', craft: entry.xp ? `Crafted +${entry.xp} ${LABEL[entry.attribute] || ''}` : 'Crafted',
           reflect: 'Thought', purchase: 'Anchor', rebirth: 'Rebirth',
           build: entry.xp ? `Built +${entry.xp} ${LABEL[entry.attribute] || ''}` : 'Built', stow: 'Chest'}[entry.type] || entry.type;

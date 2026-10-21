@@ -100,6 +100,9 @@ class NavigationMixin:
             return False
         if (ncx, ncy) != (cx, cy) and (lx, ly, direction) not in exits.get((cx, cy), ()):
             return False
+        limit = self.game.ring_limit   # the closed grey wall
+        if limit is not None and max(abs(ncx), abs(ncy)) > max(limit, abs(cx), abs(cy)):
+            return False
         return True
 
     def _walkable(self, grid, gx, gy):
@@ -141,7 +144,8 @@ class NavigationMixin:
         into `cell` (collision and chunk exits only; live targets are checked per search).
         Same rule as _can_move with nothing blocked; cached by the resident set."""
         grid = self._grid()
-        if self._graph_cache is not None and self._graph_cache[0] is grid:
+        limit = self.game.ring_limit   # the grey wall: no crossing outward past it
+        if self._graph_cache is not None and self._graph_cache[0] is grid and self._graph_cache[2] == limit:
             return grid, self._graph_cache[1]
         w, h, chunks, exits = grid
         rev = {}
@@ -159,7 +163,7 @@ class NavigationMixin:
                 if self._can_move(grid, none, gx, gy, direction):
                     cell = (gx + dx, gy + dy)
                     rev[cell] = rev.get(cell, []) + [(gx, gy)]
-        self._graph_cache = (grid, rev)
+        self._graph_cache = (grid, rev, limit)
         return grid, rev
 
     def _field(self, goals, limit=None, until=None):
@@ -172,7 +176,7 @@ class NavigationMixin:
         grid, rev = self._graph()
         blocked = self._blocked()
         key = (tuple(sorted(goals)), tuple(sorted(grid[2])), self.game.player.chunk, blocked, limit,
-               until is not None)
+               until is not None, self.game.ring_limit)
         cached = self._field_cache.get(key)
         if cached is not None:
             dist, reach = cached

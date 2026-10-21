@@ -10,6 +10,7 @@ import {$, el, readUi, writeUi} from './dom.js';
 import {hosted, request, releaseInput} from './transport.js';
 import {drawMinimap, visibleAt} from './minimap.js';
 import {anchorAction, renderAnchor} from './anchor_ui.js';
+import {StoryCard, drawWall, renderStory} from './story_ui.js';
 import {buildTabs, journalAction, renderSection, renderSubtabs} from './page_ui.js';
 import {dayGrade, drawDayGrade, drawNight, nightAlpha, drawEdgeMarker, drawEyelids, drawPossessionAura, drawPossessionGround, drawPossessionTint, drawVignette, edgePoint, possessionGlow, tintPicture} from './scene_fx.js';
 import {drawMotes, drawReflection, drawWaterGlints, isWater} from './nature_art.js';
@@ -17,6 +18,7 @@ import {drawBlownLeaves, swayKind, windShear} from './wind.js';
 import {ACTOR_FOOT} from './sprites.js';
 import {SOUND_KEY, SoundEngine, VOLUMES, loadSettings, soundEvents, surfaceOf} from './sound.js';
 
+const storyCard = new StoryCard();
 const canvas = $('scene'), ctx = canvas.getContext('2d'), mini = $('minimap'), map = mini.getContext('2d');
 const chunks = new Map(), pictures = new Map(), controls = new Controls();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -186,6 +188,8 @@ function adopt(next, sentControl = null) {
   if (firstSnapshot && $('report').hidden) setPause(false);
   hud.update(next);
   renderAnchor(next.expedition);
+  renderStory(next.expedition);
+  storyCard.feed(next.expedition, performance.now());
   if (next.expedition?.anchor_space && contextOpen) closeContext();
   renderLocationContext(next.expedition?.location_context, contextOpen);
   if (next.expedition?.detail) lastDetail = next.expedition.detail;
@@ -514,8 +518,10 @@ function render(now) {
     const goal = state.expedition?.goal;
     // Spots sit on the ground: canopies south of them cover them too, see-through so they still read.
     const spots = (state.spots || []).filter(spot => inSight(spot.x, spot.y)).sort((a, b) => a.y - b.y);
+    const storyElder = spots.find(spot => spot.story && spot.art === 'elder');
     for (const spot of spots) {
-      drawSpot(ctx, spot, (spot.x+.5)*TILE_W, (spot.y+.5)*TILE_H, {clock: state.clock_ms, goal: !!goal && goal.x === spot.x && goal.y === spot.y});
+      drawSpot(ctx, spot, (spot.x+.5)*TILE_W, (spot.y+.5)*TILE_H, {clock: state.clock_ms, goal: !!goal && goal.x === spot.x && goal.y === spot.y,
+        markerOnly: spot === storyElder});
       repaintCanopies(spot.x, spot.y, revealed, .55);
     }
     for (const [id, f] of fadingSpots) {
@@ -530,6 +536,8 @@ function render(now) {
       .map(t=>({kind:'enemy',row:t.y,tx:t.x,ty:t.y,target:t}));
     actors.push({kind:'player',row:actor.y/TILE_H-.5,tx:state.player.x,ty:state.player.y});
     const prologue = state.expedition?.prologue ?? null;
+    if (storyElder) actors.push({kind:'elder',row:storyElder.y,tx:storyElder.x,ty:storyElder.y,alpha:1,shift:0,
+      facing:state.player.x < storyElder.x ? 'west' : 'east',talking:state.expedition?.activity?.encounter === storyElder.encounter});
     if (elder && inSight(elder.x,elder.y)) actors.push({kind:'elder',row:elder.y,tx:elder.x,ty:elder.y,alpha:1,shift:0,
       facing:state.player.x < elder.x ? 'west' : 'east',talking:prologue?.stage === 'listen'});
     else if (elderLeaving && inSight(elderLeaving.x,elderLeaving.y)) {
@@ -586,6 +594,7 @@ function render(now) {
         const at=enemyXY(t,now); drawDamage(ctx,at.x,at.y-44,hit.amount,reducedMotion?0:now-hit.at);
       }
     }
+    if (!state.expedition?.anchor_space) drawWall(ctx, state.expedition?.story?.wall, visible, TILE_W, TILE_H, now, reducedMotion);
     if(!reducedMotion && !state.expedition?.anchor_space) drawBlownLeaves(ctx,view.x-width/view.scale/2,view.y-height/view.scale/2,
       view.x+width/view.scale/2,view.y+height/view.scale/2,now,{tileW:TILE_W,tileH:TILE_H});
     if(!reducedMotion) drawMotes(ctx,view.x-width/view.scale/2,view.y-height/view.scale/2,

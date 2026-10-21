@@ -9,6 +9,7 @@ from .. import effects
 from ..catalog import ASSET_ENEMY_ACTION, BY_ID, ITEMS
 from ..encounters import EncounterSpot, chunk_spots, features, forced_spot, roll_window, spot_id
 from ..models import ChunkKey, chunk_ident
+from ..progression import dimensional_level
 from ..seeds import derive_seed
 from ..sites import condition_for
 from ..tuning import PITY_CHUNKS
@@ -94,6 +95,7 @@ class SpawningMixin:
     def _progress_fields(self):
         """Persistent permission state shared by every action context."""
         return {"unlocked": frozenset(self.unlocked), "knowledge": frozenset(self.knowledge),
+                "levels": {name: dimensional_level(xp) for name, xp in self.dimensional.items()},
                 "recipes": frozenset(self.recipes | self.life_recipes), "action_counts": self.journal["actions"],
                 "item_counts": self.journal["items"]}
 
@@ -269,6 +271,7 @@ class SpawningMixin:
                 if self.drought[category] >= PITY_CHUNKS[category] and self._pity(chunk, ident, category, taken):
                     self.drought[category] = 0
                     taken = [(s.x, s.y) for s in self._spots(chunk)]
+        self._place_story(self.game.current_chunk())
         for target in sorted(self.game.targets.values(), key=lambda t: t.id):
             if target.id.startswith(("enc:", "lead:")) or target.id in self.screened_targets:
                 continue

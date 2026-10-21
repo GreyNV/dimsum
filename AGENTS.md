@@ -45,6 +45,8 @@ world/autopilot/night.py: day/night clock (12 min, sim time) and night wolves as
   tree kinds per region are presentation (catalog.REGION_TREES -> frame chunk.trees). docs/design/DAY_NIGHT_AND_TREES.md.
 Pursuit (combat._pursue, docs/design/PURSUIT.md): a noticed enemy hunts until unloaded outside the loaded 3x3;
   the camp or a campfire frightens hunters away.
+world/autopilot/story.py: the main story (catalog STORY steps, placement="story", placed for sure, kept as knowledge) and
+  the grey wall (catalog WALLS; runtime.ring_limit + navigation refuse outward steps while closed). docs/design/STORY.md.
 world/simulate.py: `cli simulate` (seeded metrics), `cli inspect` (why a spot did/didn't appear, region provenance), `cli regions` (layout).
 Action pipeline + lifecycle states: docs/design/ACTION_SYSTEM.md; per-action audit: ACTION_ARCHITECTURE_AUDIT.md.
 Unlock/knowledge != always available: never add a permanent action button; extend buckets, outcomes or leads.

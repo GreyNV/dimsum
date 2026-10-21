@@ -442,7 +442,7 @@ def _load_life(result, data):
         raise ValueError("invalid drought counters")
     result.drought = {k: integer(v, "drought", 0, 1000) for k, v in data["drought"].items()}
     forced = data["forced"]
-    if type(forced) is not dict or any(type(v) is not list or any(e not in BY_ID or BY_ID[e].placement != "spot"
+    if type(forced) is not dict or any(type(v) is not list or any(e not in BY_ID or BY_ID[e].placement not in ("spot", "story")
                                                                   for e in v) for v in forced.values()):
         raise ValueError("invalid pity spots")
     result.forced = {k: list(v) for k, v in forced.items()}

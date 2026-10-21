@@ -66,6 +66,15 @@ export const SPOTS = Object.freeze({
     glyph: ['   **    ', '  _/ \\_  ', ' |*| |*| ', ' |_| |_| ', '/_______\\']},
   shrine_offerings: {paint: ['  y  y   ', ' ggg ggg ', ' gyg gxg ', '  g   g  '],
     glyph: ['  .  $   ', ' \\$/ \\o/ ', ' (_) (_) ', '  "   "  ']},
+  // Main story places (story actions; art keys from the catalog).
+  watch_post: {paint: [' kkkkkkk ', 'kooooooo ', 'ko xx  o ', 'ko gg  o ', ' u     u '],
+    glyph: [' /=====\\ ', '/|-----| ', '||[#]  | ', '||==   | ', ' "     " ']},
+  grey_wall: {paint: [' w w w w ', 'wwwwwwwww', 'wcwcwcwcw', 'wwwwwwwww', ' c c c c '],
+    glyph: [' ~ : ~ : ', '~:~:~:~:~', ':~`~:~`~:', '~:~:~:~:~', ' . . . . ']},
+  dead_gate: {paint: ['  ggggg  ', ' gg   gg ', ' g  x  g ', ' g     g ', 'gg     gg'],
+    glyph: ['  _____  ', ' /|   |\\ ', ' || o || ', ' ||   || ', '/_|   |_\\']},
+  elder: {paint: ['   ww   ', '  wkkw  ', '   oo   ', '  oooo  ', '  o  o  '],
+    glyph: ['   ^^   ', '  (..)  ', '   ||   ', '  /||\\  ', '  /  \\  ']},
   shrine_pillars: {paint: ['  xgx  ', '  g g  ', '  gxg  ', '  g g  ', ' ggggg '],
     glyph: ['  =o=  ', '  |@|  ', '  |o|  ', '  |@|  ', ' /___\\ ']},
   barrow_goods: {paint: ['  qqqqq  ', ' qgggggq ', 'qgu y ugq', 'qgu w ugq'],
@@ -294,22 +303,25 @@ export const spotSprite = spot => SPOTS[spot.art || spot.encounter] || FALLBACK_
 
 /** Spot at tile center (x, y); a sparkle marks it, brighter when it is the goal and in its
  * rarity color (catalog RarityDef, frame `glint`) for uncommon and rarer spots. */
-export function drawSpot(ctx, spot, x, y, {clock = 0, goal = false, fade = 0} = {}) {
+export function drawSpot(ctx, spot, x, y, {clock = 0, goal = false, fade = 0, markerOnly = false} = {}) {
   if (!spot.encounter && !spot.art) return;
   const sprite = spotSprite(spot);
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
   const painted = spotCanvas(SPOTS[spot.art || spot.encounter] ? spot.art || spot.encounter : null);
   const w = painted ? painted.lw - 2 * painted.pad : sprite.paint[0].length * CELL_W;
-  const h = painted ? painted.lh - 2 * painted.pad : sprite.paint.length * CELL_H;
+  let h = painted ? painted.lh - 2 * painted.pad : sprite.paint.length * CELL_H;
+  if (markerOnly) h = 46;   // an actor stands here (the old man): only the marker, above his head
   const left = x - w / 2, top = y + ACTOR_FOOT - 2 - h;
   ctx.save();
-  if (painted) drawPainted(ctx, painted, left, top, 1 - fade);
+  if (spot.story && !fade) drawStoryLight(ctx, x, y + ACTOR_FOOT - 4, clock);
+  if (markerOnly) { /* the actor is drawn with the others */ }
+  else if (painted) drawPainted(ctx, painted, left, top, 1 - fade);
   else paintParts(ctx, sprite, SPOT_ROLES, left, top, 1 - fade);
   ctx.globalAlpha = 1 - fade;
   if (!fade) {
     const lift = Math.round(Math.sin((clock + visualHash(spot.x, spot.y, 3) % 900) / 300) * 2);
-    const sy = top - 7 + lift, size = goal || spot.glint ? 3 : 2;
+    const sy = top - 7 + lift, size = goal || spot.glint || spot.story ? 3 : 2;
     const diamond = r => { ctx.beginPath(); ctx.moveTo(x, sy - r * 1.3); ctx.lineTo(x + r, sy); ctx.lineTo(x, sy + r * 1.3); ctx.lineTo(x - r, sy); ctx.closePath(); ctx.fill(); };
     ctx.fillStyle = OUTLINE; diamond(size + 1.2);
     ctx.fillStyle = spot.glint || (goal ? '#fff0b0' : '#d8b860'); diamond(size);
@@ -318,6 +330,23 @@ export function drawSpot(ctx, spot, x, y, {clock = 0, goal = false, fade = 0} = 
       ctx.fillStyle = spot.glint;   // a slow twinkle: four points around the sparkle
       for (const [dx, dy] of [[0, -6], [0, 6], [-6, 0], [6, 0]]) ctx.fillRect(x + dx - 1, sy + dy - 1, 2, 2);
     }
+  }
+  ctx.restore();
+}
+
+/** A story place: a soft gold pool of light on the ground and a few rising sparks, so the
+ * main story reads apart from ordinary finds. */
+export function drawStoryLight(ctx, x, y, clock = 0) {
+  ctx.save();
+  const pulse = .75 + .25 * Math.sin(clock / 520);
+  const grad = ctx.createRadialGradient(x, y, 2, x, y, 30);
+  grad.addColorStop(0, `rgba(255, 220, 120, ${.42 * pulse})`); grad.addColorStop(1, 'rgba(255, 210, 110, 0)');
+  ctx.fillStyle = grad; ctx.beginPath(); ctx.ellipse(x, y, 30, 13, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ffe9a8';
+  for (let i = 0; i < 4; i++) {
+    const t = ((clock / 1400 + i / 4) % 1);
+    ctx.globalAlpha = (1 - t) * .8;
+    ctx.fillRect(x - 12 + i * 8 + Math.sin(t * 6 + i) * 2, y - 6 - t * 34, 1.5, 1.5);
   }
   ctx.restore();
 }

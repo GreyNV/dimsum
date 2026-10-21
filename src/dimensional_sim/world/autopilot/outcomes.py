@@ -91,7 +91,8 @@ class OutcomesMixin:
             if outcome.kind == "knowledge":
                 if outcome.id not in self.knowledge:
                     self.knowledge.add(outcome.id)
-                    self._entry("lore", f"Learned {outcome.id.replace('_', ' ')}.", encounter=action.id)
+                    if action.placement != "story":   # a story step logs its own lore (story.py)
+                        self._entry("lore", f"Learned {outcome.id.replace('_', ' ')}.", encounter=action.id)
             elif outcome.kind == "recipe":
                 if outcome.id not in self.recipes and outcome.id not in self.life_recipes:
                     self.life_recipes.add(outcome.id)
@@ -193,6 +194,8 @@ class OutcomesMixin:
                 self._entry("lore", f"Mastery {earned} of {entry.name} earned at {count} completions.",
                             encounter=entry.id)
         self._apply_outcomes(entry, ident)
+        if entry.placement == "story":
+            self._story_done(entry)
         if ident.startswith("lead:"):
             self._record_leads([lead for lead in self.leads if lead["id"] == ident], "completed")
             self.leads = [lead for lead in self.leads if lead["id"] != ident]

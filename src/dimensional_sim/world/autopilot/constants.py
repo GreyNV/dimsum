@@ -62,14 +62,14 @@ MEMORIES = (
 )
 # The old man who finds the newborn avatar beside the road.
 ELDER_LINES = (
-    "Why... I don't believe it. I witnessed the birth of an avatar - a dimensional avatar.",
-    "The bandits left you for dead. The gods saved you, but now you have to worship them.",
-    "Something old looks out through your eyes. When it takes your hands, let it - you will be quicker for it.",
-    "Mind your hunger, too. This forest feeds only the lucky.",
-    "May the path be smooth. Only you will know what destiny awaits.",
+    "Why... I don't believe it. The bandits left you dead, and you stand up an avatar. The old stone woke.",
+    "Folk will say the gods spared you. It wasn't the gods. That stone is an anchor, and it has bound you.",
+    "Something answered it, and it looks out through your eyes. When it takes your hands, let it.",
+    "Mind your hunger. This forest feeds only the lucky.",
+    "I keep a camp out along the road. Find it when you can. There's a lot you should know about the wall.",
 )
 LOG_TYPES = ("encounter", "eat", "rest", "life", "possess", "night", "lore", "trade", "ambush",
-             "craft", "reflect", "purchase", "rebirth", "build", "stow")
+             "craft", "reflect", "purchase", "rebirth", "build", "stow", "story")
 TASK_TYPES = ("perform", "pause", "rest", *SELF_ACTIONS, *PROLOGUE_MS)
 SCHEMA_VERSION = 21                # 21: reusable possession charge; 20: hunting enemies; 19: night watch tick; 18: contact + possession; 17: recipes found this life; 16: shimmer cells; 15: ecological pressure
 
