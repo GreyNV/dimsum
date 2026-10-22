@@ -40,7 +40,8 @@ class EcologyMixin:
 
     def rarity_percent(self, key):
         """Spot tier odds percent in chunk `key`: raised in a shimmering region cell."""
-        return SHIMMER_RARITY_PERCENT if cell_of(key) in self.shimmer else 100
+        shimmer = SHIMMER_RARITY_PERCENT if cell_of(key) in self.shimmer else 100
+        return shimmer * self.location_rarity_percent(key) // 100
 
     def worked_here(self):
         """Ecologies thinned out around the avatar, most worked first (presentation)."""

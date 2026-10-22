@@ -2,6 +2,8 @@
 what they do and why they can't be used."""
 import unittest
 
+from dimensional_sim.world.catalog import location_thresholds
+
 from dimensional_sim.world.catalog import BY_ID
 from dimensional_sim.world.models import chunk_ident
 from dimensional_sim.world.runtime import InputCommand
@@ -87,8 +89,9 @@ class SkillSlotTests(unittest.TestCase):
         from camp_fixture import away
         away(e)
         fire = snapshot(e.game, expedition=e)["expedition"]["location_context"]["actions"][0]
-        self.assertTrue(any("25 ash" in reason for reason in fire["reasons"]))
-        e.unlocked.add("campfire")
+        self.assertTrue(any("mastered" in reason for reason in fire["reasons"]), fire["reasons"])
+        here = e.location_here()
+        e.location_done[here] = location_thresholds(here)[1]
         fire = snapshot(e.game, expedition=e)["expedition"]["location_context"]["actions"][0]
         self.assertTrue(any("needs 3" in reason for reason in fire["reasons"]))
         e.inventory = {"stick": 3}

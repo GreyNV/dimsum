@@ -3,7 +3,7 @@ import unittest
 from dataclasses import replace
 
 from dimensional_sim.world.actions import (
-    Context, bucket, bucket_reasons, context_reasons, explain, known, weight,
+    Context, bucket, bucket_reasons, context_reasons, explain, known, reasons_against, weight,
 )
 from dimensional_sim.world.catalog import BY_ID, Requirement
 from dimensional_sim.world.catalog import REGIONS
@@ -35,8 +35,7 @@ class ActionAvailabilityTests(unittest.TestCase):
         ctx = Context(region="old_road", region_def=pinned)
         self.assertEqual(weight(BY_ID["fallen_branches"], ctx), 0)
         self.assertNotIn("fallen_branches", [spot.encounter for spot in chunk_spots(chunk, context=ctx)])
-        suppressed = replace(ctx, journal_favor={"bramble_berries": "suppress"},
-                             mastery={"bramble_berries": 2})
+        suppressed = replace(ctx, focus="searching")   # a camp focused on searching: berries weigh less
         self.assertLess(weight(BY_ID["bramble_berries"], suppressed),
                         weight(BY_ID["bramble_berries"], ctx))
         self.assertEqual(chunk_spots(chunk, context=suppressed), chunk_spots(chunk, context=suppressed))
@@ -109,26 +108,28 @@ class ActionAvailabilityTests(unittest.TestCase):
         self.assertEqual(bucket_reasons(lead, Context(placement="lead",
                                                       active_leads=frozenset({"bramble_berries"}))), [])
         existing = Context(placement="lead", active_leads=frozenset({"bramble_berries"}),
-                           mastery={"bramble_berries": 3},
+                           focus="searching",
                            journal_disabled=frozenset({"bramble_berries"}))
         self.assertEqual(bucket_reasons(lead, existing), [],
                          "future-roll controls must not erase a lead already created")
 
-    def test_journal_controls_require_mastery_and_modify_future_rolls(self):
-        action = BY_ID["bramble_berries"]
+    def test_a_camp_focus_shapes_spot_rolls_in_its_area_and_never_removes_an_action(self):
+        action = BY_ID["bramble_berries"]   # forage: a resource
         base = Context(region="bramble_thicket")
         base_weight = weight(action, base)
-        premature_favor = replace(base, mastery={action.id: 1}, journal_favor={action.id: "favor"})
-        self.assertEqual(weight(action, premature_favor), base_weight)
-        favored = replace(base, mastery={action.id: 2}, journal_favor={action.id: "favor"})
-        suppressed = replace(base, mastery={action.id: 2}, journal_favor={action.id: "suppress"})
-        self.assertGreater(weight(action, favored), base_weight)
-        self.assertLess(weight(action, suppressed), base_weight)
-        self.assertIn(action.id, [entry.id for entry, _ in bucket(favored)])
-        # Suppression changes odds without removing a valid action.
-        one_weight = replace(action, weight=1)
-        low_odds = Context(mastery={action.id: 2}, journal_favor={action.id: "suppress"})
-        self.assertEqual(weight(one_weight, low_odds), 1)
+        self.assertEqual(weight(action, replace(base, focus="all")), base_weight)
+        self.assertGreater(weight(action, replace(base, focus="resources")), base_weight)
+        self.assertLess(weight(action, replace(base, focus="searching")), base_weight)
+        self.assertIn(action.id, [entry.id for entry, _ in bucket(replace(base, focus="searching"))])
+        self.assertEqual(weight(BY_ID["bramble_boar"], replace(base, focus="searching")),
+                         weight(BY_ID["bramble_boar"], base), "danger is never focused away")
+        self.assertEqual(weight(replace(action, weight=1), Context(focus="searching")), 1)
+
+    def test_making_camp_needs_a_mastered_place(self):
+        fire = BY_ID["make_campfire"]
+        ctx = Context(placement="self", inventory={"stick": 3})
+        self.assertIn("only where the place is mastered", reasons_against(fire, replace(ctx, location_grade=1)))
+        self.assertNotIn("only where the place is mastered", reasons_against(fire, replace(ctx, location_grade=2)))
 
 
 if __name__ == "__main__":
@@ -148,8 +149,7 @@ class LifecycleStateTests(unittest.TestCase):
         self.assertEqual(explain("gnarled_tree", Context(**climb, spawned=True, admitted=True))["state"],
                          "AVAILABLE")
         self.assertEqual(explain("fallen_branches", Context(region="still_glade"))["state"], "BUCKET_INELIGIBLE")
-        suppressed = Context(region="old_road", mastery={"fallen_branches": 2},
-                             journal_favor={"fallen_branches": "suppress"})
+        suppressed = Context(region="old_road", focus="searching")
         self.assertEqual(explain("fallen_branches", suppressed)["state"], "BUCKET_ELIGIBLE")
         lead = Context(placement="lead", knowledge=frozenset({"deer_sign"}))
         self.assertEqual(explain("hunt_deer", lead)["state"], "BUCKET_INELIGIBLE")

@@ -42,6 +42,9 @@ class PlanningMixin:
                 continue
             if max(abs(gx // w), abs(gy // h)) > limit:
                 continue   # beyond the frontier this life can survive
+            if not (hungry and entry.feeds) and not self.camp_wants(
+                    entry, ChunkKey(self.game.player.chunk.dimension, gx // w, gy // h)):
+                continue   # camped: only what the camp's place and focus are about
             cells = [c for c in self._approach(gx, gy) if c in player_field]
             if not cells:
                 continue
@@ -57,7 +60,9 @@ class PlanningMixin:
         if self._camp_work_ready():   # a full pack may be stowed at the camp
             return self._home_goal()
         player_field = self._field({self._player()})
-        return self._best_candidate(player_field) or self._wander_goal(player_field)
+        best = self._best_candidate(player_field)
+        self._camp_idle(best is not None)
+        return best or self._wander_goal(player_field)
 
     def _wander_goal(self, reachable):
         w, h = self._dims()
@@ -66,7 +71,8 @@ class PlanningMixin:
         by_chunk = {}
         for (gx, gy), d in reachable.items():
             ck = (gx // w, gy // h)
-            if ck != (center.x, center.y) and max(abs(ck[0]), abs(ck[1])) <= max(frontier, self.ring(center)):
+            if ck != (center.x, center.y) and max(abs(ck[0]), abs(ck[1])) <= max(frontier, self.ring(center)) \
+                    and (not self.camp_holds() or self.in_camp_area(ChunkKey(center.dimension, *ck))):
                 by_chunk.setdefault(ck, []).append((d, gx, gy))
         if not by_chunk:
             return None

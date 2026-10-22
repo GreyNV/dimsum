@@ -39,6 +39,7 @@ class BiomeDef:
     hp_per_ring: int = 1
     ring_cap: int = 40             # rings past this add no more danger
     spot_rarity_per_ring: int = 0  # percent added to non-common spot tier odds per ring (0 = depth-neutral)
+    mastery_percent: int = 100     # how much work its locations need to be mastered (later lands need more)
 
     def __post_init__(self):
         identifier(self.id, "biome ID")
@@ -47,11 +48,12 @@ class BiomeDef:
         integer(self.danger_den, "danger growth denominator", 1, 100)
         integer(self.hp_per_ring, "enemy HP per ring", 0, 100)
         integer(self.ring_cap, "danger ring cap", 0, 1000)
+        integer(self.mastery_percent, "location mastery percent", 10, 10000)
 
 
 BIOMES = {b.id: b for b in (
     BiomeDef("dark_forest", "Dark forest"),
-    BiomeDef("ash_plain", "Ash plain"),        # terrain exists (assets.py); no content yet
+    BiomeDef("ash_plain", "Ash plain", mastery_percent=300),   # terrain exists (assets.py); no content yet
 )}
 
 
@@ -474,14 +476,15 @@ ASSET_ENEMY_ACTION = "bramble_boar"
 DEATH_CAUSES = ("starvation", "exhaustion", "return", *dict.fromkeys(e.cause for e in ENEMIES.values()))
 
 
-REQUIREMENT_KINDS = ("action_count", "item_count", "knowledge", "unlock", "recipe", "level", "gear")
+REQUIREMENT_KINDS = ("action_count", "item_count", "knowledge", "unlock", "recipe", "level", "gear",
+                     "location")   # location: the place the avatar stands in has this mastery grade (id "here")
 OUTCOME_KINDS = ("knowledge", "recipe", "lead", "note", "reveal", "shimmer", "renew")
 # note: only logs its text (a trail gone cold); reveal: shows the map around the avatar;
 # shimmer: rare spots roll more often in this region cell for the rest of the life (id = what caused it);
 # renew: the region cell's exhaustion of one ECOLOGY (the id) is lifted
 ECOLOGY = ("wood", "berries", "game", "fungi", "eggs", "fish")   # see autopilot/ecology.py
 PLACEABLES = ("campfire",)   # things a self action sets down in the world for the rest of the life
-NEED_FLAGS = ("hurt_far",)   # hurt_far: badly hurt and far from the anchor camp and any campfire
+NEED_FLAGS = ("camp_wanted",)   # camp_wanted: badly hurt far from any rest place, or in a mastered place whose focus calls for camp
 ACTION_ROLES = ("base", "unlockable", "discovery", "lead", "contextual", "craft", "combat", "reflection", "site",
                 "story")
 
@@ -1136,11 +1139,11 @@ ACTIONS = (
               effect="axe", trigger="need", need_priority=4, recipe="axe", workplace="crafting_station",
               roles=("craft", "contextual"), requirements=(Requirement("knowledge", "primitive_crafting"),)),
     # --- buildings at the anchor camp --------------------------------------------------
-    ActionDef("make_campfire", "Make a campfire", "camp", "self", "building", 15, 4000, 1,
-              "A ring of stones and a few sticks. Resting by it heals like resting at the anchor camp.",
-              "Made a campfire and sat down by it.", cost=(("stick", 3),), places="campfire",
-              trigger="need", need_flag="hurt_far", need_priority=1, roles=("contextual", "unlockable"),
-              unlock="campfire", interaction="Making a campfire"),
+    ActionDef("make_campfire", "Make camp", "camp", "self", "building", 15, 4000, 1,
+              "A campfire in a mastered place: rest by it as at the anchor, and the avatar keeps to this place.",
+              "Made camp by a small fire.", cost=(("stick", 3),), places="campfire",
+              trigger="need", need_flag="camp_wanted", need_priority=1, roles=("contextual",),
+              requirements=(Requirement("location", "here", 2),), interaction="Making a campfire"),
     ActionDef("build_station", "Build a crafting station", "build", "self", "building", 120, 20000, 1,
               "A workbench by the anchor stone: crafting becomes possible at the camp.",
               "Built a crafting station beside the anchor stone.", cost=(("stick", 12), ("boar_hide", 2)),
@@ -1195,7 +1198,7 @@ BY_ID = {action.id: action for action in ACTIONS}
 
 # ----- unlocks, mastery ---------------------------------------------------
 CURRENCIES = ("ash",)
-ABILITIES = ("contact_anchor", "make_campfire")   # engine capabilities an unlock can grant
+ABILITIES = ("contact_anchor",)   # engine capabilities an unlock can grant
 
 
 @dataclass(frozen=True)
@@ -1232,8 +1235,6 @@ class UnlockDef:
 UNLOCKS = {u.id: u for u in (
     UnlockDef("return_anchor", "Contact anchor", "Reach the anchor mid-life to spend ash, then resume where you left off. Recharges in 5 minutes.",
               "ash", 10, ability="contact_anchor"),
-    UnlockDef("campfire", "Campfire", "A skill: set down a fire anywhere (3 sticks) and rest beside it to heal as at camp.",
-              "ash", 25, ability="make_campfire"),
     # Opened by dimensional levels (permanent), roughly in the order a soul grows into them.
     UnlockDef("climbing", "Climbing", "Gnarled trees appear: bird eggs and sticks.", level=("strength", 2)),
     UnlockDef("scavenging", "Scavenging", "Abandoned camps and logging camps open up: sticks, rope, nails.",
@@ -1264,17 +1265,6 @@ for _a in ACTIONS:
     if _a.placement == "spot" and _a.category not in _grouped:
         raise ValueError(f"journal group missing for category {_a.category} ({_a.id})")
 
-# Completing the same encounter earns mastery at tenfold lifetime milestones.
-MASTERY_MAX = 3
-MASTERY_THRESHOLDS = (10, 100, 1000)
-JOURNAL_FAVOR_MASTERY = 2
-JOURNAL_GUARANTEE_MASTERY = 3
-JOURNAL_FAVOR_PERCENT = 150
-JOURNAL_SUPPRESS_PERCENT = 50
-
-
-def mastery_level(completions):
-    return sum(completions >= threshold for threshold in MASTERY_THRESHOLDS)
 
 
 # Actions removed from the catalog that older pinned world saves may still name (region
@@ -1588,6 +1578,93 @@ def validate_catalog():
 
 validate_catalog()
 
+
+# ----- locations: kinds of place the avatar masters (docs/design/LOCATIONS.md) ----------------
+@dataclass(frozen=True)
+class LocationDef:
+    """A kind of place. Every encounter finished in it (wild spots and leads by the region of their
+    chunk, landmark encounters by their site) adds to its lifetime mastery. At CAMP_GRADE a camp
+    (the campfire) can be made there, and the camp holds the avatar to that place with a focus."""
+    id: str
+    name: str
+    kind: str          # "region" or "site"
+    members: tuple     # RegionDef ids or SiteDef ids
+    text: str
+
+    def __post_init__(self):
+        identifier(self.id, "location ID")
+        if self.kind not in ("region", "site") or type(self.members) is not tuple or not self.members:
+            raise ValueError(f"invalid location: {self.id}")
+        if not 1 <= len(self.name) <= 40 or not 1 <= len(self.text) <= 120:
+            raise ValueError(f"invalid location text: {self.id}")
+
+
+LOCATIONS = {loc.id: loc for loc in (
+    LocationDef("old_road", "The Old Road", "region", ("old_road",), "The road through the woods, and the open ground beside it."),
+    LocationDef("deep_woods", "Deep Woods", "region", ("deep_woods",), "Old pines and big trees: wood, game and mushrooms."),
+    LocationDef("bramble_thicket", "Bramble Thicket", "region", ("bramble_thicket",), "Thorns and berries, and the boars that eat them."),
+    LocationDef("still_glade", "Still Glade", "region", ("still_glade",), "Springs, pools and deer in the quiet clearings."),
+    LocationDef("abandoned_camp", "Abandoned camp", "site", ("abandoned_camp",), "Tents left standing, and whatever their owners dropped."),
+    LocationDef("logging_camp", "Logging camp", "site", ("woodcutters_clearing",), "Log piles and a tool shed the loggers never came back for."),
+    LocationDef("hunters_cabin", "Hunter's cabin", "site", ("hunters_lodge",), "Racks, traps and trophies of a hunter long gone."),
+    LocationDef("old_ruins", "Old ruins", "site", ("fallen_watchtower", "ruined_shrine", "old_barrow"),
+                "Fallen watchtowers, ruined shrines and burial mounds, and what guards them."),
+)}
+LOCATION_OF_REGION = {m: loc.id for loc in LOCATIONS.values() if loc.kind == "region" for m in loc.members}
+LOCATION_OF_SITE = {m: loc.id for loc in LOCATIONS.values() if loc.kind == "site" for m in loc.members}
+# Lifetime encounters finished there for each grade, at a biome's mastery_percent of 100. Measured
+# (seed 3, 5 h, before locations): about 100 encounters an hour on the Old Road, 25-90 in the other
+# regions, 5-10 at landmarks - so the Old Road is mastered in the first life or two, landmarks in hours.
+# 1 Known: the Journal shows what is found there; 2 Mastered: you or the avatar can make camp there;
+# 3 Deep: rare and uncommon finds there are LOCATION_DEEP_RARITY_PERCENT as likely.
+LOCATION_GRADE_NAMES = ("New", "Known", "Mastered", "Deep")
+LOCATION_GRADES = {"region": (10, 40, 400), "site": (3, 12, 60)}
+CAMP_GRADE = 2
+LOCATION_DEEP_RARITY_PERCENT = 150
+# A camp's focus: what the avatar goes after while camped there. Spot rolls in the camp's area
+# weigh focus categories FOCUS_PERCENT and the rest UNFOCUS_PERCENT. Choosing any focus for a
+# mastered place also tells the avatar to make camp there on its own; with none chosen only the
+# player makes camp there (while possessing it), and the camp then goes after everything.
+LOCATION_FOCUS = {
+    "all": ("Everything", None),
+    "resources": ("Resources", ("forage", "gather", "hunt", "drink", "climb")),
+    "searching": ("Searching", ("observe", "study", "scavenge", "meditate", "pray")),
+}
+FOCUS_PERCENT = 200
+UNFOCUS_PERCENT = 50
+CAMP_IDLE_MS = 120_000   # nothing to do in the camp's area this long: the avatar breaks camp
+
+
+def location_thresholds(location_id):
+    """Encounters needed for grades 1-3 of a location (its biome's mastery_percent applied)."""
+    loc = LOCATIONS[location_id]
+    biome = REGIONS[loc.members[0]].biome if loc.kind == "region" else SITES[loc.members[0]].biome
+    percent = BIOMES[biome].mastery_percent
+    return tuple(-(-need * percent // 100) for need in LOCATION_GRADES[loc.kind])
+
+
+def location_grade(location_id, done):
+    return sum(done >= need for need in location_thresholds(location_id))
+
+
+def _validate_locations():
+    if set(LOCATION_OF_REGION) != set(REGIONS):
+        raise ValueError("every region needs exactly one location")
+    if set(LOCATION_OF_SITE) != set(SITES):
+        raise ValueError("every site needs exactly one location")
+    for loc in LOCATIONS.values():
+        table = REGIONS if loc.kind == "region" else SITES
+        if any(m not in table for m in loc.members):
+            raise ValueError(f"location {loc.id} names an unknown {loc.kind}")
+    for grades in LOCATION_GRADES.values():
+        if list(grades) != sorted(set(grades)) or len(LOCATION_GRADE_NAMES) != len(grades) + 1:
+            raise ValueError("location grades must rise")
+    for _, cats in LOCATION_FOCUS.values():
+        if cats is not None and any(c not in CATEGORIES for c in cats):
+            raise ValueError("location focus names an unknown category")
+
+
+_validate_locations()
 
 # ----- story steps and walls ----------------------------------------------------------------
 @dataclass(frozen=True)

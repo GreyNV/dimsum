@@ -27,12 +27,15 @@ from .presentation import PresentationMixin
 from .saves import SavesMixin
 from .spawning import SpawningMixin
 from .story import StoryMixin
+from .places import PlacesMixin
 from .vitals import VitalsMixin
 
 
+FIRE_ACTION = next(a for a in BY_ID.values() if a.places == "campfire")   # making camp
+
 class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, OutcomesMixin, VitalsMixin,
                  LivesMixin, LocationsMixin, SavesMixin, PresentationMixin, CampMixin, EcologyMixin, NightMixin,
-                 StoryMixin):
+                 StoryMixin, PlacesMixin):
     def __init__(self, game, *, fresh=True, opening=False):
         """fresh=True starts a new expedition (prologue first); loaders pass False.
         opening=True (new games in the browser) starts at the anchor: the player meets
@@ -50,9 +53,8 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.ash = 0
         self.converted = {}       # item id -> lifetime count converted into ash
         self.unlocked = set()      # UnlockDef ids: opened by dimensional level or bought with ash
-        self.mastery = {}          # action id -> level earned from lifetime completions
-        self.journal_guarantee = None  # one selected mastered encounter, placed once per life
-        self.journal_guarantee_region = None
+        self.location_done = {}    # location id -> lifetime encounters finished there (autopilot/places.py)
+        self.location_focus = {}   # location id -> what camps there go after (catalog.LOCATION_FOCUS; "all" omitted)
         self.contact_ready_ms = 0  # contact-the-anchor cooldown deadline (simulation time)
         self.contact = False       # the anchor is contacted mid-life: the world waits (not saved)
         self.possess_end_ms = None # possession (manual control) ends at this simulation time
@@ -65,7 +67,6 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.recipes = set()       # recipes kept with ash: known in every later life
         self.life_recipes = set()  # recipes found this life (lost at rebirth unless kept)
         self.journal_disabled = set()
-        self.journal_favor = {}
         self.journal = new_journal()   # lifetime counts (journal.py); persists across lives
         self.bound_buildings = set()   # BuildingDef ids made permanent with ash
         self.chest = {}                # storage chest contents (item -> count); kept only if bound
@@ -109,8 +110,8 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.goal = None   # {"kind": "spot"|"target"|"wander"|"home", "id", "x", "y"}
         self.stats = {key: 0 for key in STAT_KEYS}
         self.drought = {category: 0 for category in PITY_CHUNKS}
-        self.forced = {}   # chunk id -> [encounter id, ...] pity spots, in order
-        self.guarantee_used = False
+        self.forced = {}   # chunk id -> [encounter id, ...] pity and story spots, in order
+        self.camp = None   # this life's camp (places.py): {"location", "dimension", "cx", "cy", "idle_since"}
         self.buildings = set(self.bound_buildings)   # what stands at the camp this life
         self.pressure = {}     # "dimension:cx:cy:ecology" -> harvests this life (autopilot/ecology.py)
         self.shimmer = set()   # "dimension:cx:cy" region cells where rare spots roll more often this life
@@ -436,6 +437,9 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         if self.task:
             return self._task_step(cap, allow_prayer)
         if self.goal is None:
+            if self._wants_camp() and self.can_make_fire():   # a mastered place with a focus: camp here
+                self._start_self(FIRE_ACTION)
+                return 0
             self.goal = self._choose_goal()
             if self.goal is None:
                 self._run(cap, InputCommand())

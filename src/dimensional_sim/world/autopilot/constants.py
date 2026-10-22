@@ -71,7 +71,7 @@ ELDER_LINES = (
 LOG_TYPES = ("encounter", "eat", "rest", "life", "possess", "night", "lore", "trade", "ambush",
              "craft", "reflect", "purchase", "rebirth", "build", "stow", "story")
 TASK_TYPES = ("perform", "pause", "rest", *SELF_ACTIONS, *PROLOGUE_MS)
-SCHEMA_VERSION = 21                # 21: reusable possession charge; 20: hunting enemies; 19: night watch tick; 18: contact + possession; 17: recipes found this life; 16: shimmer cells; 15: ecological pressure
+SCHEMA_VERSION = 22                # 22: location mastery and camps; 21: reusable possession charge; 20: hunting enemies; 19: night watch tick; 18: contact + possession; 17: recipes found this life; 16: shimmer cells; 15: ecological pressure
 
 
 def attribute_table():

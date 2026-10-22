@@ -47,6 +47,9 @@ Pursuit (combat._pursue, docs/design/PURSUIT.md): a noticed enemy hunts until un
   the camp or a campfire frightens hunters away.
 world/autopilot/story.py: the main story (catalog STORY steps, placement="story", placed for sure, kept as knowledge) and
   the grey wall (catalog WALLS; runtime.ring_limit + navigation refuse outward steps while closed). docs/design/STORY.md.
+world/autopilot/places.py: location mastery (catalog LOCATIONS: regions and kinds of landmark) and camps: the
+  campfire is "Make camp", allowed only in a mastered place; a camp holds the avatar to that place and its focus.
+  docs/design/LOCATIONS.md. (Per-encounter mastery and Journal favor/guarantee are gone, schema 22.)
 world/simulate.py: `cli simulate` (seeded metrics), `cli inspect` (why a spot did/didn't appear, region provenance), `cli regions` (layout).
 Action pipeline + lifecycle states: docs/design/ACTION_SYSTEM.md; per-action audit: ACTION_ARCHITECTURE_AUDIT.md.
 Unlock/knowledge != always available: never add a permanent action button; extend buckets, outcomes or leads.

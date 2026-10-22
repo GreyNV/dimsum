@@ -175,11 +175,11 @@ class LocationChoiceTests(unittest.TestCase):
         self.assertEqual(e.ash, before_death + expected_final)
         self.assertEqual(e.converted["stick"], 3)
 
-    def test_wilderness_default_is_campfire(self):
+    def test_wilderness_default_is_making_camp(self):
         e = away(fresh())
         context = e.location_context()
         self.assertEqual(context["kind"], "wild")
-        self.assertEqual(context["actions"][0]["name"], "Make a campfire")
+        self.assertEqual(context["actions"][0]["name"], "Make camp")
 
     def test_browser_session_opens_anchor_and_offers_a_stack(self):
         e = to_camp(fresh())

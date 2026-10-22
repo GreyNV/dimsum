@@ -49,14 +49,14 @@ class PresentationMixin:
                                       "landmark": region.landmark} if region else None,
                 "knowledge": sorted(self.knowledge), "recipes": sorted(self.recipes),
                 "pressure_here": self.pressure_percents(key),
-                "journal": {"disabled": sorted(self.journal_disabled), "favor": dict(self.journal_favor)},
+                "journal": {"disabled": sorted(self.journal_disabled), "focus": dict(self.location_focus)},
                 "states": [{"id": r["id"], "state": r["state"], "admitted": r["id"] in admitted}
                            for r in (explain(a.id, replace(spot_ctx, spawned=a.id in rolled)
                                              if a.placement == "spot" else
                                              lead_ctx if a.placement == "lead" else
                                              self.self_context("need" if a.trigger == "need" else "after_location"))
                                      for a in BY_ID.values())],
-                "unlocked": sorted(self.unlocked), "mastery": dict(self.mastery),
+                "unlocked": sorted(self.unlocked), "places": dict(self.location_done), "camp": dict(self.camp) if self.camp else None, "camping": self.camping(),
                 "spot_bucket": describe_bucket(spot_ctx),
                 "spot_explanations": [explain(a.id, replace(spot_ctx, spawned=a.id in rolled,
                                                           admitted=(a.id in admitted) if screened else None))

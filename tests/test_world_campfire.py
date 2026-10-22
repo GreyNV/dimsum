@@ -2,6 +2,8 @@
 import json
 import unittest
 
+from dimensional_sim.world.catalog import CAMP_GRADE, location_thresholds
+
 from dimensional_sim.world.autopilot import REST_REGEN, RETREAT_BELOW, Expedition
 from dimensional_sim.world.autopilot import saves
 from dimensional_sim.world.catalog import BY_ID
@@ -14,11 +16,9 @@ from save_fixture import v17
 POINT = 1_000_000
 
 
-def far_and_hurt(seed=482910, sticks=5, bought=True):
-    """An avatar two chunks from the anchor, badly hurt, fed, carrying sticks (campfire bought)."""
+def far_and_hurt(seed=482910, sticks=5, mastered=True):
+    """An avatar two chunks from the anchor, badly hurt, fed, carrying sticks, in a mastered place."""
     e = expedition(seed)
-    if bought:
-        e.unlocked.add("campfire")
     while e.in_prologue:
         e.advance(500)
     key = ChunkKey(e.dimension, 2, 0)
@@ -33,6 +33,9 @@ def far_and_hurt(seed=482910, sticks=5, bought=True):
     e.hunger = 100 * POINT  # food should wait until it restores its full hunger value
     e.inventory = {"stick": sticks, "wild_berries": 2}
     e.goal = e.task = None
+    if mastered:
+        here = e.location_here()
+        e.location_done[here] = location_thresholds(here)[CAMP_GRADE - 1]
     return e
 
 
@@ -45,9 +48,9 @@ class CampfireTests(unittest.TestCase):
         self.assertNotEqual(getattr(healthy._need_action(), "id", None), "make_campfire")
         poor = far_and_hurt(sticks=2)
         self.assertNotEqual(getattr(poor._need_action(), "id", None), "make_campfire", "a fire costs 3 sticks")
-        unbought = far_and_hurt(bought=False)
-        self.assertNotEqual(getattr(unbought._need_action(), "id", None), "make_campfire", "the skill is bought with ash")
-        self.assertFalse(unbought.can_make_fire())
+        unknown = far_and_hurt(mastered=False)
+        self.assertNotEqual(getattr(unknown._need_action(), "id", None), "make_campfire", "camp needs a mastered place")
+        self.assertFalse(unknown.can_make_fire())
 
     def test_the_fire_heals_like_the_anchor_and_the_autopilot_rests_there(self):
         e = far_and_hurt()
@@ -111,7 +114,7 @@ class CampfireTests(unittest.TestCase):
         view = snapshot(e.game, expedition=e)["expedition"]
         self.assertEqual(view["skill_slots"][1]["name"], "Possess")
         self.assertEqual(view["skill_slots"][2]["name"], "Dimensional Shift")
-        self.assertEqual(view["location_context"]["actions"][0]["name"], "Make a campfire")
+        self.assertEqual(view["location_context"]["actions"][0]["name"], "Make camp")
         self.assertFalse(view["location_context"]["actions"][0]["reasons"])
         self.assertIsNone(view["campfire"])
         e._start_self(BY_ID["make_campfire"])

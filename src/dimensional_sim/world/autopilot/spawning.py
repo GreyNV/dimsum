@@ -51,36 +51,13 @@ class SpawningMixin:
         seed = derive_seed(self.game.world.world_seed, "spawn-window", self.life)
         bonus = effects.total({}, "food_window_bonus")   # gear is not worn yet
         self.budget = {entry.id: limit for entry in BY_ID.values()
-                       if (limit := roll_window(entry, seed, self.mastery.get(entry.id, 0),
+                       if (limit := roll_window(entry, seed, 0,
                                                 bonus if entry.feeds else 0)) is not None}
         self.spawned = {ident: 0 for ident in self.budget}   # total admitted this life
         self.admitted = {}             # spot / asset-target id -> encounter id, this life
         self.screened_chunks = set()   # chunk ids whose spots were screened
         self.spot_plans = {}           # chunk id -> immutable runtime roll, saved for replay
         self.screened_targets = set()  # asset-spawned target ids screened
-        self.guarantee_used = False
-
-    def _guarantee(self, chunk, chunk_id, taken, context):
-        """One extra mastered encounter per life, outside the normal 0..3 draws."""
-        ident = self.journal_guarantee
-        if (self.guarantee_used or ident is None or self._camp_excludes(chunk, ident)
-                or context.region != self.journal_guarantee_region
-                or bucket_reasons(BY_ID[ident], context)):
-            return None
-        index = len(self.forced.get(chunk_id, ()))
-        spot = forced_spot(chunk, ident, index, taken=taken)
-        if spot is None:
-            return None  # try the next eligible chunk
-        self.forced.setdefault(chunk_id, []).append(ident)
-        self.guarantee_used = True
-        self.admitted[spot.id] = ident  # guarantee bypasses the at-once spawn window
-        if ident in self.budget:
-            self.spawned[ident] += 1
-        category = BY_ID[ident].spawn_category
-        if category:
-            self.stats[f"{category}_spots"] += 1
-        self._note(chunk_id, spot.id, ident, "mastery guarantee")
-        return spot
 
     def region(self, key):
         """RegionDef of a chunk key (pure: world seed, biome, coordinates)."""
@@ -113,8 +90,8 @@ class SpawningMixin:
                        ring=self.ring(key), pressure=self.pressure_percents(key), rarity_percent=self.rarity_percent(key),
                        gear=frozenset(i for i in self.inventory if ITEMS[i].kind == "gear"),
                        features=features(chunk.asset) if chunk is not None else frozenset(),
-                       mastery=self.mastery, journal_disabled=frozenset(self.journal_disabled),
-                       journal_favor=self.journal_favor, **self._progress_fields())
+                       journal_disabled=frozenset(self.journal_disabled),
+                       focus=self.camp_focus() if self.in_camp_area(key) else None, **self._progress_fields())
 
     def lead_context(self, key):
         """Context for temporary leads around chunk `key`."""
@@ -130,12 +107,12 @@ class SpawningMixin:
         if camp:
             for item, count in self.chest.items():
                 stock[item] = stock.get(item, 0) + count
-        return Context(placement="self", mastery=self.mastery, inventory=stock,
+        return Context(placement="self", inventory=stock, location_grade=self.grade_of(self.location_here()),
                        at_camp=camp, buildings=frozenset(self.buildings),
                        gear=frozenset(i for i in self.inventory if ITEMS[i].kind == "gear"),
                        hunger=self.hunger // POINT, food_carried=self._has_food(),
                        trigger=trigger, visible=visible,
-                       flags=frozenset({"hurt_far"} if self._hurt_far() else ()),
+                       flags=frozenset({"camp_wanted"} if self._hurt_far() or self._wants_camp() else ()),
                        **self._progress_fields())
 
     def _spots(self, chunk):
@@ -259,10 +236,6 @@ class SpawningMixin:
                 if self._admit(spot.id, spot.encounter, ident):
                     admitted.add(BY_ID[spot.encounter].spawn_category)
             taken = [(s.x, s.y) for s in spots]
-            guaranteed = self._guarantee(chunk, ident, taken, context)
-            if guaranteed is not None:
-                taken.append((guaranteed.x, guaranteed.y))
-                admitted.add(BY_ID[guaranteed.encounter].spawn_category)
             for category in PITY_CHUNKS:
                 if category in admitted:
                     self.drought[category] = 0

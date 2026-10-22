@@ -6,7 +6,7 @@ it. Older saves are migrated one schema at a time by MIGRATIONS; schemas 1-5
 (before the hosted build) are no longer supported and are rejected.
 """
 from ..catalog import RECIPE_KEEP_COST, DEATH_CAUSES, UNLOCKS
-from ..catalog import ATTRIBUTES, BUILDINGS, BY_ID, ITEMS, REGIONS
+from ..catalog import ATTRIBUTES, BUILDINGS, BY_ID, ITEMS, LOCATION_FOCUS, LOCATIONS, REGIONS
 from ..encounters import ENCOUNTER_VERSION
 from ..equipment import validate_equipped
 from ..journal import new_journal, validate_journal
@@ -38,7 +38,11 @@ V19_SAVE_FIELDS = V18_SAVE_FIELDS + V19_FIELDS
 V20_FIELDS = ("hunting",)          # schema 20: enemies hunting or fleeing the avatar
 V20_SAVE_FIELDS = V19_SAVE_FIELDS + V20_FIELDS
 V21_FIELDS = ("possess_charge", "possess_charge_at_ms", "possess_drain_duration_ms")
-SAVE_FIELDS = tuple(f for f in V20_SAVE_FIELDS if f != "possess_ready_ms") + V21_FIELDS
+V21_SAVE_FIELDS = tuple(f for f in V20_SAVE_FIELDS if f != "possess_ready_ms") + V21_FIELDS
+# Schema 22: encounter mastery and Journal favor/guarantee became location mastery and camp focus.
+V22_DROPPED = ("mastery", "journal_favor", "journal_guarantee", "journal_guarantee_region", "guarantee_used")
+V22_FIELDS = ("location_done", "location_focus", "camp")
+SAVE_FIELDS = tuple(f for f in V21_SAVE_FIELDS if f not in V22_DROPPED) + V22_FIELDS
 V7_FIELDS = ("journal",)                       # added by schema 7
 V8_FIELDS = ("equipped", "knowledge", "recipes", "journal_disabled", "journal_favor",
              "leads", "lead_history")         # added by schema 8
@@ -255,9 +259,28 @@ def _from_v20(data):
             "possess_charge_at_ms": total, "possess_drain_duration_ms": drain}
 
 
+def _from_v21(data):
+    """Encounter counts become location mastery: each encounter's lifetime count goes to the place
+    it most likely happened (its landmark, or the region that favours it most). The campfire skill
+    is gone (a mastered place allows camp); schema 18 had granted it to every older save, so there
+    is no telling who paid for it, and nothing is refunded."""
+    fields(data, V21_SAVE_FIELDS)
+    from .places import home_location
+    done = {}
+    actions = data["journal"].get("actions", {}) if type(data["journal"]) is dict else {}
+    for ident, count in sorted(actions.items()):
+        location = home_location(ident)
+        if location is not None and type(count) is int and count > 0:
+            done[location] = done.get(location, 0) + count
+    unlocked = [u for u in data["unlocked"] if u != "campfire"]
+    return {**{k: v for k, v in data.items() if k not in V22_DROPPED}, "schema_version": 22,
+            "unlocked": unlocked,
+            "location_done": done, "location_focus": {}, "camp": None}
+
+
 MIGRATIONS = {6: _from_v6, 7: _from_v7, 8: _from_v8, 9: _from_v9, 10: _from_v10, 11: _from_v11, 12: _from_v12,
               13: _from_v13, 14: _from_v14, 15: _from_v15, 16: _from_v16,
-              17: _from_v17, 18: _from_v18, 19: _from_v19, 20: _from_v20}
+              17: _from_v17, 18: _from_v18, 19: _from_v19, 20: _from_v20, 21: _from_v21}
 
 
 def upgrade(data):
@@ -326,11 +349,15 @@ def _load_progress(result, data):
                 type(value) is not str for value in values):
             raise ValueError(f"invalid {name}")
         setattr(result, name, set(values))
-    if type(data["journal_favor"]) is not dict or any(
-            key not in BY_ID or value not in ("favor", "suppress")
-            for key, value in data["journal_favor"].items()):
-        raise ValueError("invalid journal favor")
-    result.journal_favor = dict(data["journal_favor"])
+    done = data["location_done"]
+    if type(done) is not dict or any(key not in LOCATIONS for key in done):
+        raise ValueError("invalid location mastery")
+    result.location_done = {k: integer(v, "location mastery", 0) for k, v in done.items()}
+    focus = data["location_focus"]
+    if type(focus) is not dict or any(key not in LOCATIONS or value not in LOCATION_FOCUS
+                                      for key, value in focus.items()):
+        raise ValueError("invalid location focus")
+    result.location_focus = dict(focus)
     if any(key not in BY_ID or BY_ID[key].placement != "spot" for key in result.journal_disabled):
         raise ValueError("invalid journal disabled")
     for name in ("leads", "lead_history"):
@@ -416,25 +443,19 @@ def _load_life(result, data):
             or len(set(data["unlocked"])) != len(data["unlocked"]):
         raise ValueError("invalid unlocks")
     result.unlocked = set(data["unlocked"])
-    if type(data["mastery"]) is not dict or any(a not in BY_ID or BY_ID[a].placement != "spot"
-                                                  for a in data["mastery"]):
-        raise ValueError("invalid mastery")
-    result.mastery = {a: integer(v, "mastery", 1, 3) for a, v in data["mastery"].items()}
-    selected = data["journal_guarantee"]
-    if selected is not None and (selected not in BY_ID or BY_ID[selected].placement != "spot"
-                                 or result.mastery.get(selected, 0) < 3):
-        raise ValueError("invalid journal guarantee")
-    result.journal_guarantee = selected
-    region = data["journal_guarantee_region"]
-    if (selected is None and region is not None) or (selected is not None and
-            (region not in REGIONS or REGIONS[region].biome not in BY_ID[selected].biomes or
-             (BY_ID[selected].regions is not None and region not in BY_ID[selected].regions) or
-             REGIONS[region].multiplier(selected) == 0)):
-        raise ValueError("invalid journal guarantee region")
-    result.journal_guarantee_region = region
-    if type(data["guarantee_used"]) is not bool:
-        raise ValueError("invalid guarantee state")
-    result.guarantee_used = data["guarantee_used"]
+    camp = data["camp"]
+    if camp is not None:
+        fields(camp, ("location", "dimension", "cx", "cy", "idle_since", "left"))
+        if type(camp["left"]) is not bool:
+            raise ValueError("invalid camp")
+        if camp["location"] not in LOCATIONS:
+            raise ValueError("invalid camp")
+        identifier(camp["dimension"], "camp dimension")
+        integer(camp["cx"], "camp x"); integer(camp["cy"], "camp y")
+        if camp["idle_since"] is not None:
+            integer(camp["idle_since"], "camp idle", 0, result.total_ms)
+        camp = dict(camp)
+    result.camp = camp
     if type(data["stats"]) is not dict or set(data["stats"]) != set(STAT_KEYS):
         raise ValueError("invalid life stats")
     result.stats = {k: integer(v, "life stat", 0) for k, v in data["stats"].items()}
@@ -565,7 +586,9 @@ class SavesMixin:
                 "inventory": [[item, count] for item, count in self.inventory.items()],
                 "equipped": dict(self.equipped), "knowledge": sorted(self.knowledge),
                 "recipes": sorted(self.recipes), "life_recipes": sorted(self.life_recipes), "journal_disabled": sorted(self.journal_disabled),
-                "journal_favor": dict(sorted(self.journal_favor.items())),
+                "location_done": dict(sorted(self.location_done.items())),
+                "location_focus": dict(sorted(self.location_focus.items())),
+                "camp": dict(self.camp) if self.camp else None,
                 "leads": [dict(lead) for lead in self.leads],
                 "lead_history": [dict(lead) for lead in self.lead_history],
                 "hunger": self.hunger, "health": self.health,
@@ -577,7 +600,6 @@ class SavesMixin:
                 "campfire": dict(self.campfire) if self.campfire else None,
                 "pressure": dict(sorted(self.pressure.items())), "shimmer": sorted(self.shimmer),
                 "unlocked": sorted(self.unlocked),
-                "mastery": dict(sorted(self.mastery.items())),
                 "stats": dict(self.stats), "drought": dict(self.drought), "journal": validate_journal(self.journal),
                 "forced": {k: list(v) for k, v in sorted(self.forced.items())},
                 "spot_plans": {k: [list(row) for row in v] for k, v in sorted(self.spot_plans.items())},
@@ -587,9 +609,6 @@ class SavesMixin:
                 "possess_drain_duration_ms": self.possess_drain_duration_ms,
                 "opening": self.opening, "night_tick": self.night_tick,
                 "hunting": {k: dict(v) for k, v in sorted(self.hunting.items())},
-                "journal_guarantee": self.journal_guarantee,
-                "journal_guarantee_region": self.journal_guarantee_region,
-                "guarantee_used": self.guarantee_used,
                 "monster_ms": self.monster_ms,
                 "budget": dict(self.budget), "spawned": dict(self.spawned),
                 "admitted": sorted([i, e] for i, e in self.admitted.items()), "screened_chunks": sorted(self.screened_chunks),

@@ -6,8 +6,8 @@ Self recipes use the same eligibility rules but need no terrain roll.
 """
 from dataclasses import dataclass, field
 
-from .catalog import (ACTIONS, BIOMES, BUILDINGS, BY_ID, FALLBACK_RARITY, ITEMS, JOURNAL_FAVOR_MASTERY,
-                      JOURNAL_FAVOR_PERCENT, JOURNAL_SUPPRESS_PERCENT, RARITY, REGIONS, UNLOCKS)
+from .catalog import (ACTIONS, BIOMES, BUILDINGS, BY_ID, FALLBACK_RARITY, FOCUS_PERCENT, ITEMS, LOCATION_FOCUS,
+                      LOCATION_GRADE_NAMES, RARITY, REGIONS, UNFOCUS_PERCENT, UNLOCKS)
 from .drops import SCALE, tier_chances
 
 
@@ -27,9 +27,9 @@ class Context:
     action_counts: dict = field(default_factory=dict)
     item_counts: dict = field(default_factory=dict)
     levels: dict = field(default_factory=dict)
-    mastery: dict = field(default_factory=dict)
     journal_disabled: frozenset = frozenset()
-    journal_favor: dict = field(default_factory=dict)
+    location_grade: int = 0           # mastery grade of the place the avatar stands in (Requirement "location")
+    focus: str | None = None          # a camp's focus here (catalog.LOCATION_FOCUS); None = no camp holds this place
     inventory: dict = field(default_factory=dict)
     gear: frozenset = frozenset()
     at_camp: bool = False             # standing in the anchor camp (workplace actions)
@@ -87,6 +87,8 @@ def _requirement_reasons(action, ctx):
             result.append(f"needs recipe {req.id}")
         elif req.kind == "gear" and req.id not in ctx.gear:
             result.append(f"needs a {req.id.replace('_', ' ')} carried")
+        elif req.kind == "location" and ctx.location_grade < req.count:
+            result.append(f"only where the place is {LOCATION_GRADE_NAMES[req.count].lower()}")
     return result
 
 
@@ -165,7 +167,7 @@ def reasons_against(action, ctx):
 
 
 def weight(action, ctx):
-    """Effective pool weight, after region and earned Journal influence."""
+    """Effective pool weight, after region, a camp's focus and worked ground."""
     if reasons_against(action, ctx):
         return 0
     weight_value = action.weight
@@ -173,7 +175,7 @@ def weight(action, ctx):
         region = ctx.region_def or REGIONS.get(ctx.region)
         if region is not None:
             weight_value = weight_value * region.multiplier(action.id) // 100
-    percent = _journal_percent(action, ctx)
+    percent = _focus_percent(action, ctx)
     if percent is not None:
         weight_value = max(1, weight_value * percent // 100)
     if action.placement == "spot" and action.ecology in ctx.pressure:
@@ -181,12 +183,14 @@ def weight(action, ctx):
     return weight_value
 
 
-def _journal_percent(action, ctx):
-    """Earned Journal odds for a spot action (favor/suppress at mastery 2), or None."""
-    if action.placement != "spot" or ctx.mastery.get(action.id, 0) < JOURNAL_FAVOR_MASTERY:
+def _focus_percent(action, ctx):
+    """A camp's focus over spot rolls in its area: focus categories up, the rest down, or None."""
+    if action.placement != "spot" or ctx.focus is None or action.category == "fight":
         return None
-    choice = ctx.journal_favor.get(action.id)
-    return {"favor": JOURNAL_FAVOR_PERCENT, "suppress": JOURNAL_SUPPRESS_PERCENT}.get(choice)
+    categories = LOCATION_FOCUS[ctx.focus][1]
+    if categories is None:
+        return None
+    return FOCUS_PERCENT if action.category in categories else UNFOCUS_PERCENT
 
 
 def bucket(ctx):
@@ -308,9 +312,9 @@ def _weight_modifiers(action, ctx):
     region = ctx.region_def or REGIONS.get(ctx.region)
     if action.placement == "spot" and region is not None:
         modifiers.append({"source": "region", "percent": region.multiplier(action.id)})
-    percent = _journal_percent(action, ctx)
+    percent = _focus_percent(action, ctx)
     if percent is not None:
-        modifiers.append({"source": "journal", "percent": percent})
+        modifiers.append({"source": "camp focus", "percent": percent})
     return modifiers
 
 

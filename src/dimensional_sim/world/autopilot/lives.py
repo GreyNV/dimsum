@@ -1,6 +1,5 @@
 """Death, the anchor interlude between lives, anchor purchases and rebirth."""
 from .. import economy
-from ..catalog import JOURNAL_FAVOR_MASTERY, JOURNAL_GUARANTEE_MASTERY, REGIONS
 from ..catalog import ATTRIBUTES, BUILDINGS, BY_ID, ENEMIES, ITEMS, UNLOCKS
 from ..generation import GENERATOR_VERSION
 from ..journal import record_death, validate_journal
@@ -170,12 +169,11 @@ class LivesMixin:
     # Anchor action type -> exact fields it carries (session.validate_input checks the type).
     ANCHOR_FIELDS = {"contact": {"type"}, "resume": {"type"}, "possess": {"type"}, "release": {"type"},
                      "campfire": {"type"}, "begin_life": {"type"}, "unlock": {"type", "id"},
-                     "bind": {"type", "id"}, "keep": {"type", "id"}, "journal_favor": {"type", "id", "mode"},
-                     "journal_guarantee": {"type", "id", "region"},
+                     "bind": {"type", "id"}, "keep": {"type", "id"}, "location_focus": {"type", "id", "mode"},
                      "location": {"type", "id"}, "offer": {"type", "id", "count"}}
     ANCHOR_ACTIONS = tuple(ANCHOR_FIELDS)
-    # Journal controls work at any time (Journal page): they shape chunks not yet rolled.
-    JOURNAL_ACTIONS = ("journal_favor", "journal_guarantee")
+    # Journal controls work at any time (Journal > Places): a camp's focus there.
+    JOURNAL_ACTIONS = ("location_focus",)
 
     def anchor_offers(self):
         """Anchor shop rows (economy.offers) for the UI and debugging."""
@@ -219,41 +217,17 @@ class LivesMixin:
             raise ValueError("anchor action requires the anchor space")
         if kind == "begin_life":
             self._begin_life()
-        elif kind == "journal_favor":
-            self._journal_favor(action["id"], action["mode"])
-        elif kind == "journal_guarantee":
-            ident, region = action["id"], action["region"]
-            if ident is not None and (ident not in BY_ID or BY_ID[ident].placement != "spot"
-                                      or self.mastery.get(ident, 0) < JOURNAL_GUARANTEE_MASTERY):
-                raise ValueError("guarantee requires spot mastery 3")
-            if (ident is None and region is not None) or (ident is not None and
-                    (region not in REGIONS or REGIONS[region].biome not in BY_ID[ident].biomes or
-                     (BY_ID[ident].regions is not None and region not in BY_ID[ident].regions) or
-                     REGIONS[region].multiplier(ident) == 0)):
-                raise ValueError("guarantee requires an eligible region")
-            self.journal_guarantee = ident
-            self.journal_guarantee_region = region
+        elif kind == "location_focus":
+            if type(action["id"]) is not str or type(action["mode"]) is not str:
+                raise ValueError("invalid focus")
+            self.set_location_focus(action["id"], action["mode"])
             self.anchor_wait = self.anchor_wait or self.anchor_ms is not None
-            self._entry("purchase", f"Journal guarantee: {BY_ID[ident].name} in {REGIONS[region].name}."
-                        if ident else "Journal guarantee cleared.")
         else:
             if type(action["id"]) is not str:
                 raise ValueError("invalid anchor action")
             row = economy.purchase(self, kind, action["id"])
             self.anchor_wait = self.anchor_ms is not None
             self._entry("purchase", f"Bought {row['name']} for {row['cost']} {row['currency']}.")
-
-    def _journal_favor(self, ident, mode):
-        if ident not in BY_ID or BY_ID[ident].placement != "spot" \
-                or mode not in ("normal", "favor", "suppress") \
-                or self.mastery.get(ident, 0) < JOURNAL_FAVOR_MASTERY:
-            raise ValueError("journal odds require spot mastery 2")
-        if mode == "normal":
-            self.journal_favor.pop(ident, None)
-        else:
-            self.journal_favor[ident] = mode
-        self.anchor_wait = self.anchor_wait or self.anchor_ms is not None
-        self._entry("purchase", f"Journal: {BY_ID[ident].name} odds set to {mode}.")
 
     def _begin_life(self):
         self.anchor_ms = None
@@ -270,7 +244,7 @@ class LivesMixin:
     @classmethod
     def rebuilt(cls, old, game):
         """A brand-new world (`game`) for an existing expedition: keeps everything that
-        persists across lives (dimensional XP, ash, unlocks, mastery, journal,
+        persists across lives (dimensional XP, ash, unlocks, location mastery, journal,
         cooldowns) and starts the next life there,
         without the prologue. Used by the hosted "New world, keep progress" button."""
         new = cls(game, fresh=False)
@@ -290,11 +264,10 @@ class LivesMixin:
             new.converted[item] = new.converted.get(item, 0) + count
         new.bound_buildings = set(old.bound_buildings)   # bound buildings follow the anchor
         new.chest = dict(old.chest) if old._chest_bound() else {}
-        new.unlocked, new.mastery = set(old.unlocked), dict(old.mastery)
-        new.journal_guarantee = old.journal_guarantee
-        new.journal_guarantee_region = old.journal_guarantee_region
+        new.unlocked = set(old.unlocked)
+        new.location_done, new.location_focus = dict(old.location_done), dict(old.location_focus)
         new.knowledge, new.recipes = set(old.knowledge), set(old.recipes)
-        new.journal_disabled, new.journal_favor = set(old.journal_disabled), dict(old.journal_favor)
+        new.journal_disabled = set(old.journal_disabled)
         new.journal = validate_journal(old.journal)
         new.log = [dict(e) for e in old.log]
         new.life = old.life + 1

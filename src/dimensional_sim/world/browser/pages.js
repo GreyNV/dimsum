@@ -6,7 +6,7 @@ import {LABEL} from './hud.js';
 export const PAGES = Object.freeze([
   {id: 'world', label: 'World', icon: '◈'},
   {id: 'stats', label: 'Stats', icon: '▤', subtabs: [{id: 'character', label: 'Character'}, {id: 'statistics', label: 'Statistics'}]},
-  {id: 'journal', label: 'Journal', icon: '✎', subtabs: [{id: 'encounters', label: 'Encounters'}, {id: 'story', label: 'Story'}, {id: 'achievements', label: 'Achievements'}]},
+  {id: 'journal', label: 'Journal', icon: '✎', subtabs: [{id: 'places', label: 'Places'}, {id: 'encounters', label: 'Encounters'}, {id: 'story', label: 'Story'}, {id: 'achievements', label: 'Achievements'}]},
   {id: 'settings', label: 'Settings', icon: '⚙'},
 ]);
 /** Subtabs of a page ([] when it has none); the first one is the page's main view. */
@@ -122,50 +122,33 @@ function statistics(d) {
   ];
 }
 
-/** Journal controls for one encounter: favor/suppress (grade 2) and a regional guarantee (grade 3). */
-function encounterButtons(e, guarantee) {
-  return [
-    ...(e.can_favor ? [{label: `Odds: ${e.mode}`, note: 'select to cycle normal → favor → suppress',
-      action: {type: 'journal_favor', id: e.id, mode: nextMode(e.mode)}, on: e.mode !== 'normal'}] : []),
-    ...(e.can_guarantee ? e.regions.map(region => {
-      const chosen = guarantee.id === e.id && guarantee.region === region.id;
-      return {label: chosen ? `Guaranteed in ${region.name}` : `Guarantee in ${region.name}`,
-        note: chosen ? (guarantee.used ? 'placed this life; select to clear' : 'select to clear') : 'once per life',
-        action: {type: 'journal_guarantee', id: chosen ? null : e.id, region: chosen ? null : region.id}, on: chosen};
-    }) : []),
-  ];
-}
-
-const pips = level => '●'.repeat(level) + '○'.repeat(Math.max(0, 3 - level));
-/** One encounter as a tree node: a one-line summary, details on opening, and the trails it opens. */
-function encounterNode(n, byId, guarantee) {
+/** One encounter as a tree node: a one-line summary, details on opening, and the trails it opens.
+ * Where and how often it appears shows once a place it belongs to is known (location grade 1). */
+function encounterNode(n, byId) {
   const e = byId[n.id];
   if (!e) return null;
   const spot = e.placement === 'spot';
-  const where = e.placement === 'site' ? `at ${e.site.toLowerCase()}` : e.placement === 'lead' ? 'follows another encounter'
-    : e.regions.map(x => x.name).join(', ') || '-';
-  const count = e.next ? `${e.done} / ${e.next}` : String(e.done);
+  const where = e.placement === 'lead' ? 'follows another encounter' : (e.places || []).join(', ') || '-';
+  const done = String(e.done);
   return {key: `enc:${e.id}`, label: e.name, tier: e.rarity,
-    badge: spot ? `${pips(e.level)} ${count}` : count === '0' ? 'not done yet' : `done ${count}`,
+    badge: done === '0' ? 'not done yet' : `done ${done}`,
     rows: [
       ['What you do', e.interaction || '-'],
       ['Where', where],
-      ...(spot ? [['Grade', `${e.level} / 3`, e.next ? `next at ${e.next} completions` : 'mastered'],
-        ['Chance here', e.level >= 1 ? `${pct(e.current_share_permille)} per spot` : '?', 'grade 1 reveals it']] : []),
+      ...(spot ? [['Chance here', e.level >= 1 ? `${pct(e.current_share_permille)} per spot` : '?', 'shown once its place is known']] : []),
       ...(spot && e.level >= 1 ? [['Seen this life', e.locations.length ? `${e.locations.length} place${e.locations.length > 1 ? 's' : ''}` : 'none yet']] : []),
     ],
-    buttons: encounterButtons(e, guarantee),
+    buttons: [],
     hidden: n.hidden,
-    children: n.children.map(c => encounterNode(c, byId, guarantee)).filter(Boolean)};
+    children: n.children.map(c => encounterNode(c, byId)).filter(Boolean)};
 }
 
 /** The encounter tree: branches by what you do, landmarks by site, trails under their source. */
 export function encounterTree(j) {
   const byId = Object.fromEntries((j.encounters || []).map(e => [e.id, e]));
-  const guarantee = j.guarantee || {};
   const branch = g => ({key: `group:${g.id}`, label: g.title, group: true, badge: `${g.known} / ${g.total} found`,
     rows: [], buttons: [], hidden: 0,
-    children: [...(g.groups || []).map(branch), ...g.nodes.map(n => encounterNode(n, byId, guarantee)).filter(Boolean)]});
+    children: [...(g.groups || []).map(branch), ...g.nodes.map(n => encounterNode(n, byId)).filter(Boolean)]});
   return (j.tree || []).map(branch);
 }
 
@@ -180,7 +163,7 @@ function encounters(d) {
       [t.name, `${pct(t.permille)} per spot`, `${t.actions} eligible`]),
       note: 'Each spot rolls rare first, then uncommon; a miss falls through to common. Unlocking more of a tier raises its odds.'},
     {title: 'Encounters', kind: 'tree', items: encounterTree(j), empty: 'No encounters known yet.',
-      note: 'Open a branch, then an encounter. ●●○ is its grade: grade 1 reveals where and how often it appears, grade 2 lets you favor or suppress it, grade 3 guarantees it in a chosen region. Trails hang under what opens them; "not found yet" keeps their names secret.'},
+      note: 'Open a branch, then an encounter. Where and how often it appears shows once its place is known (Journal › Places). Trails hang under what opens them; "not found yet" keeps their names secret.'},
     {title: 'Action durations', kind: 'table', head: ['Action', 'Attribute', 'Speed', 'Base', 'Now'],
       rows: m.actions.map(a => [a.name, label(a.attribute), times(a.speed), seconds(a.base_ms), seconds(a.effective_ms)]),
       note: 'Only actions you know are listed. Prayer and reflection take fixed time.'},
@@ -195,6 +178,32 @@ function encounters(d) {
     {title: 'Recent leads', kind: 'table', head: ['Lead', 'Source', 'State'],
       rows: j.lead_history.slice(-10).reverse().map(row => [title(row.action), row.source, row.status]),
       empty: 'No leads yet.'},
+  ];
+}
+
+/** Journal · Places (main): each kind of place and its mastery; a camp's focus in mastered places. */
+function places(d) {
+  const p = d.journal.places;
+  if (!p) return [];
+  const rows = p.places.filter(row => row.done || row.here);
+  const modes = p.focus_modes;
+  return [
+    {title: 'Places', kind: 'progress', items: rows.map(row => ({
+      label: `${row.name} · ${row.grade_name}${row.here ? ' · you are here' : ''}`,
+      value: row.next ? row.done : 1, max: row.next || 1,
+      text: row.next ? `${row.done} / ${row.next}` : `${row.done} · deep`,
+      note: row.can_camp ? `${row.text} Camp can be made here.` : `${row.text} Camp from ${row.camp_at} encounters.`,
+      done: !row.next})),
+      empty: 'Finish encounters to come to know the places they are in.',
+      note: 'Every encounter finished in a place counts for it, in every life. Known: the Journal shows what is found there. Mastered: you or the avatar can make camp there, and the avatar keeps to that place while the camp stands. Deep: rare finds come more often.'},
+    {title: 'Camp focus', kind: 'controls', items: p.places.filter(row => row.can_camp).map(row => ({
+      label: row.name, buttons: modes.map(m => ({label: m.name, on: row.focus === m.id,
+        note: m.id === 'all' ? 'go after everything in the place' : `go after ${m.name.toLowerCase()} first`,
+        action: {type: 'location_focus', id: row.id, mode: m.id}}))})),
+      empty: 'Master a place to choose what camps there focus on.'},
+    {title: 'This life', kind: 'rows', rows: [
+      ['Camp', p.camp ? `${p.camp.name} · ${p.camp.focus}` : 'none', p.camp ? 'the avatar keeps to this place' : 'made in a mastered place'],
+    ]},
   ];
 }
 
@@ -216,7 +225,7 @@ function settings(state, host, prefs = {}) {
   const sections = [{title: 'This world', kind: 'rows', rows}];
   if (host) sections.push({title: 'Reset', kind: 'actions', buttons: [
     {id: 'rebuild', label: 'New world, keep progress',
-      note: 'A fresh forest from a new seed. Keeps dimensional levels, ash, unlocks, mastery and the journal; starts the next life.'},
+      note: 'A fresh forest from a new seed. Keeps dimensional levels, ash, unlocks, places mastered and the journal; starts the next life.'},
     {id: 'wipe', label: 'Start over', danger: true,
       note: 'Deletes this browser\'s save and its cloud link, then starts a brand-new game. Copy your save code first if you may want it back.'},
   ]});
@@ -250,7 +259,7 @@ function story(d) {
   return sections;
 }
 
-const BUILDERS = {stats: {character, statistics}, journal: {encounters, story, achievements: achievementsPage}};
+const BUILDERS = {stats: {character, statistics}, journal: {places, encounters, story, achievements: achievementsPage}};
 
 /** {title, subtabs, sub, sections} for one page (sub defaults to the main subtab), or
  * {title, loading: true} while the detail block is on its way. */

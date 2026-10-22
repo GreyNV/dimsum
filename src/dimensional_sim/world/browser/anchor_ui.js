@@ -17,7 +17,7 @@ export const ANCHOR_TEXT = Object.freeze({
       'Nothing is lost. Every past life shapes the next: what it learned stays with it, and what it carried burns into ash, which the anchor turns into what lasts.',
     ],
     dialogue: 'Spend ash on what should last. Then begin.',
-    hint: 'Skill 1: Contact anchor. Skill 2: Possess. Make campfire appears in nearby choices once bought.',
+    hint: 'Skill 1: Contact anchor. Skill 2: Possess. Master a place to make camp there (Journal › Places).',
     next: 'Continue',
     begin: 'Begin your first life'},
   death: {
@@ -125,8 +125,9 @@ export function renderAnchor(ex) {
   const shop = $('anchor-shop'), sections = shopSections(ex.shop);
   shop.replaceChildren(...sections.flatMap(section => [el('h3', '', section.title), ...section.rows.map(shopButton)]));
   if (!sections.length) shop.append(el('p', 'note', 'Nothing to buy yet. Bring things back: everything carried becomes ash.'));
-  if ((ex.meta?.journal || []).some(row => row.mastery >= 2))
-    shop.append(el('p', 'note', 'Shape future encounters in Journal › Encounters.'));
+  const mastered = (ex.meta?.places || []).filter(row => row.can_camp);
+  if (mastered.length)
+    shop.append(el('p', 'note', `Mastered: ${mastered.map(row => row.name).join(', ')}. Choose what camps there focus on in Journal › Places.`));
 }
 
 function shopButton(row) {

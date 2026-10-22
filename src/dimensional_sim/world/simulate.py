@@ -101,7 +101,7 @@ def run(seed, minutes=30, policy="spend", step_ms=1000):
             start = e.total_ms if policy != "idle" else e.total_ms + e.anchor_ms
     return {"seed": seed, "policy": policy, "lives": lives,
             "final": {"life": e.life, "ash": e.ash,
-                      "unlocked": sorted(e.unlocked), "mastery": dict(e.mastery),
+                      "unlocked": sorted(e.unlocked), "places": dict(e.location_done),
                       "dimensional_xp": sum(e.dimensional.values())}}
 
 

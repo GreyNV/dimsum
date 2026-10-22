@@ -3,7 +3,7 @@ from dataclasses import replace
 
 from .. import effects
 from ..actions import bucket, outcome_chance, reasons_against
-from ..catalog import BY_ID, ITEMS, RECIPE_KEEP_COST, RECIPE_NAMES, mastery_level
+from ..catalog import BY_ID, ITEMS, RECIPE_KEEP_COST, RECIPE_NAMES
 from ..encounters import features, lead_spot, roll_loot
 from ..equipment import equip_item
 from ..journal import record_action, record_items
@@ -186,13 +186,7 @@ class OutcomesMixin:
         record_action(self.journal, entry.id)
         if spot is not None:
             self._deplete(entry, spot.chunk)
-        if entry.placement == "spot":
-            count = self.journal["actions"][entry.id]
-            earned = mastery_level(count)
-            if earned > self.mastery.get(entry.id, 0):
-                self.mastery[entry.id] = earned
-                self._entry("lore", f"Mastery {earned} of {entry.name} earned at {count} completions.",
-                            encounter=entry.id)
+        self._record_location(entry, spot)
         self._apply_outcomes(entry, ident)
         if entry.placement == "story":
             self._story_done(entry)
@@ -277,6 +271,7 @@ class OutcomesMixin:
             self._build(action)
         if action.places == "campfire":
             self._place_fire()
+            self._pitch_camp()
         if action.effect:
             if self._add_item(action.effect, 1):
                 items.append((action.effect, 1))

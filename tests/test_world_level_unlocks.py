@@ -22,7 +22,7 @@ def xp_for_level(level):
 class LevelUnlockTests(unittest.TestCase):
     def test_actions_open_by_level_and_only_abilities_are_sold(self):
         priced = {u.id for u in UNLOCKS.values() if u.currency}
-        self.assertEqual(priced, {"return_anchor", "campfire"})
+        self.assertEqual(priced, {"return_anchor"}, "camp comes from mastering a place, not ash")
         for u in UNLOCKS.values():
             if u.level is None:
                 continue
@@ -76,7 +76,7 @@ class LevelUnlockTests(unittest.TestCase):
         old["schema_version"] = 16
         old["unlocked"] = ["hide_working", "snares", "climbing"]
         loaded = Expedition.from_dict(old)
-        self.assertEqual(loaded.unlocked, {"snares", "climbing", "campfire"}, "the free campfire is kept")
+        self.assertEqual(loaded.unlocked, {"snares", "climbing"}, "the old free campfire became place mastery")
         self.assertEqual(loaded.recipes, {"hide_wrap", "snare"})
         bad = e.to_dict()
         bad["life_recipes"] = ["moon_boots"]

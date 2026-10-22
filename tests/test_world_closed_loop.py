@@ -3,6 +3,8 @@ crafting, currencies, anchor purchases and observability (docs/design/DEFINITION
 import json
 import unittest
 
+from dimensional_sim.world.catalog import location_thresholds
+
 from dataclasses import replace
 
 from dimensional_sim.world import autopilot as ap
@@ -252,17 +254,19 @@ class EconomyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             e.anchor_action({"type": "unlock", "id": "climbing"})   # opened by levels, never sold
         e.ash = 100
-        e.anchor_action({"type": "unlock", "id": "campfire"})
+        e.anchor_action({"type": "unlock", "id": "return_anchor"})
         e.anchor_action({"type": "keep", "id": "hide_wrap"})
         with self.assertRaises(ValueError):
-            e.anchor_action({"type": "unlock", "id": "campfire"})   # bought once
-        self.assertEqual((e.ash, e.mastery), (55, {}))
+            e.anchor_action({"type": "unlock", "id": "return_anchor"})   # bought once
+        with self.assertRaises(ValueError):
+            e.anchor_action({"type": "unlock", "id": "campfire"})   # camp comes from mastering a place
+        self.assertEqual(e.ash, 70)
         e.unlocked.add("climbing")
         restored = Expedition.from_dict(json.loads(dump(e)))
         self.assertEqual(dump(restored), dump(e))
         e.anchor_action({"type": "begin_life"})
-        self.assertEqual((e.life, e.ash), (2, 55))
-        self.assertTrue(e.has_ability("make_campfire"))
+        self.assertEqual((e.life, e.ash), (2, 70))
+        self.assertTrue(e.has_ability("contact_anchor"))
         self.assertEqual((e.recipes, e.life_recipes), ({"hide_wrap"}, set()), "kept for good; found ones reset")
         self.assertEqual(e.log[-1]["type"], "rebirth")
         low, high = BY_ID["bramble_berries"].window
@@ -285,7 +289,7 @@ class EconomyTests(unittest.TestCase):
         rows = {(r["kind"], r["id"]): r for r in economy.offers(e)}
         self.assertNotIn(("unlock", "mushroom_lore"), rows, "level unlocks are not sold")
         self.assertEqual(rows[("unlock", "return_anchor")]["cost"], 10)
-        self.assertEqual(rows[("unlock", "campfire")]["cost"], 25)
+        self.assertNotIn(("unlock", "campfire"), rows, "camp comes from mastering a place, not ash")
         e.life_recipes.add("spear")
         rows = {(r["kind"], r["id"]): r for r in economy.offers(e)}
         self.assertEqual(rows[("keep", "spear")]["reasons"], ["needs 35 ash"])
@@ -306,7 +310,7 @@ class EconomyTests(unittest.TestCase):
         clock, here = e.total_ms, e._player()
         e.advance(60_000)
         self.assertEqual((e.total_ms, e._player(), e.inventory), (clock, here, {"stick": 4}))
-        e.anchor_action({"type": "unlock", "id": "campfire"})
+        e.ash -= 25   # what the old test spent on the campfire skill
         with self.assertRaisesRegex(ValueError, "anchor space"):
             e.anchor_action({"type": "begin_life"})   # a contact never ends the life
         e.anchor_action({"type": "resume"})
@@ -319,30 +323,19 @@ class EconomyTests(unittest.TestCase):
         restored.anchor_action({"type": "contact"})
         self.assertTrue(restored.contact)
 
-    def test_mastery_guarantee_uses_one_chosen_region_and_survives_reload(self):
+    def test_location_focus_works_during_a_life_needs_mastery_and_survives_reload(self):
         e = past_prologue(fresh())
-        e.mastery["bramble_berries"] = 3
-        at_anchor(e)
-        e.anchor_action({"type": "journal_guarantee", "id": "bramble_berries", "region": "old_road"})
-        e.anchor_action({"type": "begin_life"})
-        e._screen()
-        self.assertTrue(e.guarantee_used)
-        self.assertIn("bramble_berries", e.forced["forest:0:0"])
-        self.assertEqual(dump(Expedition.from_dict(json.loads(dump(e)))), dump(e))
-
-    def test_journal_controls_work_during_a_life_and_shape_unrolled_chunks(self):
-        e = past_prologue(fresh())
-        with self.assertRaisesRegex(ValueError, "mastery 2"):
-            e.anchor_action({"type": "journal_favor", "id": "bramble_berries", "mode": "favor"})
-        e.mastery["bramble_berries"] = 3
-        e.anchor_action({"type": "journal_favor", "id": "bramble_berries", "mode": "suppress"})
-        e.anchor_action({"type": "journal_guarantee", "id": "bramble_berries", "region": "old_road"})
-        self.assertEqual(e.journal_favor, {"bramble_berries": "suppress"})
-        self.assertEqual((e.journal_guarantee, e.journal_guarantee_region), ("bramble_berries", "old_road"))
+        with self.assertRaisesRegex(ValueError, "mastered location"):
+            e.anchor_action({"type": "location_focus", "id": "old_road", "mode": "resources"})
+        e.location_done["old_road"] = location_thresholds("old_road")[1]
+        e.anchor_action({"type": "location_focus", "id": "old_road", "mode": "resources"})
+        self.assertEqual(e.location_focus, {"old_road": "resources"})
         self.assertFalse(e.anchor_wait, "mid-life controls never hold a future anchor open")
         with self.assertRaisesRegex(ValueError, "anchor space"):
             e.anchor_action({"type": "unlock", "id": "climbing"})
         self.assertEqual(dump(Expedition.from_dict(json.loads(dump(e)))), dump(e))
+        e.anchor_action({"type": "location_focus", "id": "old_road", "mode": "none"})
+        self.assertEqual(e.location_focus, {})
 
     def test_schema_nine_combines_prestige_balances(self):
         data = v17(fresh().to_dict())
@@ -381,19 +374,23 @@ class EconomyTests(unittest.TestCase):
             self.assertEqual((saved["schema_version"], saved["spot_plans"]), (SCHEMA_VERSION, {}))
             self.assertEqual(restored.inventory, {"stick": 2})
             self.assertEqual((restored.equipped, restored.recipes), ({}, {"padded_jerkin"}))
-            self.assertEqual((restored.mastery, restored.journal_favor, restored.converted),
-                             ({"bramble_berries": 1}, {}, {"stick": 4}))
+            self.assertEqual(restored.converted, {"stick": 4})
+            self.assertEqual(restored.location_done, {"bramble_thicket": 5},
+                             "old encounter counts move to the place that favours them most")
             self.assertEqual(restored.journal["actions"], {"bramble_berries": 5})
         with self.assertRaises(ValueError):
             Expedition.from_dict({**old, "schema_version": 11, "encounters": "encounters-v8"})
 
-    def test_repeated_spot_actions_earn_all_three_mastery_grades(self):
-        e = fresh()
+    def test_encounters_finished_in_a_place_earn_its_three_grades(self):
+        e = past_prologue(fresh())
         action = BY_ID["bramble_berries"]
-        for prior, grade in ((9, 1), (99, 2), (999, 3)):
-            e.journal["actions"][action.id] = prior
-            e._reward(f"enc:forest:0:0:{prior}", action)
-            self.assertEqual(e.mastery[action.id], grade)
+        place = e.location_of_chunk(ChunkKey("forest", 0, 0))
+        needs = location_thresholds(place)
+        for grade, need in enumerate(needs, 1):
+            e.location_done[place] = need - 1
+            e._reward(f"enc:forest:0:0:{need}", action)
+            self.assertEqual((e.location_done[place], e.grade_of(place)), (need, grade))
+        self.assertEqual(e.location_rarity_percent(ChunkKey("forest", 0, 0)), 150, "deep: rare finds likelier")
 
 
 class ObservabilityTests(unittest.TestCase):

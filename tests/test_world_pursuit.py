@@ -4,6 +4,8 @@ a campfire frightens every hunter: it flees until it is out of range (or soon go
 import json
 import unittest
 
+from tests.save_fixture import v21
+
 from dimensional_sim.world.autopilot import Expedition
 from dimensional_sim.world.autopilot.combat import FLEE_UNLOAD_MS
 from dimensional_sim.world.encounters import spot_id
@@ -142,7 +144,7 @@ class HuntTests(unittest.TestCase):
 
     def test_schema_nineteen_saves_start_with_nobody_hunting(self):
         e, _ = boar_beside()
-        old = {k: v for k, v in e.to_dict().items() if k not in ("hunting", "possess_charge",
+        old = {k: v for k, v in v21(e.to_dict()).items() if k not in ("hunting", "possess_charge",
                "possess_charge_at_ms", "possess_drain_duration_ms")}
         old.update(schema_version=19, possess_ready_ms=0)
         self.assertEqual(Expedition.from_dict(json.loads(json.dumps(old))).hunting, {})

@@ -8,7 +8,21 @@ export const REGION_CUES = Object.freeze({
 
 /** Plain words for catalog.ECOLOGY, for the "picked over" cue. */
 const ECOLOGY_WORDS = {wood: 'fallen wood', berries: 'berries', game: 'animal signs', fungi: 'mushrooms', eggs: 'nests', fish: 'fish'};
+/** The place line: how well the avatar knows the kind of place it stands in, and its camp. */
+export function placeCue(place) {
+  if (!place) return '';
+  if (place.camped) return `Camped: ${place.name}.`;
+  if (place.can_camp) return `${place.name} · ${place.grade_name.toLowerCase()}: camp can be made here.`;
+  return `${place.name} · ${place.grade_name.toLowerCase()} ${place.done}/${place.next}.`;
+}
+
 export function regionCue(region) {
+  const place = placeCue(region?.place);
+  const cue = regionFlavour(region);
+  return place && cue ? `${place} ${cue}` : place || cue;
+}
+
+function regionFlavour(region) {
   if (region?.shimmer) return 'The air hums here. Rare things are closer this life.';
   const base = region?.site ? `${region.site}: ${region.condition?.text || 'a landmark with its own encounters and materials.'}`
     : REGION_CUES[region?.id] || '';

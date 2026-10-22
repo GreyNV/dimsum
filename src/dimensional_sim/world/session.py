@@ -10,6 +10,7 @@ from .animation import rotate
 from .autopilot import INVENTORY_SLOTS, Expedition
 from .autopilot.constants import CONTACT_COOLDOWN_MS, POSSESS_COOLDOWN_MS, POSSESS_SPEED_PERCENT
 from . import details
+from .autopilot.ecology import cell_of
 from .catalog import BY_ID, DEFAULT_TREES, ENEMIES, ITEMS, REGION_TREES, REGIONS, TREE_KINDS, UNLOCKS, rarity_glint
 from .models import ChunkKey, chunk_ident, integer
 from .progression import attribute_report
@@ -236,20 +237,14 @@ def _skill_slots(e, in_anchor):
 
 
 def _meta_view(e):
-    """Progress that survives death: ash, unlocks, mastery, Journal controls."""
+    """Progress that survives death: ash, unlocks, knowledge, the places mastered."""
+    view = e.places_view()
     return {"ash": e.ash,
             "unlocked": [{"id": u, "name": UNLOCKS[u].name} for u in sorted(e.unlocked)],
-            "mastery": dict(e.mastery),
             "knowledge": sorted(e.knowledge), "recipes": sorted(e.recipes),
-            "journal": [{"id": ident, "name": BY_ID[ident].name, "mastery": level,
-                         "mode": e.journal_favor.get(ident, "normal"),
-                         "regions": [{"id": region.id, "name": region.name}
-                                     for region in REGIONS.values() if region.biome in BY_ID[ident].biomes
-                                     and (BY_ID[ident].regions is None or region.id in BY_ID[ident].regions)
-                                     and region.multiplier(ident) > 0]}
-                        for ident, level in sorted(e.mastery.items()) if level >= 1],
-            "journal_guarantee": e.journal_guarantee,
-            "journal_guarantee_region": e.journal_guarantee_region}
+            "places": [{k: row[k] for k in ("id", "name", "grade", "grade_name", "done", "next", "can_camp", "focus")}
+                       for row in view["places"] if row["done"]],
+            "here": view["here"], "camp": view["camp"]}
 
 
 def _weapon_view(expedition):
@@ -269,7 +264,17 @@ def _region_view(expedition):
                                         "condition": None if condition is None or condition.id == "quiet"
                                         else {"name": condition.name, "text": condition.text},
                                         "worked": expedition.worked_here(),
-                                        "shimmer": expedition.rarity_percent(key) > 100}
+                                        "shimmer": cell_of(key) in expedition.shimmer,
+                                        "place": _place_view(expedition)}
+
+
+def _place_view(e):
+    """The kind of place the avatar stands in and how well it is known (HUD line)."""
+    here = e.location_here()
+    if here is None:
+        return None
+    row = next(r for r in e.places_view()["places"] if r["id"] == here)
+    return {k: row[k] for k in ("name", "grade", "grade_name", "done", "next", "can_camp", "camped", "focus")}
 
 
 def validate_input(data):

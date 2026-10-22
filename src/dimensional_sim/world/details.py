@@ -9,8 +9,8 @@ TESTS: tests/test_world_pages.py.
 from .actions import Context, describe_bucket, known, spot_tiers
 from .autopilot import INVENTORY_SLOTS, POINT, REGEN, REST_REGEN
 from . import effects
-from .catalog import (ACTIONS, BY_ID, ENEMIES, ITEMS, JOURNAL_FAVOR_MASTERY, JOURNAL_GROUPS, JOURNAL_GUARANTEE_MASTERY,
-                      MASTERY_THRESHOLDS, RARITY, REGIONS, SITES, UNLOCKS)
+from .catalog import (ACTIONS, BY_ID, ENEMIES, ITEMS, JOURNAL_GROUPS, LOCATION_OF_REGION, LOCATION_OF_SITE, LOCATIONS,
+                      RARITY, REGIONS, SITES, UNLOCKS)
 from .drops import SCALE, table_chances, tier_chances
 from .encounters import spawn_window
 from .journal import achievements
@@ -101,9 +101,9 @@ def rolls(e):
     windows = []
     for ident, spawned, limit in e.bounty():
         action = BY_ID[ident]
-        low, high = spawn_window(action, e.mastery.get(ident, 0), bonus if action.feeds else 0)
+        low, high = spawn_window(action, 0, bonus if action.feeds else 0)
         windows.append({"id": ident, "name": action.name, "rolled": limit, "min": low, "max": high,
-                        "active": e._active(ident), "spawned": spawned, "mastery": e.mastery.get(ident, 0),
+                        "active": e._active(ident), "spawned": spawned,
                         "known": known(action, known_ctx)})
     loot = []
     for a in ACTIONS:
@@ -162,8 +162,8 @@ def encounter_tree(known_ids):
 
 
 def journal(e):
-    """Lifetime record plus every known encounter with its tier, grade, odds here and Journal
-    control state (favor/suppress at grade 2, a regional guarantee at grade 3)."""
+    """Lifetime record plus every known encounter with its tier, where it is found and its odds
+    here; encounters are shown once the place they belong to is known (location grade 1)."""
     j = e.journal
     current = {row["id"]: row["share_permille"] for row in describe_bucket(e.spot_context(e.game.player.chunk))}
     known_ctx = _known_context(e)
@@ -171,7 +171,11 @@ def journal(e):
     for action in ACTIONS:
         if action.placement not in ("spot", "lead", "site") or not known(action, known_ctx):
             continue
-        ident, level = action.id, e.mastery.get(action.id, 0)
+        ident = action.id
+        places = ([LOCATION_OF_SITE[action.site]] if action.placement == "site" else
+                  [LOCATION_OF_REGION[r.id] for r in REGIONS.values() if r.biome in action.biomes
+                   and (action.regions is None or r.id in action.regions) and r.multiplier(ident) > 0])
+        level = max((e.grade_of(p) for p in places), default=0)
         locations = sorted(chunk_id for chunk_id, plan in e.spot_plans.items()
                            if any(row[0] == ident for row in plan))
         regions = [{"id": region.id, "name": region.name} for region in REGIONS.values()
@@ -179,14 +183,11 @@ def journal(e):
                    and region.multiplier(ident) > 0]
         encounters.append({"id": ident, "name": action.name, "interaction": action.interaction, "rarity": action.rarity,
                            "placement": action.placement, "level": level,
+                           "places": [LOCATIONS[p].name for p in places],
                            "site": SITES[action.site].name if action.site else None,
                            "done": j["actions"].get(ident, 0),
-                           "next": MASTERY_THRESHOLDS[level] if action.placement == "spot"
-                           and level < len(MASTERY_THRESHOLDS) else None,   # only wild spots earn grades
                            "regions": regions, "current_share_permille": current.get(ident, 0),
-                           "locations": locations, "mode": e.journal_favor.get(ident, "normal"),
-                           "can_favor": action.placement == "spot" and level >= JOURNAL_FAVOR_MASTERY,
-                           "can_guarantee": action.placement == "spot" and level >= JOURNAL_GUARANTEE_MASTERY})
+                           "locations": locations})
     return {"actions": sorted(([BY_ID[a].name, BY_ID[a].category, n] for a, n in j["actions"].items()),
                               key=lambda r: (-r[2], r[0])),
             "items": sorted(([ITEMS[i].name, n] for i, n in j["items"].items()), key=lambda r: (-r[1], r[0])),
@@ -195,12 +196,11 @@ def journal(e):
             "achievements": achievements(e),
             "knowledge": sorted(e.knowledge), "recipes": sorted(e.recipes),
             "life_recipes": sorted(e.life_recipes - e.recipes),
-            "disabled": sorted(e.journal_disabled), "favor": dict(e.journal_favor),
+            "disabled": sorted(e.journal_disabled),
             "encounters": encounters,
             "tree": encounter_tree({row["id"] for row in encounters if row["placement"] != "lead" or row["done"]
                                      or any(lead["action"] == row["id"] for lead in e.leads + e.lead_history)}),
-            "guarantee": {"id": e.journal_guarantee, "region": e.journal_guarantee_region,
-                          "used": e.guarantee_used},
+            "places": e.places_view(),
             "leads": [dict(row) for row in e.leads],
             "lead_history": [dict(row) for row in e.lead_history[-20:]]}
 

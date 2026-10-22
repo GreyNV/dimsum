@@ -172,9 +172,9 @@ class CraftingProgressionTests(unittest.TestCase):
         e.recipes.add("padded_jerkin")
         e.inventory["padded_jerkin"] = 1
         e.equipped = {"body": "padded_jerkin"}
-        e.mastery["fallen_branches"] = 3
+        e.location_done["old_road"] = 50
         e.journal_disabled.add("fallen_branches")
-        e.journal_favor["fallen_branches"] = "suppress"
+        e.location_focus["old_road"] = "resources"
         saved = Expedition.from_dict(e.to_dict())
         self.assertEqual((saved.equipped, saved.leads), (e.equipped, e.leads))
         e.health, e.cause = 0, "starvation"
@@ -186,4 +186,5 @@ class CraftingProgressionTests(unittest.TestCase):
         self.assertIn("deer_sign", e.knowledge)
         self.assertIn("padded_jerkin", e.recipes, "a kept recipe outlives the life")
         self.assertEqual(e.journal_disabled, {"fallen_branches"})
-        self.assertEqual(e.journal_favor, {"fallen_branches": "suppress"})
+        self.assertEqual((e.location_done["old_road"] >= 50, e.location_focus), (True, {"old_road": "resources"}),
+                         "place mastery and focus outlive the life")

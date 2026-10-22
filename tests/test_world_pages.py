@@ -3,6 +3,8 @@ and the hosted "New world, keep progress" rebuild."""
 import json
 import unittest
 
+from dimensional_sim.world.catalog import LOCATIONS
+
 from dimensional_sim.world import autopilot as ap
 from dimensional_sim.world.autopilot import Expedition, saves
 from dimensional_sim.world.catalog import ACHIEVEMENTS, BY_ID
@@ -86,11 +88,12 @@ class DetailTests(unittest.TestCase):
         self.assertEqual(set(d["multipliers"]), {"actions", "hunger_drain", "enemy_hit", "punch_damage", "punch_parts"})
         self.assertEqual(set(d["rolls"]), {"life", "windows", "spots_per_chunk", "tiers", "pity", "stats", "loot"})
         self.assertEqual(set(d["journal"]), {"actions", "items", "deaths", "best_life_min", "lives", "best_depth",
-                                             "achievements", "knowledge", "recipes", "disabled", "favor",
-                                             "encounters", "guarantee", "leads", "lead_history", "life_recipes", "tree"})
+                                             "achievements", "knowledge", "recipes", "disabled",
+                                             "encounters", "places", "leads", "lead_history", "life_recipes", "tree"})
         row = next(r for r in d["journal"]["encounters"] if r["id"] == "bramble_berries")
-        self.assertTrue({"rarity", "placement", "level", "done", "next", "regions", "current_share_permille",
-                         "locations", "mode", "can_favor", "can_guarantee"} <= set(row))
+        self.assertTrue({"rarity", "placement", "level", "done", "places", "regions", "current_share_permille",
+                         "locations"} <= set(row))
+        self.assertEqual({p["id"] for p in d["journal"]["places"]["places"]}, set(LOCATIONS))
         self.assertTrue({"name", "level", "into", "next", "dim_level", "dim_into", "dim_next", "speed",
                          "speed_regular_only", "speed_dimensional_only", "life_gain", "xp"} <= set(d["stats"][0]))
 

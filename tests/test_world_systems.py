@@ -236,13 +236,14 @@ class RarityTests(unittest.TestCase):
 
 
 class AbilityTests(unittest.TestCase):
-    def test_the_campfire_is_an_ability_granted_by_an_unlock(self):
+    def test_contact_is_an_ability_granted_by_an_unlock_and_camp_is_not_sold(self):
         e = expedition()
-        self.assertFalse(e.has_ability("make_campfire"))
-        owner = next(u.id for u in UNLOCKS.values() if u.ability == "make_campfire")
-        self.assertEqual((UNLOCKS[owner].currency, UNLOCKS[owner].cost), ("ash", 25))
+        self.assertFalse(e.has_ability("contact_anchor"))
+        owner = next(u.id for u in UNLOCKS.values() if u.ability == "contact_anchor")
+        self.assertEqual((UNLOCKS[owner].currency, UNLOCKS[owner].cost), ("ash", 10))
         e.unlocked.add(owner)
-        self.assertTrue(e.has_ability("make_campfire"))
+        self.assertTrue(e.has_ability("contact_anchor"))
+        self.assertFalse(any(u.ability == "make_campfire" for u in UNLOCKS.values()))
 
 
 if __name__ == "__main__":

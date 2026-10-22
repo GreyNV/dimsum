@@ -10,7 +10,7 @@ Carry load: every carried unit beyond CARRY_FREE slows walking, softened by
 Endurance and Strength. The movement interval is a pure function of state, set on the
 runtime before each step, so any slicing of time moves the same.
 """
-from ..catalog import BUILDINGS, ITEMS
+from ..catalog import BUILDINGS, CAMP_GRADE, ITEMS
 from ..models import DELTAS
 from ..tuning import CAMPFIRE_AWAY, CARRY_FREE, CARRY_MAX_PERCENT, CARRY_PERCENT_PER_ITEM, CHEST_SLOTS, STOW_TRIP_AT
 from .constants import CAMP_SAFE_RADIUS, FIRE_KIT, POSSESS_SPEED_PERCENT, RESTED_AT, RETREAT_BELOW, STACK_LIMIT
@@ -128,7 +128,7 @@ class CampMixin:
 
     def can_make_fire(self):
         return (self.anchor_ms is None and not self.in_prologue and self.task is None and not self.contact
-                and self.has_ability("make_campfire")
+                and self.grade_of(self.location_here()) >= CAMP_GRADE
                 and all(self.inventory.get(item, 0) >= n for item, n in FIRE_KIT.items()))
 
     def _place_fire(self):

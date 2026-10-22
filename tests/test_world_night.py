@@ -12,7 +12,7 @@ from dimensional_sim.world.runtime import Exploration
 from dimensional_sim.world.seeds import canonical_json
 from dimensional_sim.world.session import TREE_LETTERS, snapshot
 from dimensional_sim.world.web import new_world
-from save_fixture import v17
+from save_fixture import v17, v21
 
 BROWSER = pathlib.Path(__file__).resolve().parents[1] / "src" / "dimensional_sim" / "world" / "browser"
 NIGHTFALL = tuning.DAY_MS - tuning.NIGHT_MS - tuning.DAY_START_MS   # first nightfall in total_ms
@@ -208,7 +208,7 @@ class NightSpawnTests(unittest.TestCase):
 
     def test_schema_eighteen_saves_start_watching_from_now(self):
         e = started()
-        old = {k: v for k, v in e.to_dict().items() if k not in ("night_tick", "hunting") + saves.V21_FIELDS}
+        old = {k: v for k, v in v21(e.to_dict()).items() if k not in ("night_tick", "hunting") + saves.V21_FIELDS}
         old["possess_ready_ms"] = 0
         old["schema_version"] = 18
         loaded = Expedition.from_dict(json.loads(json.dumps(old)))

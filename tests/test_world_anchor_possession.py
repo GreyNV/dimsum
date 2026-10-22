@@ -11,7 +11,7 @@ from dimensional_sim.world.runtime import Exploration, InputCommand
 from dimensional_sim.world.seeds import canonical_json
 from dimensional_sim.world.session import BrowserSession
 from dimensional_sim.world.web import new_world
-from save_fixture import v17
+from save_fixture import v17, v21
 
 IDLE = {"move": None, "attack": False, "paused": False, "known": []}
 
@@ -37,7 +37,7 @@ class OpeningTests(unittest.TestCase):
         self.assertEqual(e.total_ms, 0, "the anchor waits for the player")
         view = BrowserSession(e.game, e).state(0)["expedition"]
         self.assertEqual(view["anchor_space"]["kind"], "opening")
-        self.assertEqual([r["id"] for r in view["shop"]], ["return_anchor", "campfire"], "the shop is shown before the first life")
+        self.assertEqual([r["id"] for r in view["shop"]], ["return_anchor"], "the shop is shown before the first life")
         again = Expedition.from_dict(json.loads(dump(e)))
         self.assertEqual(dump(again), dump(e))
         e.anchor_action({"type": "begin_life"})
@@ -81,8 +81,9 @@ class ContactTests(unittest.TestCase):
         clock, health, hunger = e.total_ms, e.health, e.hunger
         session.advance_ms(90_000, 1)
         self.assertEqual((e.total_ms, e.health, e.hunger), (clock, health, hunger))
-        session.input({**IDLE, "action": {"type": "unlock", "id": "campfire"}}, 2)
-        self.assertEqual((e.ash, e.inventory), (15, {"stick": 3}), "buying never touches the life")
+        e.life_recipes.add("hide_wrap")
+        session.input({**IDLE, "action": {"type": "keep", "id": "hide_wrap"}}, 2)
+        self.assertEqual((e.ash, e.inventory), (20, {"stick": 3}), "buying never touches the life")
         frame = session.input({**IDLE, "action": {"type": "begin_life"}}, 2)
         self.assertIn("anchor space", frame["expedition"]["action_error"])
         frame = session.input({**IDLE, "action": {"type": "resume"}}, 3)
@@ -204,7 +205,7 @@ class PossessionTests(unittest.TestCase):
 class MigrationTests(unittest.TestCase):
     def test_schema_twenty_cooldown_becomes_partial_charge(self):
         e = started()
-        old = {k: v for k, v in e.to_dict().items() if k not in saves.V21_FIELDS}
+        old = {k: v for k, v in v21(e.to_dict()).items() if k not in saves.V21_FIELDS}
         old.update(schema_version=20, possess_ready_ms=e.total_ms + 30_000)
         loaded = Expedition.from_dict(json.loads(json.dumps(old)))
         self.assertEqual(loaded.possession()["charge_ms"], 30_000)
@@ -213,7 +214,7 @@ class MigrationTests(unittest.TestCase):
 
     def test_schema_twenty_active_possession_keeps_remaining_time(self):
         e = started()
-        old = {k: v for k, v in e.to_dict().items() if k not in saves.V21_FIELDS}
+        old = {k: v for k, v in v21(e.to_dict()).items() if k not in saves.V21_FIELDS}
         old.update(schema_version=20, possess_ready_ms=0, possess_end_ms=e.total_ms + 20_000)
         loaded = Expedition.from_dict(json.loads(json.dumps(old)))
         self.assertEqual(loaded.possession()["remaining_ms"], 20_000)
@@ -229,7 +230,7 @@ class MigrationTests(unittest.TestCase):
         old["journal"]["actions"]["pray"] = 4
         loaded = Expedition.from_dict(json.loads(json.dumps(old)))
         self.assertEqual(loaded.ash, 3)
-        self.assertEqual(loaded.unlocked, {"return_anchor", "climbing", "campfire"})
+        self.assertEqual(loaded.unlocked, {"return_anchor", "climbing"}, "the old free campfire became place mastery")
         self.assertEqual(loaded.contact_ready_ms, 5)
         self.assertNotIn("pray", loaded.journal["actions"])
         self.assertEqual(loaded.log[-1]["type"], "lore")

@@ -8,7 +8,7 @@ export function renderLocationContext(context, open) {
   toggle.setAttribute('aria-expanded', String(!!context && open));
   if (!context) return;
   const count = context.actions.filter(row => !row.reasons.length).length + (context.visit ? 1 : 0);
-  toggle.textContent = context.kind === 'wild' ? 'Make campfire' : `${context.name} · ${count} ${count === 1 ? 'choice' : 'choices'}`;
+  toggle.textContent = context.kind === 'wild' ? 'Make camp' : `${context.name} · ${count} ${count === 1 ? 'choice' : 'choices'}`;
   const signature = JSON.stringify(context);
   if (panel.dataset.signature === signature) return;
   panel.dataset.signature = signature;

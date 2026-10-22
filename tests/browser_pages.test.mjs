@@ -26,20 +26,26 @@ const detail = {
       {item: 'Boar tusk', min: 1, max: 1, chance: 14.7, roll: 'Uncommon', color: '#efe2c4'}]}]},
   journal: {actions: [['Bramble berries', 'forage', 12], ['Fallen branches', 'gather', 3]], items: [['Wild berries', 30]],
     deaths: {starvation: 2}, best_life_min: 7.5, lives: 3, best_depth: 5,
-    knowledge: ['deer_sign'], recipes: [], life_recipes: ['Snare'], disabled: [], favor: {}, leads: [],
+    knowledge: ['deer_sign'], recipes: [], life_recipes: ['Snare'], disabled: [], leads: [],
     encounters: [
       {id: 'bramble_berries', name: 'Bramble berries', interaction: 'Picking berries', rarity: 'common', placement: 'spot', level: 3, done: 120, next: null,
         regions: [{id: 'old_road', name: 'The Old Road'}, {id: 'still_glade', name: 'Still Glade'}], current_share_permille: 127,
-        locations: ['forest:0:0'], mode: 'favor', can_favor: true, can_guarantee: true},
+        locations: ['forest:0:0'], places: ['The Old Road', 'Still Glade']},
       {id: 'old_carvings', name: 'Old carvings', rarity: 'uncommon', placement: 'spot', level: 0, done: 2, next: 5,
-        regions: [{id: 'old_road', name: 'The Old Road'}], current_share_permille: 41, locations: [], mode: 'normal',
-        can_favor: false, can_guarantee: false},
+        regions: [{id: 'old_road', name: 'The Old Road'}], current_share_permille: 41, locations: [], places: ['The Old Road']},
       {id: 'hunt_deer', name: 'Hunt deer', rarity: 'common', placement: 'lead', level: 1, done: 4, next: 25,
-        regions: [], current_share_permille: 0, locations: [], mode: 'normal', can_favor: false, can_guarantee: false},
+        regions: [], current_share_permille: 0, locations: [], places: []},
       {id: 'camp_bedroll', name: 'Torn bedroll', rarity: 'common', placement: 'site', site: 'Abandoned camp', level: 0,
-        done: 1, next: null, regions: [], current_share_permille: 0, locations: [], mode: 'normal',
-        can_favor: false, can_guarantee: false}],
-    guarantee: {id: 'bramble_berries', region: 'still_glade', used: false},
+        done: 1, next: null, regions: [], current_share_permille: 0, locations: [], places: ['Abandoned camp']}],
+    places: {here: 'old_road', camp: {location: 'old_road', name: 'The Old Road', focus: 'Resources'},
+      focus_modes: [{id: 'none', name: 'No camp'}, {id: 'all', name: 'Everything'}, {id: 'resources', name: 'Resources'}, {id: 'searching', name: 'Searching'}],
+      places: [
+        {id: 'old_road', name: 'The Old Road', kind: 'region', text: 'The road.', done: 52, grade: 2, grade_name: 'Mastered',
+          next: 400, camp_at: 40, can_camp: true, focus: 'resources', here: true, camped: true},
+        {id: 'old_ruins', name: 'Old ruins', kind: 'site', text: 'Ruins.', done: 1, grade: 0, grade_name: 'New',
+          next: 3, camp_at: 12, can_camp: false, focus: 'none', here: false, camped: false},
+        {id: 'still_glade', name: 'Still Glade', kind: 'region', text: 'Glade.', done: 0, grade: 0, grade_name: 'New',
+          next: 10, camp_at: 40, can_camp: false, focus: 'none', here: false, camped: false}]},
     tree: [
       {id: 'food', title: 'Food and water', known: 1, total: 6, groups: [], nodes: [{id: 'bramble_berries', hidden: 1, children: []}]},
       {id: 'signs', title: 'Signs and lore', known: 1, total: 5, groups: [],
@@ -63,7 +69,7 @@ const allSections = () => PAGES.flatMap(p => (subtabsOf(p.id).length ? subtabsOf
 test('pages: every tab and subtab has a model, world has none, detail pages wait for data', () => {
   assert.deepEqual(PAGE_IDS, ['world', 'stats', 'journal', 'settings']);
   assert.deepEqual(subtabsOf('stats').map(t => t.id), ['character', 'statistics']);
-  assert.deepEqual(subtabsOf('journal').map(t => t.id), ['encounters', 'story', 'achievements']);
+  assert.deepEqual(subtabsOf('journal').map(t => t.id), ['places', 'encounters', 'story', 'achievements']);
   assert.equal(pageModel('world', state), null);
   assert.equal(pageModel('nope', state), null);
   for (const p of PAGES.filter(p => needsDetail(p.id))) {
@@ -113,7 +119,7 @@ test('stats: character is the main view with multipliers; statistics holds every
 });
 
 test('journal: encounters (main) are a tree - branches, landmarks by site, trails under their source', () => {
-  const journal = pageModel('journal', state).sections;
+  const journal = pageModel('journal', state, null, 'encounters').sections;
   assert.equal(journal[0].title, 'Encounter rarity here');
   assert.deepEqual(journal.find(s => s.title === 'Encounter rarity here').rows[0], ['Uncommon', '8.3% per spot', '2 eligible']);
   const tree = journal.find(s => s.title === 'Encounters');
@@ -122,22 +128,17 @@ test('journal: encounters (main) are a tree - branches, landmarks by site, trail
   assert.deepEqual([food.label, food.badge, food.group], ['Food and water', '1 / 6 found', true]);
   const berries = food.children[0];
   assert.equal(berries.label, 'Bramble berries');
-  assert.equal(berries.badge, '●●● 120');
+  assert.equal(berries.badge, 'done 120');
   assert.equal(berries.hidden, 1, 'trails not found yet are counted, not named');
   assert.deepEqual(berries.rows.find(r => r[0] === 'Chance here').slice(0, 2), ['Chance here', '12.7% per spot']);
   const carvings = signs.children[0];
-  assert.equal(carvings.rows.find(r => r[0] === 'Chance here')[1], '?', 'grade 0 hides odds');
-  assert.equal(carvings.badge, '○○○ 2 / 5');
+  assert.equal(carvings.rows.find(r => r[0] === 'Chance here')[1], '?', 'an unknown place hides odds');
+  assert.equal(carvings.badge, 'done 2');
   assert.equal(carvings.children[0].label, 'Hunt deer', 'a trail hangs under what opens it');
   assert.equal(carvings.children[0].rows.find(r => r[0] === 'Where')[1], 'follows another encounter');
   assert.equal(landmarks.children[0].label, 'Abandoned camp');
-  assert.equal(landmarks.children[0].children[0].rows.find(r => r[0] === 'Where')[1], 'at abandoned camp');
-  const [odds, road, glade] = berries.buttons;
-  assert.deepEqual(odds.action, {type: 'journal_favor', id: 'bramble_berries', mode: 'suppress'});
-  assert.deepEqual(road.action, {type: 'journal_guarantee', id: 'bramble_berries', region: 'old_road'});
-  assert.deepEqual(glade.action, {type: 'journal_guarantee', id: null, region: null}, 'the chosen guarantee clears');
-  assert.ok(glade.on && odds.on && !road.on);
-  assert.deepEqual(['normal', 'favor', 'suppress'].map(nextMode), ['favor', 'suppress', 'normal']);
+  assert.equal(landmarks.children[0].children[0].rows.find(r => r[0] === 'Where')[1], 'Abandoned camp');
+  assert.deepEqual(berries.buttons, [], 'encounters have no controls: places do');
   assert.ok(journal.some(s => s.title === 'Action durations'));
   assert.deepEqual(journal.find(s => s.title === 'Chains and discoveries').rows[0], ['Knowledge', 'Deer sign']);
   assert.deepEqual(journal.find(s => s.title === 'Recent leads').rows, [['Follow deer tracks', 'enc:forest:1:0:2', 'expired']]);
@@ -146,6 +147,19 @@ test('journal: encounters (main) are a tree - branches, landmarks by site, trail
   assert.equal(achievements.length, 1);
   assert.match(achievements[0].title, /1 \/ 2/);
   assert.ok(allSections().length > 15);
+});
+
+test('journal places (main): grades with progress, focus buttons only where mastered, this life\'s camp', () => {
+  const [list, focus, life] = pageModel('journal', state).sections;
+  assert.equal(list.title, 'Places');
+  assert.deepEqual(list.items.map(i => i.label), ['The Old Road · Mastered · you are here', 'Old ruins · New'],
+    'places with nothing done are left out');
+  assert.deepEqual([list.items[0].text, list.items[1].text], ['52 / 400', '1 / 3']);
+  assert.match(list.items[1].note, /Camp from 12 encounters/);
+  assert.deepEqual(focus.items.map(i => i.label), ['The Old Road']);
+  const resources = focus.items[0].buttons.find(b => b.label === 'Resources');
+  assert.deepEqual([resources.on, resources.action], [true, {type: 'location_focus', id: 'old_road', mode: 'resources'}]);
+  assert.deepEqual(life.rows[0].slice(0, 2), ['Camp', 'The Old Road · Resources']);
 });
 
 test('stats: each attribute groups its regular bar with its dimensional bar right below', () => {

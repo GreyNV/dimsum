@@ -247,9 +247,9 @@ class LifeTests(unittest.TestCase):
         self.assertEqual((frame["spots"], frame["targets"]), ([], []))
         self.assertEqual(e.ash, 2)
         body = {"move": None, "attack": False, "paused": False, "known": [],
-                "action": {"type": "unlock", "id": "campfire"}}
+                "action": {"type": "unlock", "id": "return_anchor"}}
         frame = session.input(body, now=1)
-        self.assertIn("needs 25 ash", frame["expedition"]["action_error"])
+        self.assertIn("needs 10 ash", frame["expedition"]["action_error"])
         self.assertTrue(frame["expedition"]["anchor_space"]["waiting"])
         session.input(body, now=2)
         self.assertEqual(e.ash, 2)
@@ -309,7 +309,7 @@ class LifeTests(unittest.TestCase):
                 Expedition.from_dict(old)
         for mutate in (lambda d: d.update(schema_version=99), lambda d: d.update(encounters="v0"),
                        lambda d: d.update(ash=-1), lambda d: d.update(unlocked=["flying"]),
-                       lambda d: d.update(mastery={"think": 1}), lambda d: d.update(opening=True),
+                       lambda d: d.update(location_done={"nowhere": 1}), lambda d: d.update(location_focus={"old_road": "nap"}), lambda d: d.update(opening=True),
                        lambda d: d.update(forced={"forest:0:0": ["think"]}), lambda d: d["stats"].pop("pity"),
                        lambda d: d.update(possess_end_ms=0), lambda d: d.update(contact_ready_ms=-1),
                        lambda d: d.update(anchor_ms=-1), lambda d: d.update(anchor_wait=True),
@@ -420,7 +420,7 @@ class SpawnWindowTests(unittest.TestCase):
         self.assertEqual(rolls, set(range(boar.window[0], boar.window[1] + 1)))
         self.assertIsNone(roll_window(BY_ID["animal_tracks"], 1), "non-food stays unlimited")
         low, high = boar.window
-        self.assertEqual(spawn_window(boar, 3), (low, high), "earned mastery leaves caps unchanged")
+        self.assertEqual(spawn_window(boar, 3), (low, high), "the mastery argument leaves caps unchanged")
         food = {e.id for e in DARK_FOREST if any(ITEMS[l.item].kind == "food" for l in e.loot)}
         self.assertTrue(all(BY_ID[i].window for i in food), "every food source is capped")
 
