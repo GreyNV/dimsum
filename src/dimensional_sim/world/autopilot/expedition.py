@@ -247,7 +247,6 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         if self.game.reveal_radius != radius:
             self.game.reveal_radius = radius
             self.game._reveal()
-        self._hold_wall()
         here = self.ring(self.game.player.chunk)
         if here > self.depth:
             self.depth = here

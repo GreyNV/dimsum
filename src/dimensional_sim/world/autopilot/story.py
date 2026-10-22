@@ -1,4 +1,4 @@
-"""The main story and the grey wall (docs/design/STORY.md).
+"""The main story (docs/design/STORY.md).
 
 Story progress is knowledge: the current step is the first catalog STORY step whose id
 is not known yet, and knowledge survives every death, so a death never undoes the story.
@@ -6,15 +6,11 @@ Each life the current step is placed (a forced spot, outside the spawn windows) 
 chunk the avatar stands in inside the step's rings, once its requirements hold. If the avatar
 walks away and the placed chunk unloads, a later chunk may hold it again (at most
 STORY_PLACEMENTS_PER_LIFE times), so the step can never be stranded out of reach.
-
-The wall: while its `opened_by` knowledge is missing, the runtime refuses any step that
-enters a chunk past the wall ring (stepping inward always works, so an old save standing
-beyond it is never stuck) and the frontier never reaches past it.
 """
 from dataclasses import replace
 
 from ..actions import bucket_reasons
-from ..catalog import BY_ID, STORY, STORY_BY_ACTION, STORY_CHAPTERS, STORY_NEXT, WALLS, story_rings
+from ..catalog import BY_ID, STORY, STORY_BY_ACTION, STORY_CHAPTERS, STORY_NEXT, story_rings
 from ..encounters import forced_spot
 from ..models import chunk_ident
 
@@ -32,25 +28,8 @@ class StoryMixin:
         step = STORY_BY_ACTION.get(action.id)
         return step is not None and step.id in self.knowledge
 
-    def wall(self):
-        """The WallDef of the avatar's land, or None."""
-        return WALLS.get(self.dimension)
-
-    def wall_open(self):
-        wall = self.wall()
-        return wall is None or wall.opened_by in self.knowledge
-
-    def ring_limit(self):
-        """Deepest ring the avatar may enter: the wall ring while it stands closed, else None."""
-        return None if self.wall_open() else self.wall().ring
-
-    def _hold_wall(self):
-        """Hand the runtime the wall (derived from knowledge, never saved)."""
-        self.game.ring_limit = self.ring_limit()
-
     def step_rings(self, step):
-        wall = self.wall()
-        return story_rings(step, wall.ring if wall else 0)
+        return story_rings(step)
 
     # ----- placement -------------------------------------------------------------------
     def _story_spots(self, step):
@@ -109,17 +88,13 @@ class StoryMixin:
             return
         for line in step.lore:
             self._entry("story", line, encounter=action.id)
-        follow = self.story_step()
-        if step.id == (self.wall().opened_by if self.wall() else None):
-            self._entry("story", "The grey wall will let you through now.", encounter=action.id)
-        if follow is None:
+        if self.story_step() is None:
             self._entry("story", STORY_NEXT, encounter=action.id)
 
     # ----- presentation -------------------------------------------------------------------
     def story_view(self):
-        """HUD and Story page: the current objective, why it waits, the steps done, the wall."""
+        """HUD and Story page: the current objective, why it waits, and the steps done."""
         step = self.story_step()
-        wall = self.wall()
         done = [{"id": s.id, "action": s.action, "chapter": s.chapter, "name": BY_ID[s.action].name,
                  "lore": list(s.lore)}
                 for s in STORY if s.id in self.knowledge]
@@ -135,8 +110,7 @@ class StoryMixin:
             current = {"id": step.id, "chapter": step.chapter, "chapter_name": STORY_CHAPTERS[step.chapter],
                        "objective": step.objective, "name": BY_ID[step.action].name,
                        "rings": [low, high], "waits": [_plain(r) for r in waits], "here": live}
-        return {"current": current, "done": done, "next": STORY_NEXT if step is None else None,
-                "wall": None if wall is None else {"name": wall.name, "ring": wall.ring, "open": self.wall_open()}}
+        return {"current": current, "done": done, "next": STORY_NEXT if step is None else None}
 
 
 def _plain(reason):

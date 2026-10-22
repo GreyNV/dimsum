@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {storyLine, wallEdges, ringOf} from '../src/dimensional_sim/world/browser/story_ui.js';
-import {beyondWall} from '../src/dimensional_sim/world/browser/minimap.js';
+import {storyLine} from '../src/dimensional_sim/world/browser/story_ui.js';
 import {ANCHOR_TEXT, openingBeatText} from '../src/dimensional_sim/world/browser/anchor_ui.js';
 
 test('story line: objective, then why it waits, that it is close, or where to look', () => {
@@ -12,19 +11,6 @@ test('story line: objective, then why it waits, that it is close, or where to lo
   assert.equal(storyLine({current: {...current, waits: ['needs Willpower 3 (now 2)']}}).note, 'Waiting: needs Willpower 3 (now 2).');
   assert.equal(storyLine({current: null, next: 'Chapter 2 is not written yet.'}).text, 'Story · Chapter 2 is not written yet.');
   assert.equal(storyLine(null), null);
-});
-
-test('the wall: chunks past its ring are grey while it is closed; its edge faces inward', () => {
-  const state = wall => ({expedition: {story: {wall}}});
-  assert.equal(beyondWall(state({ring: 6, open: false}), 7, 0), true);
-  assert.equal(beyondWall(state({ring: 6, open: false}), 6, -6), false);
-  assert.equal(beyondWall(state({ring: 6, open: true}), 9, 0), false);
-  assert.equal(beyondWall({}, 9, 0), false);
-  assert.equal(ringOf(-7, 3), 7);
-  assert.deepEqual(wallEdges(7, 0, 6), ['west']);
-  assert.deepEqual(wallEdges(0, -7, 6), ['south']);
-  assert.deepEqual(wallEdges(7, 7, 6), []);          // a corner touches no inside chunk
-  assert.deepEqual(wallEdges(8, 0, 6), []);          // two rings out: no wall line here
 });
 
 test('the opening tells its story in short beats before the shop', () => {

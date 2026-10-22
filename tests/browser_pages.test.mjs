@@ -60,7 +60,7 @@ detail.story = {
   current: {id: 'story_wall', chapter: 1, chapter_name: 'The grey wall', objective: 'Reach the grey wall',
     name: 'The grey wall', rings: [6, 6], waits: ['you can safely go as far as ring 5'], here: false},
   done: [{id: 'story_camp', chapter: 1, name: "The old man's camp", lore: ['A cold fire.', 'A page.']}],
-  next: null, wall: {name: 'The grey wall', ring: 6, open: false}};
+  next: null};
 const state = {world_seed: '482910', expedition: {detail}};
 
 const allSections = () => PAGES.flatMap(p => (subtabsOf(p.id).length ? subtabsOf(p.id).map(t => t.id) : [null])
@@ -199,9 +199,8 @@ test('stats: what opens as you grow; journal: found recipes', () => {
   assert.ok(j.includes('Found this life') && j.includes('Snare'), 'found recipes are listed');
 });
 
-test('journal story: the objective and why it waits, the wall, then the lore found, newest first', () => {
+test('journal story: the objective and why it waits, then the lore found, newest first', () => {
   const sections = pageModel('journal', state, null, 'story').sections;
   assert.deepEqual(sections[0].rows[0], ['Now', 'Reach the grey wall', 'Waiting: you can safely go as far as ring 5']);
-  assert.deepEqual(sections[1].rows[0], ['Where', 'ring 6', 'Nothing goes past it yet.']);
-  assert.deepEqual(sections[2], {title: "The old man's camp", kind: 'lore', lines: ['A cold fire.', 'A page.']});
+  assert.deepEqual(sections[1], {title: "The old man's camp", kind: 'lore', lines: ['A cold fire.', 'A page.']});
 });

@@ -106,8 +106,7 @@ class CombatMixin:
             ring += 1
         if self.hunger <= EAT_AT and not self._has_food():
             ring += 1
-        limit = self.ring_limit()   # the grey wall, while it stands closed
-        return ring if limit is None else min(ring, limit)
+        return ring
 
     def _hostile(self, target):
         """A live enemy this life admitted, in the avatar's dimension."""

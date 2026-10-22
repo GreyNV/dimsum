@@ -10,12 +10,6 @@ export function visibleAt(fog, x, y, width, height) {
 }
 
 /** Paint the minimap for snapshot `state` into the 2D context `map`. */
-/** True when chunk (cx, cy) lies past a closed grey wall (story.wall from the snapshot). */
-export function beyondWall(state, cx, cy) {
-  const wall = state?.expedition?.story?.wall;
-  return !!wall && !wall.open && Math.max(Math.abs(cx), Math.abs(cy)) > wall.ring;
-}
-
 export function drawMinimap(map, state, chunks, dpr) {
   map.setTransform(dpr,0,0,dpr,0,0);
   map.fillStyle = '#0b110b'; map.fillRect(0,0,MAP_W,MAP_H);
@@ -44,7 +38,6 @@ export function drawMinimap(map, state, chunks, dpr) {
       map.fillStyle='#26301f';
       for(let py=y+3;py<y+h;py+=5) for(let px=x+3;px<x+w;px+=5) map.fillRect(px,py,.7,.7);
     }
-    if (beyondWall(state, entry.x, entry.y)) { map.fillStyle='rgba(176,182,190,.55)'; map.fillRect(x,y,w,h); }
   }
   const px=left+(state.player.x-minX*state.chunk_width+.5)*scale;
   const py=top+(state.player.y-minY*state.chunk_height+.5)*scale;

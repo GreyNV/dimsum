@@ -66,7 +66,7 @@ ELDER_LINES = (
     "A god took you back from death. One of them, at least, and it bound you to that stone. An anchor.",
     "That god looks out through your eyes now. When it takes your hands, let it - you will be quicker for it.",
     "Mind your hunger. This forest feeds only the lucky.",
-    "I keep a camp out along the road. Find it when you can. There's a lot you should know about the wall.",
+    "I keep a camp out along the road. Find it when you can. There's a lot you should know about these woods.",
 )
 LOG_TYPES = ("encounter", "eat", "rest", "life", "possess", "night", "lore", "trade", "ambush",
              "craft", "reflect", "purchase", "rebirth", "build", "stow", "story")

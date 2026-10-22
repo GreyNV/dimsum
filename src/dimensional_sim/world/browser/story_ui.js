@@ -1,5 +1,4 @@
-/** The main story on screen: the objective line under the location, and the grey wall drawn
- * over every chunk past it while it stands closed (a faint haze at its line once it is open).
+/** The main story on screen: the objective line, the story card and the opening's darkness.
  * Story rules live in Python (autopilot/story.py); this only draws the snapshot's `story`. */
 import {$} from './dom.js';
 
@@ -27,62 +26,6 @@ export function renderStory(ex) {
   const b = document.createElement('b'); b.textContent = line.text;
   box.append(b);
   if (line.note) { const small = document.createElement('small'); small.textContent = line.note; box.append(small); }
-}
-
-/** Ring of chunk (cx, cy): Chebyshev distance from the anchor chunk, as in Python. */
-export const ringOf = (cx, cy) => Math.max(Math.abs(cx), Math.abs(cy));
-
-/** Sides of chunk (cx, cy) that touch the inside of a wall at `ring` ([] if not just outside it). */
-export function wallEdges(cx, cy, ring) {
-  if (ringOf(cx, cy) !== ring + 1) return [];
-  return [['north', 0, -1], ['south', 0, 1], ['west', -1, 0], ['east', 1, 0]]
-    .filter(([, dx, dy]) => ringOf(cx + dx, cy + dy) <= ring).map(([side]) => side);
-}
-
-const MIST_GLYPHS = ['~', ':', '.', '~', '`', ','];
-
-/** Draw the wall over the visible chunks (world px; ctx already in camera space). */
-export function drawWall(ctx, wall, chunks, tileW, tileH, clock, reducedMotion = false) {
-  if (!wall) return;
-  const drift = reducedMotion ? 0 : clock / 900;
-  for (const chunk of chunks) {
-    const past = ringOf(chunk.x, chunk.y) > wall.ring;
-    if (!past) continue;
-    const x0 = chunk.x * chunk.width * tileW, y0 = chunk.y * chunk.height * tileH;
-    const w = chunk.width * tileW, h = chunk.height * tileH;
-    if (!wall.open) {   // past a closed wall: the land lies under cold grey mist
-      ctx.fillStyle = 'rgba(150, 156, 164, .58)';
-      ctx.fillRect(x0, y0, w, h);
-    }
-    for (const side of wallEdges(chunk.x, chunk.y, wall.ring)) {
-      const deep = (wall.open ? 2.5 : 5) * (side === 'north' || side === 'south' ? tileH : tileW);
-      const [gx0, gy0, gx1, gy1] = side === 'north' ? [x0, y0, x0, y0 + deep] : side === 'south' ? [x0, y0 + h, x0, y0 + h - deep]
-        : side === 'west' ? [x0, y0, x0 + deep, y0] : [x0 + w, y0, x0 + w - deep, y0];
-      const grad = ctx.createLinearGradient(gx0, gy0, gx1, gy1);
-      grad.addColorStop(0, wall.open ? 'rgba(205, 210, 218, .35)' : 'rgba(214, 218, 226, .85)');
-      grad.addColorStop(1, 'rgba(190, 196, 204, 0)');
-      ctx.fillStyle = grad;
-      const [rx, ry, rw, rh] = side === 'north' ? [x0, y0, w, deep] : side === 'south' ? [x0, y0 + h - deep, w, deep]
-        : side === 'west' ? [x0, y0, deep, h] : [x0 + w - deep, y0, deep, h];
-      ctx.fillRect(rx, ry, rw, rh);
-      if (wall.open) continue;
-      // drifting mist written as text along the wall line, in keeping with the ASCII art
-      ctx.save();
-      ctx.font = `${Math.round(tileH * .7)}px ui-monospace, Consolas, monospace`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      const along = side === 'north' || side === 'south' ? chunk.width : chunk.height;
-      for (let i = 0; i < along; i++) for (let layer = 0; layer < 5; layer++) {
-        const wave = Math.sin(drift + i * .7 + layer * 2.1);
-        const off = (layer * 1.1 + .5 + wave * .45) * (side === 'north' || side === 'south' ? tileH : tileW) * .9;
-        const px = side === 'north' || side === 'south' ? x0 + (i + .5) * tileW : side === 'west' ? x0 + off : x0 + w - off;
-        const py = side === 'west' || side === 'east' ? y0 + (i + .5) * tileH : side === 'north' ? y0 + off : y0 + h - off;
-        ctx.globalAlpha = .6 - layer * .11;
-        ctx.fillStyle = '#eef1f6';
-        ctx.fillText(MIST_GLYPHS[(i * 7 + layer * 3 + Math.floor(drift * 2)) % MIST_GLYPHS.length], px, py);
-      }
-      ctx.restore();
-    }
-  }
 }
 
 /** Story log entries newer than `lastSeq`, grouped into cards by the story place they came from:

@@ -59,6 +59,11 @@ export const STRUCTURE_ART = Object.freeze({
     glyph: ['     ;;;;;;     ', '  _/;:;:;:;;\\_  ', ' /;:;:;:;:;:;:\\ ', '/;:;:;|==|;:;:;\\', ';;;;;;|  |;;;;;;']},
   I: {paint: [' gg  ', 'gssg ', 'gssg ', 'gsgg ', 'mmmm '],                             // standing stone
     glyph: [' __  ', '/::\\ ', '|:o| ', '|::| ', ';;;; ']},
+  // The edge of the land (generator v7): fallen trees across a road, a bridge broken over a river.
+  K: {paint: ['  t  t  ', 'wwwwwwww', 'tddddddt', 'wwwwwwww'],                         // deadfall
+    glyph: ['  ^  v  ', '(@====@)', '/\\/\\/\\/', '(@====@)']},
+  Y: {paint: ['d      d', 'dd    dd', 'd      d', 'd      d'],                         // broken bridge piers
+    glyph: ['|=    =|', '|=\\  /=|', '|      |', '|      |']},
 });
 export function setupText(ctx) {
   ctx.font = '7px Consolas, "Liberation Mono", monospace';
@@ -381,5 +386,6 @@ export function terrainColor(glyph) {
     : glyph === 'H' ? '#9b7944' : glyph === '*' ? '#55703a'
     : glyph === 'A' ? '#c8b080' : glyph === 'M' ? '#a3a490' : glyph === 'F' ? '#7d8576'
     : glyph === 'L' || glyph === 'S' || glyph === 'U' ? '#9b7944' : glyph === 'R' ? '#a6845d'
-    : glyph === 'P' || glyph === 'Q' || glyph === 'I' ? '#a3a490' : glyph === 'B' ? '#59713b' : '#3d512b';
+    : glyph === 'P' || glyph === 'Q' || glyph === 'I' ? '#a3a490' : glyph === 'B' ? '#59713b'
+    : glyph === 'K' ? '#6e4f2e' : glyph === 'Y' ? '#c0503a' : '#3d512b';   // edge: deadfall, broken bridge
 }

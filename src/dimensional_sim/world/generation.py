@@ -14,12 +14,14 @@ from .models import (
 )
 from .seeds import canonical_json, content_digest, derive_seed
 
-GENERATOR_VERSION = 6   # v3: tile-level organic region borders (regions.RegionField), game trails
+GENERATOR_VERSION = 7   # v3: tile-level organic region borders (regions.RegionField), game trails
                         # v4: + continuous rivers (water.WaterField), fords and bridges
                         # v5: + landmark sites (sites.site_at, pinned catalog.SITES)
                         # v6: + natural woods: groves with open clearings, sparse rims, lone
                         #       trees, boulder piles and clumped brush (open_terrain._grove_block)
-SUPPORTED_GENERATOR_VERSIONS = (1, 2, 3, 4, 5, 6)
+                        # v7: + the edge of the land (edges.py): thicket, fallen trees and broken
+                        #       bridges close the sides of the outermost reachable chunks
+SUPPORTED_GENERATOR_VERSIONS = (1, 2, 3, 4, 5, 6, 7)
 
 
 def validated_dimensions(dimensions):
@@ -88,7 +90,7 @@ class ChunkGenerator:
 
     def __init__(self, world_seed: int, dimensions: tuple, assets: tuple,
                  generator_version: int = GENERATOR_VERSION, region_catalog=None,
-                 region_version=None, site_catalog=None):
+                 region_version=None, site_catalog=None, land_catalog=None):
         integer(world_seed, "world seed", 0, 2**64 - 1)
         if type(generator_version) is not int or generator_version not in SUPPORTED_GENERATOR_VERSIONS:
             raise ValueError("unsupported generator version")
@@ -128,6 +130,17 @@ class ChunkGenerator:
                 raise ValueError("invalid site catalog")
             self.site_catalog = {key: SiteDef(**asdict(value)) for key, value in sorted(definitions.items())}
             self.site_catalog_digest = content_digest([asdict(value) for value in self.site_catalog.values()])
+        self.land_catalog = None
+        self.land_catalog_digest = None
+        if self.generator_version >= 7:
+            from .catalog import LANDS, LandDef
+            definitions = LANDS if land_catalog is None else land_catalog
+            if type(definitions) is not dict or any(
+                    type(key) is not str or not isinstance(value, LandDef) or value.dimension != key
+                    for key, value in definitions.items()):
+                raise ValueError("invalid land catalog")
+            self.land_catalog = {key: LandDef(**asdict(value)) for key, value in sorted(definitions.items())}
+            self.land_catalog_digest = content_digest([asdict(value) for value in self.land_catalog.values()])
         self._specs = {spec.id: spec for spec in self.dimensions}
         self._pools = {}
         for spec in self.dimensions:
@@ -229,10 +242,15 @@ class ChunkGenerator:
                 region = region_for(self.world_seed, source.biome, key, self.region_catalog,
                                     version=self.region_version)
             site = self.site_for(key) if self.generator_version >= 5 else None
+            sealed = ()
+            if self.generator_version >= 7:
+                from .edges import sealed_sides
+                sealed = sealed_sides(self.world_seed, key, self.land_catalog)
             return Chunk(key, seed, source.id, compose_open(source, spec, key, landscape_seed,
                                                              region=region, region_grid=region_grid,
                                                              water=water, site=site,
-                                                             groves=self.generator_version >= 6))
+                                                             groves=self.generator_version >= 6,
+                                                             sealed=sealed))
         terrain = derive_seed(seed, "terrain")
         decoration = derive_seed(seed, "decoration")
         encounter = derive_seed(seed, "encounter")

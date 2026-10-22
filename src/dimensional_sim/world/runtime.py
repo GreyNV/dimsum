@@ -75,7 +75,6 @@ class Exploration:
     """Own all mutable actor/input clocks; repository owns immutable world chunks."""
 
     attack_reach = 1   # cells along the facing (the weapon); the owner sets it each step, never saved
-    ring_limit = None  # deepest chunk ring a step may enter (a closed wall); the owner sets it, never saved
 
     def __init__(self, world, dimension=None, *, movement_interval_ms=120,
                  animation_rate_percent=100, attack_rate_percent=100,
@@ -267,8 +266,6 @@ class Exploration:
         if not any(e.direction == direction and (x, y) == (e.x, e.y) for e in asset.exits):
             return None
         nkey = ChunkKey(key.dimension, key.x + dx, key.y + dy)
-        if self.ring_limit is not None and max(abs(nkey.x), abs(nkey.y)) > max(self.ring_limit, abs(key.x), abs(key.y)):
-            return None   # the wall: never further out than the limit (stepping inward always works)
         found = self.world.peek(nkey) if peek else self.world.get(nkey)
         if found is None:
             return None

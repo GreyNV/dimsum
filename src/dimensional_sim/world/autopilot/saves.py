@@ -273,8 +273,14 @@ def _from_v21(data):
         if location is not None and type(count) is int and count > 0:
             done[location] = done.get(location, 0) + count
     unlocked = [u for u in data["unlocked"] if u != "campfire"]
+    # Story places of the retired grey wall (never on GitHub main, but in bundles that were shared).
+    retired = ("watch_post", "grey_wall", "wall_crossing")
+    forced = {k: [e for e in v if e not in retired] for k, v in data["forced"].items()} \
+        if type(data["forced"]) is dict else data["forced"]
+    admitted = [row for row in data["admitted"] if not (type(row) is list and len(row) == 2 and row[1] in retired)] \
+        if type(data["admitted"]) is list else data["admitted"]
     return {**{k: v for k, v in data.items() if k not in V22_DROPPED}, "schema_version": 22,
-            "unlocked": unlocked,
+            "unlocked": unlocked, "forced": forced, "admitted": admitted,
             "location_done": done, "location_focus": {}, "camp": None}
 
 

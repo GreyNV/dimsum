@@ -192,8 +192,10 @@ def validate_asset(asset: ChunkAsset) -> None:
                         ("west", ((0, y) for y in range(h))))
                     for x, y in points if not asset.collision[y][x]}
         actual = {(e.direction, e.x, e.y) for e in asset.exits}
-        if actual != required or len(actual) != len(asset.exits) or {e.direction for e in asset.exits} != set(DIRECTIONS):
-            raise ValueError("open exits must describe every walkable boundary in all four directions")
+        # Every walkable boundary cell is an exit. Since generator v7 a side closed by the edge of
+        # the land (edges.py) has none, so at least one direction must remain, not all four.
+        if actual != required or len(actual) != len(asset.exits) or not actual:
+            raise ValueError("open exits must describe every walkable boundary cell")
     if type(asset.spawns) is not tuple or any(not isinstance(s, Spawn) for s in asset.spawns):
         raise ValueError("spawns must be an immutable tuple")
     if len({s.id for s in asset.spawns}) != len(asset.spawns) or len({

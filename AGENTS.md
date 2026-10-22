@@ -45,8 +45,9 @@ world/autopilot/night.py: day/night clock (12 min, sim time) and night wolves as
   tree kinds per region are presentation (catalog.REGION_TREES -> frame chunk.trees). docs/design/DAY_NIGHT_AND_TREES.md.
 Pursuit (combat._pursue, docs/design/PURSUIT.md): a noticed enemy hunts until unloaded outside the loaded 3x3;
   the camp or a campfire frightens hunters away.
-world/autopilot/story.py: the main story (catalog STORY steps, placement="story", placed for sure, kept as knowledge) and
-  the grey wall (catalog WALLS; runtime.ring_limit + navigation refuse outward steps while closed). docs/design/STORY.md.
+world/autopilot/story.py: the main story (catalog STORY steps, placement="story", placed for sure, kept as knowledge).
+  docs/design/STORY.md. world/edges.py: the edge of a land (catalog LANDS, pinned per world, generator v7): chunks past
+  it are unreachable because open_terrain seals the outer sides (thicket, fallen trees "K", broken bridge "Y").
 world/autopilot/places.py: location mastery (catalog LOCATIONS: regions and kinds of landmark) and camps: the
   campfire is "Make camp", allowed only in a mastered place; a camp holds the avatar to that place and its focus.
   docs/design/LOCATIONS.md. (Per-encounter mastery and Journal favor/guarantee are gone, schema 22.)

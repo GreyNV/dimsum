@@ -10,7 +10,7 @@ import {$, el, readUi, writeUi} from './dom.js';
 import {hosted, request, releaseInput} from './transport.js';
 import {drawMinimap, visibleAt} from './minimap.js';
 import {anchorAction, openingReveal, renderAnchor} from './anchor_ui.js';
-import {StoryCard, drawOpeningDark, drawWall, renderStory} from './story_ui.js';
+import {StoryCard, drawOpeningDark, renderStory} from './story_ui.js';
 import {buildTabs, journalAction, renderSection, renderSubtabs} from './page_ui.js';
 import {dayGrade, drawDayGrade, drawNight, nightAlpha, drawEdgeMarker, drawEyelids, drawPossessionAura, drawPossessionGround, drawPossessionTint, drawVignette, edgePoint, possessionGlow, tintPicture} from './scene_fx.js';
 import {drawMotes, drawReflection, drawWaterGlints, isWater} from './nature_art.js';
@@ -598,7 +598,6 @@ function render(now) {
         const at=enemyXY(t,now); drawDamage(ctx,at.x,at.y-44,hit.amount,reducedMotion?0:now-hit.at);
       }
     }
-    if (!state.expedition?.anchor_space) drawWall(ctx, state.expedition?.story?.wall, visible, TILE_W, TILE_H, now, reducedMotion);
     if(!reducedMotion && !state.expedition?.anchor_space) drawBlownLeaves(ctx,view.x-width/view.scale/2,view.y-height/view.scale/2,
       view.x+width/view.scale/2,view.y+height/view.scale/2,now,{tileW:TILE_W,tileH:TILE_H});
     if(!reducedMotion) drawMotes(ctx,view.x-width/view.scale/2,view.y-height/view.scale/2,

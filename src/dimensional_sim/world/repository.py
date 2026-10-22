@@ -14,7 +14,7 @@ from .models import (
     ChunkKey, DimensionSpec, asset_from_dict, asset_to_dict, fields, integer,
 )
 
-WORLD_SCHEMA_VERSION = 7   # 7: generator v6 (natural woods); 6: v5 (sites, pinned site catalog); 5: v4 (rivers); 4: v3; 1-6 still load
+WORLD_SCHEMA_VERSION = 8   # 8: generator v7 (the edge of the land, pinned land catalog); 7: generator v6 (natural woods); 6: v5 (sites, pinned site catalog); 5: v4 (rivers); 4: v3; 1-6 still load
 MAX_MAP_RADIUS = 32
 
 
@@ -42,7 +42,7 @@ class WorldRepository:
 
     def __init__(self, world_seed=1, dimensions=None, assets=None, cache_limit=9,
                  generator_version=GENERATOR_VERSION, region_catalog=None, region_version=None,
-                 site_catalog=None):
+                 site_catalog=None, land_catalog=None):
         integer(cache_limit, "cache limit", 1, 4096)
         self._world_seed = integer(world_seed, "world seed", 0, 2**64 - 1)
         self._dimensions = validated_dimensions(
@@ -53,7 +53,7 @@ class WorldRepository:
         self._generator = ChunkGenerator(self.world_seed, self.dimensions, catalog,
                                          generator_version=generator_version,
                                          region_catalog=region_catalog, region_version=region_version,
-                                         site_catalog=site_catalog)
+                                         site_catalog=site_catalog, land_catalog=land_catalog)
         self._catalog = self._generator.catalog
         self._cache_limit = cache_limit
         self._resident = OrderedDict()
@@ -104,6 +104,13 @@ class WorldRepository:
     def region_for(self, key):
         """Read this world's pinned region without generating or residing a chunk."""
         return self._generator.chunk_region(key)
+
+    def chunk_open(self, key):
+        """Whether chunk `key` lies inside its land's explorable area (always, before generator v7)."""
+        if self.generator_version < 7:
+            return True
+        from .edges import chunk_open
+        return chunk_open(self.world_seed, key, self._generator.land_catalog)
 
     def site_for(self, key):
         """This world's landmark site in chunk `key` (generator v5), or None. Pure."""
@@ -196,7 +203,7 @@ class WorldRepository:
 
     def to_dict(self):
         data = {
-            "schema_version": {1: 1, 2: 3, 3: 4, 4: 5, 5: 6}.get(self.generator_version, WORLD_SCHEMA_VERSION),
+            "schema_version": {1: 1, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7}.get(self.generator_version, WORLD_SCHEMA_VERSION),
             "generator_version": self.generator_version,
             "world_seed": self.world_seed,
             "cache_limit": self.cache_limit,
@@ -219,6 +226,9 @@ class WorldRepository:
             data["site_catalog"] = [{**asdict(value), "spots": list(value.spots), "size": list(value.size)}
                                     for value in self._generator.site_catalog.values()]
             data["site_catalog_digest"] = self._generator.site_catalog_digest
+        if self.generator_version >= 7:
+            data["land_catalog"] = [asdict(value) for value in self._generator.land_catalog.values()]
+            data["land_catalog_digest"] = self._generator.land_catalog_digest
         return data
 
     @classmethod
@@ -227,7 +237,7 @@ class WorldRepository:
         if type(data) is not dict or type(data.get("schema_version")) is not int:
             raise ValueError("unsupported world schema")
         schema = data["schema_version"]
-        if schema not in (1, 2, 3, 4, 5, 6, WORLD_SCHEMA_VERSION):
+        if schema not in (1, 2, 3, 4, 5, 6, 7, WORLD_SCHEMA_VERSION):
             raise ValueError("unsupported world schema")
         required = ("schema_version", "generator_version", "world_seed", "cache_limit",
                     "dimensions", "catalog", "catalog_digest", "discovery")
@@ -237,10 +247,12 @@ class WorldRepository:
             required += ("region_version",)
         if schema >= 6:
             required += ("site_catalog", "site_catalog_digest")
+        if schema >= 8:
+            required += ("land_catalog", "land_catalog_digest")
         fields(data, required)
         if (type(data["generator_version"]) is not int or
                 data["generator_version"] not in SUPPORTED_GENERATOR_VERSIONS or
-                data["generator_version"] != {1: 1, 2: 2, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6}[schema]):
+                data["generator_version"] != {1: 1, 2: 2, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7}[schema]):
             raise ValueError("unsupported generator version")
         if any(type(data[name]) is not list for name in ("dimensions", "catalog", "discovery")):
             raise ValueError("world collections must be arrays")
@@ -278,9 +290,21 @@ class WorldRepository:
             site_catalog = {s.id: s for s in sites}
             if len(site_catalog) != len(sites):
                 raise ValueError("duplicate pinned site")
+        land_catalog = None
+        if schema >= 8:
+            from .catalog import LandDef
+            if type(data["land_catalog"]) is not list:
+                raise ValueError("land catalog must be an array")
+            try:
+                lands = [LandDef(**raw) for raw in data["land_catalog"]]
+            except (TypeError, ValueError) as exc:
+                raise ValueError("invalid pinned land catalog") from exc
+            land_catalog = {land.dimension: land for land in lands}
+            if len(land_catalog) != len(lands):
+                raise ValueError("duplicate pinned land")
         result = cls(data["world_seed"], tuple(dimensions), catalog, data["cache_limit"],
                      generator_version=data["generator_version"], region_catalog=region_catalog,
-                     site_catalog=site_catalog,
+                     site_catalog=site_catalog, land_catalog=land_catalog,
                      region_version=integer(data["region_version"], "region version", 2, 3)
                      if schema >= 3 else 1)
         if data["catalog_digest"] != result.catalog_digest:
@@ -289,6 +313,8 @@ class WorldRepository:
             raise ValueError("world region catalog digest mismatch")
         if schema >= 6 and data["site_catalog_digest"] != result._generator.site_catalog_digest:
             raise ValueError("world site catalog digest mismatch")
+        if schema >= 8 and data["land_catalog_digest"] != result._generator.land_catalog_digest:
+            raise ValueError("world land catalog digest mismatch")
         for raw in data["discovery"]:
             fields(raw, ("dimension", "x", "y", "status", "biome"))
             key = result._key(ChunkKey(raw["dimension"], raw["x"], raw["y"]))

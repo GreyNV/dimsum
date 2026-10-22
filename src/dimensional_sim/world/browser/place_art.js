@@ -67,10 +67,6 @@ export const SPOTS = Object.freeze({
   shrine_offerings: {paint: ['  y  y   ', ' ggg ggg ', ' gyg gxg ', '  g   g  '],
     glyph: ['  .  $   ', ' \\$/ \\o/ ', ' (_) (_) ', '  "   "  ']},
   // Main story places (story actions; art keys from the catalog).
-  watch_post: {paint: [' kkkkkkk ', 'kooooooo ', 'ko xx  o ', 'ko gg  o ', ' u     u '],
-    glyph: [' /=====\\ ', '/|-----| ', '||[#]  | ', '||==   | ', ' "     " ']},
-  grey_wall: {paint: [' w w w w ', 'wwwwwwwww', 'wcwcwcwcw', 'wwwwwwwww', ' c c c c '],
-    glyph: [' ~ : ~ : ', '~:~:~:~:~', ':~`~:~`~:', '~:~:~:~:~', ' . . . . ']},
   dead_gate: {paint: ['  ggggg  ', ' gg   gg ', ' g  x  g ', ' g     g ', 'gg     gg'],
     glyph: ['  _____  ', ' /|   |\\ ', ' || o || ', ' ||   || ', '/_|   |_\\']},
   elder: {paint: ['   ww   ', '  wkkw  ', '   oo   ', '  oooo  ', '  o  o  '],

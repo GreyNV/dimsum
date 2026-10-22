@@ -1170,26 +1170,14 @@ STORY_ACTIONS = (
               "Traced a summoner's mark. Its arrow points away from the anchor.", art="old_carvings",
               unlock="road_lore", roles=("story",),
               outcomes=(OutcomeDef("knowledge", "story_mark"),), interaction="Tracing the old mark"),
-    ActionDef("watch_post", "Wall watchers' post", "study", "story", "intelligence", 120, 7000, 1,
-              "A lean-to of grey planks with a log book nailed shut in a box.",
-              "Read the wall watchers' log.", art="watch_post", roles=("story",),
-              outcomes=(OutcomeDef("knowledge", "story_watch"),), interaction="Reading the watch log"),
-    ActionDef("grey_wall", "The grey wall", "meditate", "story", "willpower", 150, 6000, 1,
-              "A wall of grey mist, cold and still, humming like the anchor stone.",
-              "Touched the grey wall. It pushed back.", art="grey_wall", roles=("story",),
-              outcomes=(OutcomeDef("knowledge", "story_wall"),), interaction="Touching the grey wall"),
     ActionDef("old_man", "The old man", "observe", "story", "intelligence", 120, 12000, 1,
               "The old man from the road, waiting by a fallen log.",
               "Listened to the old man's story of the summoners.", art="elder", roles=("story",),
               outcomes=(OutcomeDef("knowledge", "story_elder"),), interaction="Listening to the old man"),
-    ActionDef("wall_crossing", "The grey wall", "meditate", "story", "willpower", 300, 30000, 1,
-              "Stand in the mist with a strong enough will and it will learn you.",
-              "Walked into the grey wall and came out the other side.", art="grey_wall", roles=("story",),
-              requirements=(Requirement("level", "willpower", 3),),
-              outcomes=(OutcomeDef("knowledge", "wall_open"),), interaction="Walking into the wall"),
     ActionDef("dead_gate", "Dead gate", "study", "story", "intelligence", 250, 9000, 1,
               "A ring of standing stones taller than a house. Its keystone has three empty sockets.",
-              "Studied the dead gate beyond the wall.", art="dead_gate", roles=("story",),
+              "Studied the dead gate deep in the forest.", art="dead_gate", roles=("story",),
+              requirements=(Requirement("level", "willpower", 3),),
               outcomes=(OutcomeDef("knowledge", "story_gate"),), interaction="Studying the dead gate"),
 )
 ACTIONS = ACTIONS + STORY_ACTIONS
@@ -1579,6 +1567,31 @@ def validate_catalog():
 validate_catalog()
 
 
+# ----- lands: how far each land can be explored (generator v7, edges.py) ----------------------
+@dataclass(frozen=True)
+class LandDef:
+    """The explorable area of one dimension (a land). Every chunk up to `edge_ring` can be reached;
+    a chunk in rings edge_ring+1..`lobe_ring` can be too where its region cell rolls under
+    `lobe_percent`, so the edge is ragged, not a square. Past that the land is closed by what is
+    there: impassable thicket in the woods, fallen trees across a road, a broken bridge over a river."""
+    dimension: str
+    name: str
+    edge_ring: int
+    lobe_ring: int
+    lobe_percent: int
+
+    def __post_init__(self):
+        identifier(self.dimension, "land dimension")
+        integer(self.edge_ring, "land edge ring", 1, 1000)
+        integer(self.lobe_ring, "land lobe ring", self.edge_ring, 1000)
+        integer(self.lobe_percent, "land lobe percent", 0, 100)
+
+
+# Rings 5-6: where auto-pilot lives level off (docs/design/STORY.md measurements).
+LANDS = {land.dimension: land for land in (
+    LandDef("forest", "The forest", edge_ring=5, lobe_ring=6, lobe_percent=45),
+)}
+
 # ----- locations: kinds of place the avatar masters (docs/design/LOCATIONS.md) ----------------
 @dataclass(frozen=True)
 class LocationDef:
@@ -1666,12 +1679,12 @@ def _validate_locations():
 
 _validate_locations()
 
-# ----- story steps and walls ----------------------------------------------------------------
+# ----- story steps ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class StoryStepDef:
     """One step of the main story. `action` is its story ActionDef (placement "story"), whose
-    knowledge outcome must be `id`. `rings` is (lowest, highest) chunk ring where it may be placed;
-    a ring may be "wall" (the wall ring) or "wall+N". `objective` is the HUD line while it is the
+    knowledge outcome must be `id`. `rings` is (lowest, highest) chunk ring where it may be placed.
+    `objective` is the HUD line while it is the
     current step; `lore` lines are logged when it is finished and kept on the Story page."""
     id: str
     chapter: int
@@ -1692,26 +1705,7 @@ class StoryStepDef:
             raise ValueError(f"invalid story lore: {self.id}")
 
 
-@dataclass(frozen=True)
-class WallDef:
-    """The grey wall around a land: nothing enters a chunk past `ring` until the `opened_by`
-    knowledge is held (moving inward is always allowed)."""
-    dimension: str
-    name: str
-    ring: int
-    opened_by: str
-
-    def __post_init__(self):
-        identifier(self.dimension, "wall dimension")
-        integer(self.ring, "wall ring", 1, 1000)
-        identifier(self.opened_by, "wall knowledge")
-
-
-# Placed at the ring where auto-pilot lives level off (docs/design/STORY.md, measurements).
-WALLS = {w.dimension: w for w in (
-    WallDef("forest", "The grey wall", 5, "wall_open"),
-)}
-STORY_CHAPTERS = {1: "The grey wall"}
+STORY_CHAPTERS = {1: "The dead gate"}
 STORY_NEXT = "Chapter 2 is not written yet: find the keystones."
 STORY = (
     StoryStepDef("story_camp", 1, "old_man_camp", (1, 3), "Find the old man's camp along the road",
@@ -1719,43 +1713,29 @@ STORY = (
                   "Under it, in a shaky hand: \"The marks on the old road were cut by the same hands. Follow them.\"")),
     StoryStepDef("story_mark", 1, "summoner_mark", (2, 5), "Find a summoner's mark on the old road",
                  ("The same circle as on the anchor stone, cut deep into a boulder by the road.",
-                  "An arrow under it points away from the anchor. Every mark points the same way: out.")),
-    StoryStepDef("story_watch", 1, "watch_post", (4, "wall"), "Follow the marks out to the wall watchers' post",
-                 ("A log kept by the wall watch, the ink gone brown.",
-                  "\"Night forty. The grey wall stands where the summoners raised it. Nothing has crossed.\"",
-                  "\"The gates beyond have been dark since the keystones were taken.\"")),
-    StoryStepDef("story_wall", 1, "grey_wall", ("wall", "wall"), "Reach the grey wall at the edge of the land",
-                 ("A wall of grey mist, cold and still. It hums like the anchor stone.",
-                  "You push. It pushes back, gently, the way the anchor pulls you home.")),
-    StoryStepDef("story_elder", 1, "old_man", (1, 2), "Find the old man near the anchor and tell him",
-                 ("\"So you found the wall. Then you've earned the rest.\"",
-                  "\"This land had summoners once. They built stone gates to call help from other lands, "
+                  "An arrow under it points deeper into the forest. Every mark points the same way.")),
+    StoryStepDef("story_elder", 1, "old_man", (1, 2), "Tell the old man what the marks show",
+                 ("\"So the marks still point the way. Then you've earned the rest.\"",
+                  "\"This forest had summoners once. They raised stone gates to call help from other lands, "
                   "and anchors to call their own back from death.\"",
                   "\"One night the gates would not close. What came through still walks: the pale lights, "
                   "the dead at the mounds.\"",
-                  "\"The last summoners raised the wall, pulled the keystones out of the gates and carried "
-                  "each one away to another land.\"",
-                  "\"The wall lets through only what an anchor can call back. Stand in it with a strong "
-                  "enough will and it will let you pass.\"")),
-    StoryStepDef("wall_open", 1, "wall_crossing", ("wall", "wall"), "Walk into the grey wall (needs Willpower 3)",
-                 ("The mist closes over you, colder than river water, and lets you go.",
-                  "Behind you the wall is only mist now. It will let you through from now on.")),
-    StoryStepDef("story_gate", 1, "dead_gate", ("wall+1", "wall+2"), "Find what the wall was hiding",
+                  "\"The last summoners pulled the keystones out of the gates and carried each one away to "
+                  "another land, so no gate could open again.\"",
+                  "\"One gate still stands deep in these woods. Go and look at it - when your will is strong "
+                  "enough to bear it.\"")),
+    StoryStepDef("story_gate", 1, "dead_gate", (4, 6), "Find the dead gate deep in the forest (needs Willpower 3)",
                  ("A ring of standing stones taller than a house, carved with the summoning circle.",
-                  "The keystone has three sockets, all empty: one for each land the summoners walled away.",
+                  "The keystone has three sockets, all empty: one for each land the summoners closed it to.",
                   "\"Find the keystones,\" the old man said. \"Then you will see what a summoner can call.\"")),
 )
 STORY_BY_ID = {step.id: step for step in STORY}
 STORY_BY_ACTION = {step.action: step for step in STORY}
 
 
-def story_rings(step, wall_ring):
-    """(lowest, highest) ring of a story step, with "wall"/"wall+N" resolved."""
-    def resolve(value):
-        if isinstance(value, int):
-            return value
-        return wall_ring + (int(value[5:]) if value != "wall" else 0)
-    return resolve(step.rings[0]), resolve(step.rings[1])
+def story_rings(step):
+    """(lowest, highest) chunk ring of a story step."""
+    return step.rings
 
 
 def _validate_story():
@@ -1770,19 +1750,13 @@ def _validate_story():
         if step.chapter not in STORY_CHAPTERS:
             raise ValueError(f"story step {step.id} names an unknown chapter")
         for value in step.rings:
-            if isinstance(value, int):
-                integer(value, "story ring", 1, 1000)
-            elif not (isinstance(value, str) and (value == "wall" or value.startswith("wall+") and value[5:].isdecimal())):
-                raise ValueError(f"invalid story ring: {step.id}")
-        low, high = story_rings(step, 100)
+            integer(value, "story ring", 1, 1000)
+        low, high = story_rings(step)
         if low > high:
             raise ValueError(f"story rings out of order: {step.id}")
     for action in ACTIONS:
         if action.placement == "story" and action.id not in STORY_BY_ACTION:
             raise ValueError(f"story action {action.id} belongs to no story step")
-    for wall in WALLS.values():
-        if wall.opened_by not in STORY_BY_ID:
-            raise ValueError(f"nothing opens the wall in {wall.dimension}")
 
 
 _validate_story()

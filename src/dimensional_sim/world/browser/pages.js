@@ -243,7 +243,7 @@ function settings(state, host, prefs = {}) {
   return sections;
 }
 
-/** Journal · Story: what to do next, the wall, and every story step found, newest first. */
+/** Journal · Story: what to do next and every story step found, newest first. */
 function story(d) {
   const s = d.story, sections = [];
   if (!s) return sections;
@@ -252,8 +252,6 @@ function story(d) {
     ['Now', c.objective, c.waits.length ? `Waiting: ${c.waits.join('; ')}` : c.here ? 'It is close.'
       : `Somewhere in ring${c.rings[0] === c.rings[1] ? ` ${c.rings[0]}` : `s ${c.rings[0]}-${c.rings[1]}`}`]]});
   if (s.next) sections.push({title: 'What comes next', kind: 'rows', rows: [['Next', s.next]]});
-  if (s.wall) sections.push({title: s.wall.name, kind: 'rows', rows: [['Where', `ring ${s.wall.ring}`,
-    s.wall.open ? 'It lets you through.' : 'Nothing goes past it yet.']]});
   for (const step of [...s.done].reverse()) sections.push({title: step.name, kind: 'lore', lines: step.lore});
   if (!s.done.length) sections.push({title: 'Found so far', kind: 'rows', rows: [['Nothing yet', 'Story places glow gold.']]});
   return sections;

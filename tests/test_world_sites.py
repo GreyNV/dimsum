@@ -80,7 +80,7 @@ class PlacementTests(unittest.TestCase):
         w = new_world(SEED)
         before = sites(w)
         saved = json.loads(canonical_json(w.to_dict()))
-        self.assertEqual(saved["schema_version"], 7)
+        self.assertEqual(saved["schema_version"], 8)
         moved = {k: replace(v, weights={r: 1 for r in v.weights}) for k, v in SITES.items()}
         with patch.dict(SITES, moved):
             self.assertEqual(sites(WorldRepository.from_dict(saved)), before, "a catalog edit never moves sites")
@@ -111,7 +111,9 @@ class PlacementTests(unittest.TestCase):
         art = (pathlib.Path(__file__).parents[1] / "src/dimensional_sim/world/browser/art.js").read_text()
         block = art[art.index("export const STRUCTURE_ART"):]
         drawn = set(re.findall(r"^  ([A-Z]): \{paint:", block, re.M))
-        self.assertEqual(drawn, {g for glyphs in STRUCTURE_GLYPHS.values() for g in glyphs})
+        from dimensional_sim.world.open_terrain import BROKEN_BRIDGE, DEADFALL
+        self.assertEqual(drawn, {g for glyphs in STRUCTURE_GLYPHS.values() for g in glyphs} | {DEADFALL, BROKEN_BRIDGE},
+                         "every site structure and the edge of the land (fallen trees, broken bridge) has art")
 
     def test_site_at_respects_region_weights(self):
         key = next(k for k in AREA if site_at(SEED, k, "old_road", 32, 16) is not None)

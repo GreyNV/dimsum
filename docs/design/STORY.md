@@ -1,4 +1,4 @@
-# The story: bible, chapter 1 and the grey wall (2026-10-22)
+# The story: bible and chapter 1 (2026-10-22)
 
 ## Andrew's request
 
@@ -11,20 +11,21 @@
 
 ## Story bible (one page)
 
-**The central question.** Why is this land closed in, and what are you now?
+**The central question.** What are you now, and what were the gates?
+
+**Revised 2026-10-22 (Andrew).** The grey wall is gone. It made no sense: the bandits who killed
+the traveller were here, so nothing had sealed the land. The forest is bounded by plain geography
+instead: impassable thicket, fallen trees across a road, a broken bridge (`edges.py`,
+docs/design/FIRST_LAND_REVIEW.md). Other lands are reached only through the old gates.
 
 **History.** The player learns it in pieces and never all at once.
 - This land once had **summoners**. They cut stone **gates** (rings of standing stones) to call
   help from other lands. They cut **anchors** (waystones) to call their own people back from death.
 - One night the gates would not close, and things came through. The **pale lights** (wisps) are
   some of them. The **restless dead** at the mounds are summoners who fell holding the gates.
-- The last summoners did two things:
-  - They raised the **grey wall**, a ring of cold mist around the whole land.
-  - They pulled the **keystones** out of the gates and carried each one away to another land, so
-    no gate could be opened from one side alone.
-- The **wall watch** kept towers along the old road (the fallen watchtowers). Its "scratched
-  warnings" are their log.
-- The **old carvings** on the road are summoners' marks. They all point out, towards the gates.
+- The last summoners pulled the **keystones** out of the gates and carried each one away to
+  another land, so no gate could open again.
+- The **old carvings** on the road are summoners' marks. They all point the same way: to the gate.
 - One anchor was left asleep under the old road. A god found it and used it (below).
 
 **You (Andrew, 2026-10-22): the player is a god.**
@@ -43,10 +44,7 @@
   **dimensional ash**.
 - **Ash:** the only thing the anchor can hold. That is why ash buys what outlasts a life (kept
   crafts, bound buildings, contact).
-- **Rings:** the further from the anchor, the closer to the wall. More of what came through still
-  roams there, so danger grows ring by ring.
-- **The wall:** it lets through only what an anchor can call back. Only an avatar can pass, and
-  only with a strong enough will (Willpower).
+- **Rings:** the further from the anchor, the wilder the forest, so danger grows ring by ring.
 - **Summoning:** the title. The avatar relearns the summoners' art through the story. Summoned
   gear is the reward of chapter 2 and the key to the next lands.
 
@@ -54,10 +52,10 @@
 traveller back from death and bound him to the anchor stone.
 
 **Voice.** Everyday words, short sentences.
-- Named things: the anchor, the grey wall, the old man, the gate, keystones, summoners.
+- Named things: the anchor, the old man, the gate, keystones, summoners.
 - No invented proper nouns until a name earns its place.
 
-## Chapter 1: The grey wall (built)
+## Chapter 1: The dead gate (built; reworked 2026-10-22)
 
 Each step:
 - is a **story place**: a `placement="story"` action;
@@ -69,39 +67,13 @@ Each step:
 | # | Story place | Where | Gate (grown by autoplay) | What the player learns |
 |---|---|---|---|---|
 | 0 | Opening (anchor, 4 beats) | anchor | none | anchor, avatar, possession, ash and what it buys, the closed land, the old man |
-| 0 | Prologue (existing; lines rewritten) | anchor | none | ambush, not the gods but the stone, possession, hunger, the old man's camp |
+| 0 | Prologue (existing; lines rewritten) | anchor | none | ambush, a god and the stone, possession, hunger, the old man's camp |
 | 1 | The old man's camp | rings 1-3 | none (life 1) | the marks on the road were cut by the anchor's makers |
-| 2 | Summoner's mark | rings 2-5 | Road lore (Endurance 3) | every mark points outward |
-| 3 | Wall watchers' post | rings 4-5 | reach ring 4 | the wall, the watch, dark gates, taken keystones |
-| 4 | The grey wall | ring 5 (the wall) | reach the wall | the wall is real and pushes back like the anchor |
-| 5 | The old man | rings 1-2 | step 4 done | the whole history, and how to pass the wall |
-| 6 | The grey wall (crossing) | ring 5 | **Willpower 3** | the wall opens for good |
-| 7 | Dead gate | rings 6-7 | the wall is open | three empty keystone sockets; next: find the keystones |
+| 2 | Summoner's mark | rings 2-5 | Road lore (Endurance 3) | every mark points deeper in |
+| 3 | The old man | rings 1-2 | step 2 done | summoners, gates, keystones; one gate still stands in these woods |
+| 4 | Dead gate | rings 4-6 | **Willpower 3** | three empty keystone sockets; next: find the keystones |
 
-**Gates in data.** Growth gates use the existing rules:
-- `unlock` (dimensional levels);
-- the new `Requirement("level", attr, n)`, which now reads dimensional levels;
-- rings, through the frontier.
-
-**Why these gates.** In the baseline cohort below, Endurance 3 arrives at 1.7-3.1 h and Willpower 3
-at 3.2-4.4 h. The chapter therefore spans roughly the first 4-5 hours, with a beat every 30-90 min.
-
-## The grey wall (built)
-
-- **Data.** `catalog.WALLS["forest"] = WallDef(ring=5, opened_by="wall_open")`. It is per
-  dimension, so every later land gets its own wall.
-- **Movement (`runtime._step_target`).** While closed, a step never enters a chunk past the wall
-  ring. The same rule is in the auto-pilot's movement graph (`navigation._can_move`), so paths
-  never try. Stepping inward is always allowed, so a save already standing past the wall is never
-  stuck.
-- **Frontier.** `frontier()` is clamped to the wall ring while the wall is closed.
-- **Client (`story_ui.js drawWall`).** Grey mist over every chunk past the wall, and drifting `~ : .`
-  glyphs along the wall line. After it opens, only a faint haze stays at the line. The minimap
-  greys those chunks out.
-- **State.** The limit comes from knowledge and is never saved (like weapon reach). No save
-  schema change.
-
-## Where the wall goes, and why ring 5: measurements
+## Where the land's edge goes, and why ring 5: measurements
 
 **Baseline, before any story code.** Current main, 6 seeds × 10 h, autopilot, `spend` policy at
 each anchor, 130 lives.
@@ -120,14 +92,12 @@ each anchor, 130 lives.
   deepest ring stays flat at 5-6. Danger grows ×1.5 per ring, and that outruns stat growth.
   Autoplay alone never gets meaningfully past ring 6.
 
-**Why ring 5.** It is the ring most lives reach (85% reach 5 or deeper). The first ring past it
-(6) is where autoplay stalls. So the wall stands just inside the natural ceiling, and the land
-past it really is harder.
+**Why ring 5 (lobes into 6).** It is the ring most lives reach (85% reach 5 or deeper), and
+ring 6 is where autoplay stalls. So the land ends where autoplay levels off, and the whole land
+stays worth exploring.
 
-**Why not ring 6.** Then the gate would sit at ring 7. Only 4% of lives reached 7, and none after
-hour 6, so the chapter would never end for most players.
-
-**Verification cohort, with the story.** The same 6 seeds, about 7.5 h each, same policy.
+**Verification cohort, with the story and the old grey wall** (superseded; kept for the record).
+The same 6 seeds, about 7.5 h each, same policy.
 
 | Seed | Mark | Watch post | Wall | Old man | Crossing (Willpower 3) | Gate: chapter done |
 |---|---|---|---|---|---|---|
@@ -178,7 +148,7 @@ hour 6, so the chapter would never end for most players.
 
 ### Chapter 2: The keystones
 
-1. **The summoner's tomb** (ring 6-7, past the wall).
+1. **The summoner's tomb** (a placed landmark inside the land).
    - A guarded story site: a summoner's barrow with a strong guardian.
    - It needs gear or possession to win.
    - Reward: the first **keystone** (a relic) and the summoner's last notes, which teach **summoning**.
@@ -205,7 +175,7 @@ hour 6, so the chapter would never end for most players.
   already exists; it has no content yet.
 - **Arrival and death.** The avatar arrives at that land's gate. Death still returns it to the
   forest anchor; the gate stays lit, so going back costs a walk.
-- **Its own wall.** `WALLS["ash_plain"]`, opened by chapter 3.
+- **Its own edge.** A `LandDef` for its dimension, with its own edge features (cliffs, ash drifts).
 - **Stronger enemies.** Two new `BiomeDef` fields:
   - `base_hit_percent` (for example 180%) on top of the ring curve;
   - `base_hp` added to every fight.
@@ -230,28 +200,19 @@ hour 6, so the chapter would never end for most players.
 
 ## How we know it is right
 
-- **Cohort.** With the story, every seed:
-  - reaches the wall;
-  - finishes chapter 1 inside about 6 h;
-  - never stands past the closed wall;
-  - keeps ash and levels near the baseline at matched hours (the wall should not starve the
-    economy).
-- **Tests.** `tests/test_world_story.py` covers:
-  - placement for sure;
-  - lore;
-  - persistence through death and reload;
-  - exact replay;
-  - requirement reasons;
-  - the runtime and frontier wall, including stepping back in.
-  
-  `tests/browser_story.test.mjs` covers the HUD line, the wall edges and the opening beats. Both
-  full suites must pass.
+- **Cohort.** With the story, every seed finishes chapter 1 within the measured hours; no avatar
+  ever stands in a closed chunk; ash and levels stay near the baseline.
+- **Tests.**
+  - `tests/test_world_story.py`: placement for sure, lore, persistence through death and reload,
+    exact replay, requirement reasons.
+  - `tests/test_world_edges.py`: the edge is ragged, every open chunk is reachable, sealed sides
+    have no exits, roads end in fallen trees or a broken bridge, and the land catalog is pinned.
+  - `tests/browser_story.test.mjs`: the HUD line, the story cards and the opening beats.
 - **Cold read (people, not us).** A friend who has never seen the game plays the opening and the
   first 10 minutes. Then they answer:
   1. Why are you here?
   2. What is ash?
   3. What happens when you die?
   4. What should you do next?
-  5. What is the grey wall?
 
   Three or more right answers means the opening works.

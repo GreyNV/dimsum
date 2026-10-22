@@ -192,12 +192,6 @@ export const SPOT_ART = {
     smallTree(c, 22, h - 2, 30); sparkle(c, 9, 6, 1.4, '#e2d2ff'); sparkle(c, 35, 6, 1.4, '#e2d2ff'); }],
   mossy_stone: [36, 28, (c, w, h) => { ground(c, w, h); stone(c, 18, 17, 11, 9, {moss: true}); stone(c, 28, 23, 4, 3); tuft(c, 7, 26, 4); }],
   // Main story places.
-  watch_post: [36, 32, (c, w, h) => { ground(c, w, h); plank(c, 4, 9, 2.6, 21, {nails: false}); plank(c, 29, 9, 2.6, 21, {nails: false});
-    fill(c, P([[1, 11], [18, 3], [35, 11], [33, 13], [3, 13]]), '#6b6a62', {sheen: .35}); plank(c, 9, 17, 18, 9, {color: '#7a6a52'});
-    fill(c, R(14, 19, 8, 5, .8), '#3b2a1c', {edge: .5}); line(c, '#e6d6aa', .6, 15, 21, 21, 21); line(c, '#e6d6aa', .6, 15, 22.6, 20, 22.6); }],
-  grey_wall: [44, 42, (c, w, h) => { for (let i = 0; i < 4; i++) glow(c, 11 + i * 7.3, 24 - (i % 2) * 6, 10, 'rgba(214, 220, 230, .4)');
-    for (let i = 0; i < 9; i++) line(c, 'rgba(238, 241, 246, .65)', .7, 3 + i * 4.6, h - 3, 5 + i * 4.6 + (i % 2 ? 2 : -2), 6 + (i % 3) * 3);
-    sparkle(c, 14, 10, 1.3, '#eef1f6'); sparkle(c, 30, 15, 1.1, '#eef1f6'); }],
   dead_gate: [44, 42, (c, w, h) => { ground(c, w, h, 20); for (const x of [8, 36]) fill(c, P([[x - 4, h - 2], [x - 3, 9], [x, 6], [x + 3, 9], [x + 4, h - 2]], true), STONE, {sheen: .4, shade: .55});
     block(c, 5, 4, 34, 6, {moss: true}); fill(c, E(22, 7, 4, 2.6), '#2a2620', {edge: .5});
     for (const [x, y] of [[8, 18], [36, 18], [8, 28], [36, 28]]) rune(c, x, y, 1.3, '#9aa3ad'); }],
@@ -306,6 +300,10 @@ export const STRUCTURE_PAINT = {
     c.save(); c.beginPath(); roof.path(c); c.clip(); for (let y = 8; y < 28; y += 3) line(c, 'rgba(40, 26, 14, .6)', .6, 0, y, 58, y); c.restore(); log(c, 28, 5, 30, 1, 1.2, {end: false}); }],
   R: [32, 34, (c, w, h) => { ground(c, w, h); for (const x of [3, 27]) plank(c, x, 4, 2.6, 28, {nails: false}); plank(c, 2, 4, 28, 2.2);
     fill(c, P([[8, 7], [24, 7], [22, 22], [10, 22]], true), '#a6845d', {sheen: .4}); strokes(c, R(8, 7, 16, 15), '#6e4a2c', 14, {len: 3, angle: Math.PI / 2, seed: 4}); }],
+  K: [34, 26, (c, w, h) => { ground(c, w, h); log(c, 2, 21, 32, 18, 3.4); log(c, 4, 13, 31, 16, 3); log(c, 6, 8, 27, 6, 2.4);
+    for (const [x, y] of [[9, 5], [24, 4], [16, 11]]) line(c, BARK, 1, x, y, x + 3, y - 4); bush(c, 30, 9, 3.4, {color: '#44602b', seed: 7}); }],
+  Y: [32, 30, (c, w, h) => { for (const x of [4, 26]) { plank(c, x, 6, 3, 22, {nails: false, color: '#5a4128'}); fill(c, E(x + 1.5, 28, 3, 1.2), 'rgba(4, 8, 4, .4)', {edge: 0}); }
+    plank(c, 2, 6, 10, 2.6, {color: WOOD}); plank(c, 21, 7, 9, 2.6, {color: WOOD}); line(c, '#3b2a1c', .8, 12, 7, 15, 11); line(c, '#3b2a1c', .8, 21, 8, 18, 12); }],
   P: [24, 42, (c, w, h) => { ground(c, w, h, 9); block(c, 3, 36, 18, 5); fill(c, R(6, 8, 12, 28, 1.6), STONE, {sheen: .45, shade: .55}); block(c, 4, 4, 16, 5, {moss: true});
     for (const y of [14, 22, 30]) rune(c, 12, y, 1.6, '#cfe6ff'); }],
   Q: [34, 36, (c, w, h) => { ground(c, w, h); block(c, 2, 28, 30, 7); fill(c, P([[5, 28], [7, 14], [15, 14], [16.4, 28]]), STONE, {sheen: .4}); fill(c, P([[18, 28], [19, 14], [27, 14], [29, 28]]), STONE, {sheen: .4});

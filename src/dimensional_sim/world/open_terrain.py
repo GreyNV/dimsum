@@ -79,9 +79,10 @@ def _trail(seed, along, other, band, size, label, amplitude, scale):
     return size // 2 + (_noise(seed, along, band * other, scale, label) - 50) * max(1, amplitude) // 50
 
 
-def compose_open(source, spec, key, seed, *, region=None, region_grid=None, water=None, site=None, groves=False):
+def compose_open(source, spec, key, seed, *, region=None, region_grid=None, water=None, site=None, groves=False,
+                 sealed=()):
     if region_grid is not None:
-        return _compose_v3(source, spec, key, seed, region, region_grid, water, site, groves)
+        return _compose_v3(source, spec, key, seed, region, region_grid, water, site, groves, sealed)
     if "open-terrain-v1" not in source.tags:
         raise ValueError("open generation requires a supported versioned recipe")
     w, h = source.width, source.height
@@ -212,7 +213,28 @@ def _grove_block(seed, gx, gy, canopy):
     return roll < 2               # a lone tree in a clearing
 
 
-def _compose_v3(source, spec, key, seed, region, grid, water=None, site=None, groves=False):
+# The edge of a land (generator v7, edges.py): a sealed side grows a ragged band of thicket
+# EDGE_DEPTH tiles deep; a road crossing it is blocked by fallen trees, a bridge is broken.
+EDGE_DEPTH = (2, 4)
+DEADFALL, BROKEN_BRIDGE = "K", "Y"
+
+
+def _edge_band(seed, key, w, h, sealed):
+    """{(x, y)} of the cells a land's edge closes in this chunk (ragged: depth varies per tile)."""
+    band = set()
+    low, high = EDGE_DEPTH
+    for side in sealed:
+        along = w if side in ("north", "south") else h
+        for i in range(along):
+            g = (key.x * w + i) if side in ("north", "south") else (key.y * h + i)
+            depth = low + _smooth_noise(seed, g, 0, 3, f"edge-{side}") * (high - low + 1) // 101
+            for d in range(depth):
+                band.add({"north": (i, d), "south": (i, h - 1 - d),
+                          "west": (d, i), "east": (w - 1 - d, i)}[side])
+    return band
+
+
+def _compose_v3(source, spec, key, seed, region, grid, water=None, site=None, groves=False, sealed=()):
     """Generator v3: tile-level regions (organic borders) and narrow meandering game trails.
 
     Trails still cross every chunk north-south and east-west so all four exits connect,
@@ -312,6 +334,20 @@ def _compose_v3(source, spec, key, seed, region, grid, water=None, site=None, gr
             else:
                 collision[y][x] = False
         site_objects = kept
+    # v7: the edge of the land closes sealed sides (thicket; fallen trees on a road; a broken bridge).
+    # A trail inside the band stays open unless it is within a tile of the closed boundary, so a
+    # trail running along the edge still links the chunk's other sides; the one heading out ends
+    # in thicket, fallen trees or a broken bridge right at the edge.
+    barrier = {}
+    near = lambda x, y: (("north" in sealed and y <= 1) or ("south" in sealed and y >= h - 2)
+                         or ("west" in sealed and x <= 1) or ("east" in sealed and x >= w - 2))
+    for (x, y) in sorted(_edge_band(seed, key, w, h, sealed)) if sealed else ():
+        if (paths[y][x] or road[y][x]) and not near(x, y):
+            continue
+        if road[y][x]:
+            barrier[(x, y)] = BROKEN_BRIDGE if wet(x, y) else DEADFALL
+        collision[y][x] = True
+        paths[y][x] = road[y][x] = False
     lanes = [(x, y) for y in range(h) for x in range(w) if paths[y][x]]
     origin = min(lanes, key=lambda p: (abs(p[0] - w // 2) + abs(p[1] - h // 2), p[1], p[0]))
     ambush = region is not None and source.biome == "dark_forest" and key.x == key.y == 0
@@ -346,6 +382,8 @@ def _compose_v3(source, spec, key, seed, region, grid, water=None, site=None, gr
             r = grid[y][x]
             if wet(x, y):
                 env_row.append(bridge if road[y][x] else ford if paths[y][x] else river)
+            elif (x, y) in barrier:
+                env_row.append(trail)   # the road runs on under the fallen trees
             elif road[y][x]:
                 env_row.append(trail)
             elif (x, y) in site_ground and not paths[y][x]:
@@ -362,7 +400,9 @@ def _compose_v3(source, spec, key, seed, region, grid, water=None, site=None, gr
                         env_row[-1] = replace(ground, glyph="x")
                     elif remnant == 2:
                         env_row[-1] = replace(ground, glyph=":")
-            if wet(x, y):
+            if (x, y) in barrier:
+                obj_row.append(Cell(barrier[(x, y)], floor.fg, floor.bg))
+            elif wet(x, y):
                 obj_row.append(None)
             elif (x, y) in site_objects and collision[y][x]:
                 obj_row.append(Cell(site_objects[(x, y)], floor.fg, floor.bg))
