@@ -8,14 +8,15 @@ import {shopSections} from './hud.js';
 export const ANCHOR_TEXT = Object.freeze({
   opening: {
     eyebrow: 'Before your first life', title: 'The anchor',
-    // Told one beat at a time before the shop appears; each beat sets up something the shop sells.
+    // Told one beat at a time before the shop appears, as narration to the player: you are the god.
+    // The screen starts dark; the anchor stone fades in with the first beat, the body with the second.
     beats: [
-      '“You answered. I am an anchor, a stone the old summoners cut. I have slept under the old road for a hundred years, waiting for someone to answer.”',
-      '“Tonight a traveller was killed on that road. I have bound you to the body. Through it you can walk this land: it is your avatar. When it takes your hands, it moves quicker.”',
-      '“When it falls, I pull it back to me. What it carries burns to dimensional ash on the way. Ash is all I can hold, and with ash I keep for you what should outlast a life: crafts it learns, the camp it builds, ways to reach me.”',
-      '“This land is closed. Long ago the summoners raised a grey wall around it, and the old gates beyond it went dark. Grow strong. Find the old man who watches the road. He remembers why.”',
+      'Darkness. Then, slowly, a light you know: a stone standing in the dark. It is yours.',
+      'This is the dimensional anchor. You bound a soul to it, a traveller killed on the forest road tonight. Through that body you can walk this world, and when you choose, take its hands yourself.',
+      'The body can fall, but it cannot die. When it falls, the anchor pulls it back here and its life begins again from the start.',
+      'Nothing is lost. Every past life shapes the next: what it learned stays with it, and what it carried burns into ash, which the anchor turns into what lasts.',
     ],
-    dialogue: '“Spend ash here on what should last. Then go.”',
+    dialogue: 'Spend ash on what should last. Then begin.',
     hint: 'Skill 1: Contact anchor. Skill 2: Possess. Make campfire appears in nearby choices once bought.',
     next: 'Continue',
     begin: 'Begin your first life'},
@@ -32,7 +33,24 @@ export const ANCHOR_TEXT = Object.freeze({
 });
 
 /** Which opening beat is showing (client only: a reload starts the story again, which is harmless). */
-let openingBeat = 0, lastExpedition = null;
+let openingBeat = 0, lastExpedition = null, openingStart = null, beatStart = null, openingEnd = null;
+const ANCHOR_FADE_MS = 4500, BODY_FADE_MS = 2500, LIGHT_UP_MS = 1800;
+
+/** How much of the opening's darkness has lifted at time `now` (ms), or null when it is gone:
+ * {anchor, body, world} each 0..1. The anchor stone fades in first, then the bound body, then
+ * the forest once the story is told. Client only. */
+export function openingReveal(ex, now) {
+  if (ex?.anchor_space?.kind !== 'opening') return null;
+  const clamp = v => Math.max(0, Math.min(1, v));
+  openingStart ??= now; beatStart ??= now;
+  const telling = openingBeat < ANCHOR_TEXT.opening.beats.length;
+  if (!telling) openingEnd ??= now;
+  const world = telling ? 0 : clamp((now - openingEnd) / LIGHT_UP_MS);
+  if (world >= 1) return null;
+  return {anchor: clamp((now - openingStart - 600) / ANCHOR_FADE_MS),
+          body: openingBeat >= 1 ? clamp((now - (openingBeat === 1 ? beatStart : openingStart)) / BODY_FADE_MS) : 0,
+          world};
+}
 /** The beat to show for expedition `ex`, or null once the beats are done (the shop shows). */
 export function openingBeatText(ex, beat = openingBeat) {
   const beats = ANCHOR_TEXT.opening.beats;
@@ -125,6 +143,7 @@ export function anchorAction(target) {
   const begin = target.closest('#anchor-begin');
   if (begin && begin.dataset.kind === 'beat') {   // the next opening beat: nothing to ask the server
     openingBeat += 1;
+    beatStart = performance.now();
     if (lastExpedition) renderAnchor(lastExpedition);
     return null;
   }

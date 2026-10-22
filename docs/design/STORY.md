@@ -25,13 +25,18 @@
 - The **wall watch** kept towers along the old road (the fallen watchtowers). Its "scratched
   warnings" are their log.
 - The **old carvings** on the road are summoners' marks. They all point out, towards the gates.
-- One anchor was left asleep under the old road, in case a summoner ever rose again.
+- One anchor was left asleep under the old road. A god found it and used it (below).
 
-**You.**
-- A traveller killed by bandits on the old road.
-- *Something answered* the sleeping anchor, and the anchor bound that something to the body.
-  That something is the player: the presence that can take the avatar's hands (possession).
-- **Open thread:** who answered? It is never stated. Chapter 3 or later.
+**You (Andrew, 2026-10-22): the player is a god.**
+- The god bound the soul of a traveller, killed by bandits on the forest road, to a **dimensional
+  anchor**. That body is the avatar.
+- The god watches the avatar live on its own (autoplay). The god can also take its hands for a
+  while (possession).
+- The avatar **cannot die**. When it falls, the anchor pulls it back and its life begins again from
+  the start.
+- **All past lives shape the new one:** dimensional experience, kept crafts, bound buildings, ash.
+- The anchor does not speak; the opening is narration to the god.
+- **Open thread:** why this god, and why this traveller. Chapter 3 or later.
 
 **Why the mechanics are what they are.**
 - **Death:** the anchor calls the body back. What it carries cannot cross with it, so it burns to
@@ -45,8 +50,8 @@
 - **Summoning:** the title. The avatar relearns the summoners' art through the story. Summoned
   gear is the reward of chapter 2 and the key to the next lands.
 
-**The gods.** Forest folk believe the gods spared you, and roadside shrines still take prayers.
-The old man says plainly that it was not the gods but the stone. Both stay true to their speakers.
+**The gods.** Forest folk pray at roadside shrines. The old man knows what he saw: a god took the
+traveller back from death and bound him to the anchor stone.
 
 **Voice.** Everyday words, short sentences.
 - Named things: the anchor, the grey wall, the old man, the gate, keystones, summoners.
@@ -150,19 +155,24 @@ hour 6, so the chapter would never end for most players.
 - **Deaths:** starvation fell from 48 to 35 (boar 30 → 38).
 - **After the wall opens:** lives reach rings 6-8 as before (6: 23, 7: 6, 8: 1 of 62 lives).
 
-## Opening (built)
+## Opening (built; revised 2026-10-22)
 
-- **New games (`anchor_space.kind == "opening"`).** The anchor speaks in four beats before the
-  shop shows (`anchor_ui.js ANCHOR_TEXT.opening.beats`).
-- **What each beat sets up:**
-  1. who it is;
-  2. the body and possession;
-  3. death, ash and what ash buys (this is when the shop appears);
-  4. the closed land and the old man.
-- **Mechanics.** Beats are client-only (Continue 1/4 … 4/4); nothing is asked of the server. A
-  reload during the beats starts them again, which is harmless.
-- **The old man (prologue).** His lines no longer tell you to worship the gods. He names the
-  stone and points you to his camp, which is step 1.
+- **New games (`anchor_space.kind == "opening"`).** Everything starts in darkness, then:
+  - the anchor stone fades in slowly (about 5 s);
+  - the bound body fades in with the second beat;
+  - the shop appears after the fourth beat.
+
+  The art is `anchor_ui.openingReveal` and `story_ui.drawOpeningDark`.
+- **Beats.** Narration to the player-god, not words of the anchor:
+  1. darkness, and a stone that is yours;
+  2. this is the dimensional anchor; you bound a dead traveller's soul to it; through that body you
+     walk this world and can take its hands;
+  3. the body cannot die: when it falls, the anchor pulls it back and its life begins again;
+  4. nothing is lost: every past life shapes the next (what it learned stays, what it carried
+     becomes ash for what lasts).
+- **Mechanics.** Beats are client-only. Reduced motion skips the fade.
+- **The old man (prologue).** A god took you back from death and bound you to the stone. That god
+  looks out through your eyes. He points you to his camp, which is step 1.
 
 ## Phase 2 spec: keystones, gates and the second land (not built; needs Andrew's OK)
 

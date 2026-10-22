@@ -9,8 +9,8 @@ import {locationAction, renderLocationContext} from './location_ui.js';
 import {$, el, readUi, writeUi} from './dom.js';
 import {hosted, request, releaseInput} from './transport.js';
 import {drawMinimap, visibleAt} from './minimap.js';
-import {anchorAction, renderAnchor} from './anchor_ui.js';
-import {StoryCard, drawWall, renderStory} from './story_ui.js';
+import {anchorAction, openingReveal, renderAnchor} from './anchor_ui.js';
+import {StoryCard, drawOpeningDark, drawWall, renderStory} from './story_ui.js';
 import {buildTabs, journalAction, renderSection, renderSubtabs} from './page_ui.js';
 import {dayGrade, drawDayGrade, drawNight, nightAlpha, drawEdgeMarker, drawEyelids, drawPossessionAura, drawPossessionGround, drawPossessionTint, drawVignette, edgePoint, possessionGlow, tintPicture} from './scene_fx.js';
 import {drawMotes, drawReflection, drawWaterGlints, isWater} from './nature_art.js';
@@ -396,6 +396,10 @@ function render(now) {
     ctx.translate(width/2,height*.38);ctx.scale(scale,scale);
     drawCamp(ctx,-48,-15,{clock:state.expedition.total_ms,reducedMotion});
     drawPlayer(ctx,state.player,59,-11,null,{clock:state.expedition.total_ms});
+    // The opening: darkness, the anchor stone fading in, then the body bound to it.
+    const reveal = openingReveal(state.expedition, reducedMotion ? now + 1e9 : now);
+    if (reveal) drawOpeningDark(ctx, reveal, width, height, {x: width / 2 - 48 * scale, y: height * .38 - 40 * scale},
+      {x: width / 2 + 59 * scale, y: height * .38 - 30 * scale}, scale / 1.3);
     if(!stopped)requestAnimationFrame(render);
     return;
   }

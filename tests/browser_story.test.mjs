@@ -36,7 +36,8 @@ test('the opening tells its story in short beats before the shop', () => {
   assert.equal(openingBeatText(opening, beats.length), null, 'then the shop');
   assert.equal(openingBeatText({anchor_space: {kind: 'death'}}, 0), null, 'only before the first life');
   assert.match(beats.join(' '), /ash/);
-  assert.match(beats.join(' '), /wall/);
+  assert.match(beats.join(' '), /anchor/);
+  assert.match(beats.join(' '), /cannot die/);
 });
 
 test('story cards: only new story lines, grouped by the place they came from', async () => {
@@ -50,4 +51,15 @@ test('story cards: only new story lines, grouped by the place they came from', a
   ];
   assert.deepEqual(newStoryCards(log, 4), {cards: [{encounter: 'a', lines: ['one', 'two']}, {encounter: 'b', lines: ['three']}], seq: 8});
   assert.deepEqual(newStoryCards(log, 8), {cards: [], seq: 8});
+});
+
+test('the opening starts dark and the anchor stone fades in first, the body after', async () => {
+  const {openingReveal} = await import('../src/dimensional_sim/world/browser/anchor_ui.js');
+  const ex = {anchor_space: {kind: 'opening'}};
+  assert.equal(openingReveal({anchor_space: {kind: 'death'}}, 0), null);
+  const start = openingReveal(ex, 1000);
+  assert.deepEqual(start, {anchor: 0, body: 0, world: 0});
+  const later = openingReveal(ex, 1000 + 3000);
+  assert.ok(later.anchor > .4 && later.anchor < 1 && later.body === 0 && later.world === 0);
+  assert.equal(openingReveal(ex, 1000 + 10000).anchor, 1);
 });

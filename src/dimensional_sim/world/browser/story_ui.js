@@ -141,3 +141,31 @@ export class StoryCard {
       Object.assign(document.createElement('i'), {className: i < this.line ? 'done' : i === this.line ? 'now' : ''})));
   }
 }
+
+let darkLayer = null;
+/** The opening's darkness (screen space): black everywhere but a soft light around the anchor
+ * stone (`reveal.anchor`) and the body bound to it (`reveal.body`); `reveal.world` lifts it all. */
+export function drawOpeningDark(ctx, reveal, width, height, anchorAt, bodyAt, scale = 1) {
+  if (!reveal) return;
+  const alpha = 1 - reveal.world;
+  if (alpha <= 0) return;
+  darkLayer ??= document.createElement('canvas');
+  const layer = darkLayer;
+  if (layer.width !== Math.ceil(width) || layer.height !== Math.ceil(height)) { layer.width = Math.ceil(width); layer.height = Math.ceil(height); }
+  const g = layer.getContext('2d');
+  g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, layer.width, layer.height);
+  g.fillStyle = `rgba(2, 3, 4, ${alpha})`; g.fillRect(0, 0, width, height);
+  g.globalCompositeOperation = 'destination-out';
+  const hole = (at, r, strength) => {
+    if (!at || strength <= 0) return;
+    const grad = g.createRadialGradient(at.x, at.y, r * .1, at.x, at.y, r);
+    grad.addColorStop(0, `rgba(0,0,0,${strength})`); grad.addColorStop(.55, `rgba(0,0,0,${strength * .75})`);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = grad; g.fillRect(at.x - r, at.y - r, r * 2, r * 2);
+  };
+  hole(anchorAt, 120 * scale, reveal.anchor);
+  hole(bodyAt, 70 * scale, reveal.body * .9);
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(layer, 0, 0, width * (ctx.canvas.width / width), height * (ctx.canvas.height / height));
+  ctx.restore();
+}

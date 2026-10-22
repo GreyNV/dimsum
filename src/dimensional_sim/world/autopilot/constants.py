@@ -63,8 +63,8 @@ MEMORIES = (
 # The old man who finds the newborn avatar beside the road.
 ELDER_LINES = (
     "Why... I don't believe it. The bandits left you dead, and you stand up an avatar. The old stone woke.",
-    "Folk will say the gods spared you. It wasn't the gods. That stone is an anchor, and it has bound you.",
-    "Something answered it, and it looks out through your eyes. When it takes your hands, let it.",
+    "A god took you back from death. One of them, at least, and it bound you to that stone. An anchor.",
+    "That god looks out through your eyes now. When it takes your hands, let it - you will be quicker for it.",
     "Mind your hunger. This forest feeds only the lucky.",
     "I keep a camp out along the road. Find it when you can. There's a lot you should know about the wall.",
 )
