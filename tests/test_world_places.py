@@ -7,7 +7,9 @@ from dimensional_sim.world.autopilot import Expedition, saves
 from dimensional_sim.world.catalog import (BY_ID, CAMP_GRADE, CAMP_IDLE_MS, LOCATION_OF_REGION, LOCATION_OF_SITE,
                                            LOCATIONS, REGIONS, SITES, location_thresholds)
 from dimensional_sim.world.models import ChunkKey
+from dimensional_sim.world.runtime import Exploration
 from dimensional_sim.world.seeds import canonical_json
+from dimensional_sim.world.web import new_world
 from tests.save_fixture import v21
 from tests.test_world_campfire import far_and_hurt
 
@@ -28,6 +30,19 @@ class CatalogTests(unittest.TestCase):
             self.assertLess(camp, deep)
         self.assertLess(location_thresholds("old_ruins")[1], location_thresholds("old_road")[1],
                         "landmarks are rarer, so they need fewer encounters")
+
+    def test_deep_landmark_mastery_improves_wild_finds_at_the_landmark(self):
+        e = Expedition(Exploration(new_world(1), "forest"))
+        key = next(ChunkKey("forest", x, y) for y in range(-6, 7) for x in range(-6, 7)
+                   if e.game.world.site_for(ChunkKey("forest", x, y)) is not None)
+        site = e.game.world.site_for(key)
+        location = LOCATION_OF_SITE[site.id]
+        self.assertEqual(e.location_rarity_percent(key), 100)
+        e.location_done[location] = location_thresholds(location)[2]
+        self.assertEqual(e.location_rarity_percent(key), 150)
+        neighbor = ChunkKey("forest", key.x + 1, key.y)
+        if e.game.world.site_for(neighbor) is None:
+            self.assertEqual(e.location_rarity_percent(neighbor), 100)
 
 
 class CampTests(unittest.TestCase):
@@ -88,7 +103,16 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(loaded.location_done, {"bramble_thicket": 7, "abandoned_camp": 4})
         self.assertEqual(loaded.unlocked, {"return_anchor"})
         self.assertEqual((loaded.location_focus, loaded.camp), ({}, None))
-        self.assertEqual(loaded.to_dict()["schema_version"], saves.SAVE_FIELDS and 22)
+        self.assertEqual(loaded.to_dict()["schema_version"], 23)
+
+    def test_schema_22_keeps_rolled_encounters_when_the_new_odds_arrive(self):
+        e = far_and_hurt()
+        old = e.to_dict()
+        old["schema_version"] = 22
+        old["encounters"] = "encounters-v11"
+        loaded = Expedition.from_dict(json.loads(json.dumps(old)))
+        self.assertEqual(loaded.spot_plans, e.spot_plans)
+        self.assertEqual(loaded.to_dict()["schema_version"], 23)
 
 
 if __name__ == "__main__":

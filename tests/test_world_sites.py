@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from dimensional_sim.world.actions import Context
 from dimensional_sim.world.autopilot import Expedition
-from dimensional_sim.world.catalog import BY_ID, SITE_CELL, SITES, UNLOCKS
+from dimensional_sim.world.catalog import BY_ID, LandDef, REGIONS, SITE_CELL, SITES, UNLOCKS
 from dimensional_sim.world.encounters import _reachable, chunk_spots
 from dimensional_sim.world.models import ChunkKey, DimensionSpec
 from dimensional_sim.world.open_terrain import open_assets
@@ -14,7 +14,7 @@ from dimensional_sim.world.repository import WorldRepository
 from dimensional_sim.world.runtime import Exploration
 from dimensional_sim.world.seeds import canonical_json
 from dimensional_sim.world.catalog import STRUCTURES
-from dimensional_sim.world.sites import STRUCTURE_GLYPHS, site_at
+from dimensional_sim.world.sites import STRUCTURE_GLYPHS, bounded_site_plan, site_at
 from dimensional_sim.world.web import new_world
 
 SEED = 482910
@@ -35,7 +35,7 @@ class PlacementTests(unittest.TestCase):
     def test_sites_are_rare_spaced_out_far_from_the_anchor_and_pure(self):
         w = new_world(SEED)
         found = sites(w)
-        self.assertGreater(len(found), 10)
+        self.assertGreaterEqual(len(found), len(SITES))
         self.assertLess(len(found), len(AREA) // SITE_CELL ** 2, "at most one per block, most blocks stay wild")
         blocks = [(k.x // SITE_CELL, k.y // SITE_CELL) for k in found]
         self.assertEqual(len(blocks), len(set(blocks)))
@@ -80,7 +80,7 @@ class PlacementTests(unittest.TestCase):
         w = new_world(SEED)
         before = sites(w)
         saved = json.loads(canonical_json(w.to_dict()))
-        self.assertEqual(saved["schema_version"], 8)
+        self.assertEqual(saved["schema_version"], 9)
         moved = {k: replace(v, weights={r: 1 for r in v.weights}) for k, v in SITES.items()}
         with patch.dict(SITES, moved):
             self.assertEqual(sites(WorldRepository.from_dict(saved)), before, "a catalog edit never moves sites")
@@ -118,6 +118,39 @@ class PlacementTests(unittest.TestCase):
     def test_site_at_respects_region_weights(self):
         key = next(k for k in AREA if site_at(SEED, k, "old_road", 32, 16) is not None)
         self.assertIsNone(site_at(SEED, key, "nowhere", 32, 16))
+
+    def test_every_bounded_land_has_each_fitting_landmark_and_replays_its_plan(self):
+        from dimensional_sim.world.edges import chunk_open
+        for seed in range(1, 21):
+            world = new_world(seed)
+            found = {key: world.site_for(key) for key in AREA if world.chunk_open(key)}
+            found = {key: placement for key, placement in found.items() if placement is not None}
+            self.assertEqual({placement.id for placement in found.values()}, set(SITES), seed)
+            for key, placement in found.items():
+                self.assertTrue(chunk_open(seed, key), key)
+                self.assertIn(world.region_for(key).id, placement.site.weights)
+            restored = WorldRepository.from_dict(json.loads(canonical_json(world.to_dict())))
+            self.assertEqual(found, {key: restored.site_for(key) for key in found})
+
+    def test_v7_landmarks_stay_pinned_until_the_world_regrows(self):
+        current = new_world(SEED)
+        old = WorldRepository(SEED, current.dimensions, current.catalog, generator_version=7)
+        key = next(key for key in AREA if old.site_for(key) is not None)
+        saved = json.loads(canonical_json(old.to_dict()))
+        self.assertEqual(saved["schema_version"], 8)
+        self.assertEqual(WorldRepository.from_dict(saved).site_for(key), old.site_for(key))
+        for key in AREA:
+            if current.chunk_open(key) and old.site_for(key) is not None:
+                self.assertEqual(current.site_for(key), old.site_for(key),
+                                 "v8 keeps existing natural rolls and adds only missing kinds")
+
+    def test_a_missing_preferred_region_still_gets_its_landmark(self):
+        spec = DimensionSpec("forest")
+        land = LandDef("forest", "Test forest", 2, 2, 0)
+        site = replace(SITES["ruined_shrine"], weights={"missing_region": 1}, min_ring=1)
+        plan = bounded_site_plan(4, spec, land, {site.id: site},
+                                 lambda key: REGIONS["old_road"], lambda key: "dark_forest", 32, 16)
+        self.assertEqual({placement.id for placement in plan.values()}, {site.id})
 
 
 class EncounterTests(unittest.TestCase):

@@ -5,9 +5,10 @@ structures stand in it. Terrain (open_terrain) carves the clearing and places th
 structures; encounters.chunk_spots rolls the site's own encounter bucket inside it.
 INVARIANTS: a pure function of (world seed, chunk key, the chunk's region, the pinned
 site catalog and the chunk size): no RNG, hash(), clock or generation order. The world
-is divided into SITE_CELL x SITE_CELL blocks; one chunk per block is the candidate and
-rolls once against the per-mille weights of the sites allowed in its region, so sites
-never crowd each other and most blocks stay wild.
+is divided into SITE_CELL x SITE_CELL blocks; one chunk per block is the natural-roll
+candidate and rolls once against the per-mille weights of the sites allowed in its
+region. Generator v8 fills missing landmark kinds in other empty blocks of a bounded
+land, still at most one site per block.
 EXTEND: add a SiteDef to catalog.SITES and site actions (placement "site") for it; a new
 structure style needs a layout here, its glyphs in STRUCTURE_GLYPHS and client tile art
 (art.js STRUCTURE_ART) for each glyph.
@@ -60,15 +61,82 @@ def site_at(world_seed, key, region_id, width, height, catalog=None):
             continue
         weight = site.weights.get(region_id, 0)
         if roll < weight:
-            rx, ry = site.size
-            mx, my = rx + 2, ry + 2
-            if width <= 2 * mx or height <= 2 * my:
-                return None
-            x = mx + derive_seed(world_seed, SITE_VERSION, "x", key.dimension, key.x, key.y) % (width - 2 * mx)
-            y = my + derive_seed(world_seed, SITE_VERSION, "y", key.dimension, key.x, key.y) % (height - 2 * my)
-            return SitePlacement(site, key, x, y, rx, ry)
+            return place_site(world_seed, key, site, width, height)
         roll -= weight
     return None
+
+
+def place_site(world_seed, key, site, width, height):
+    """Place a chosen site using the same clearing coordinates as the original site roll."""
+    rx, ry = site.size
+    mx, my = rx + 2, ry + 2
+    if width <= 2 * mx or height <= 2 * my:
+        return None
+    x = mx + derive_seed(world_seed, SITE_VERSION, "x", key.dimension, key.x, key.y) % (width - 2 * mx)
+    y = my + derive_seed(world_seed, SITE_VERSION, "y", key.dimension, key.x, key.y) % (height - 2 * my)
+    return SitePlacement(site, key, x, y, rx, ry)
+
+
+def bounded_site_plan(world_seed, dimension, land, sites, region_for, biome_for, width, height):
+    """Keep natural rolls, then fill missing site kinds inside a finite land.
+
+    Every site whose biome belongs to this dimension gets at least one reachable
+    chunk. Prefer fitting regions and unused site cells; a rare world without one
+    may use another region or replace a duplicate site. The plan is pure and
+    independent of visit/generation order.
+    """
+    from .edges import chunk_open
+    from .models import ChunkKey
+
+    keys = [ChunkKey(dimension.id, x, y)
+            for y in range(-land.lobe_ring, land.lobe_ring + 1)
+            for x in range(-land.lobe_ring, land.lobe_ring + 1)
+            if chunk_open(world_seed, ChunkKey(dimension.id, x, y), {dimension.id: land})]
+    regions = {key: region_for(key) for key in keys}
+    all_fits = {site.id: [key for key in keys
+                          if biome_for(key) == site.biome and max(abs(key.x), abs(key.y)) >= site.min_ring
+                          and regions[key] is not None
+                          and place_site(world_seed, key, site, width, height) is not None]
+                for site in sites.values() if site.biome in dimension.biomes}
+    fits = {ident: [key for key in candidates if regions[key].id in sites[ident].weights]
+            for ident, candidates in all_fits.items()}
+    plan = {}
+    for key in keys:
+        region = regions[key]
+        if region is None:
+            continue
+        biome_sites = {name: site for name, site in sites.items() if site.biome == biome_for(key)}
+        placement = site_at(world_seed, key, region.id, width, height, biome_sites)
+        if placement is not None:
+            plan[key] = placement
+    present = {placement.site.id for placement in plan.values()}
+    counts = {ident: sum(placement.site.id == ident for placement in plan.values()) for ident in all_fits}
+    used_cells = {(key.x // SITE_CELL, key.y // SITE_CELL) for key in plan}
+    for ident in sorted(fits, key=lambda name: (len(fits[name]), name)):
+        if ident in present:
+            continue
+        def free(candidates):
+            return [key for key in candidates
+                    if (key.x // SITE_CELL, key.y // SITE_CELL) not in used_cells]
+
+        def replaceable(candidates):
+            return [key for key in candidates if key in plan and counts[plan[key].site.id] > 1]
+
+        # A rare layout can lack a preferred region, or fill every fitting site cell.
+        # Keep content reachable: use a free cell elsewhere in the same biome, then
+        # replace a duplicate natural site only if no free cell can hold this kind.
+        available = (free(fits[ident]) or free(all_fits[ident])
+                     or replaceable(fits[ident]) or replaceable(all_fits[ident]))
+        if not available:
+            raise ValueError(f"no reachable place for landmark {ident} in {dimension.id}")
+        key = min(available, key=lambda k: derive_seed(world_seed, "site-quota-v1", dimension.id, ident, k.x, k.y))
+        if key in plan:
+            counts[plan[key].site.id] -= 1
+        plan[key] = place_site(world_seed, key, sites[ident], width, height)
+        counts[ident] += 1
+        present.add(ident)
+        used_cells.add((key.x // SITE_CELL, key.y // SITE_CELL))
+    return plan
 
 
 def layout(placement, seed):

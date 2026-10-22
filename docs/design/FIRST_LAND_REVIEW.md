@@ -71,14 +71,16 @@ The share of each encounter per spot draw, with every unlock open:
 | Ruined shrine | Glade 250, Woods 100 | 4 | 0.8 | **4 of 8** |
 | Burial mound | Thicket 150, Woods 100, Road 50 | 5 | 0.6 | **4 of 8** |
 
-**Finding:** now that the land is bounded, landmark luck decides whole systems:
+**Finding at the time of the review:** with generator v7, landmark luck decided whole systems:
 - the spear recipe and snare traps (hunter's cabin);
 - the altar (ruined shrine);
 - the restless bones and their spoils (burial mound).
 
-In half the worlds the player never sees them. **Recommendation:** a bounded land should *place*
-its landmarks: "each land holds 1-2 of each of its landmark kinds, in fitting regions". Random
-rolls are a poor fit for a finite map.
+In half the sampled worlds the player never saw them. **Implemented in generator v8:** natural
+rolls remain, then each missing landmark kind is placed once in a reachable chunk of
+the bounded land. A preferred region is used where possible; an exceptional layout may use
+another region or replace a duplicate site. Existing v7 worlds retain their pinned layout until rebirth. The land stays
+at rings 5-6; adding another biome or enlarging the map is a separate content decision.
 
 ## 5. Encounter chains, enemies, gates
 
@@ -162,7 +164,8 @@ Land (dimension: edge rings, edge features, mastery scale, danger)
 Shared commons (all regions, low weight): fallen branches, berries (small), boar.
 
 **What this needs in code** (small, all data-driven):
-- landmark quotas per land (replacing per-chunk site rolls inside bounded lands);
+- landmark minimums per bounded land (built in generator v8: existing per-chunk rolls remain,
+  with one deterministic placement for each kind still missing);
 - per-region tier odds (uncommon and rare picked from the region's own pool);
 - a `signature` flag that makes an encounter's other-region weights zero;
 - a validation that every region has at least 2 signatures and the land holds every landmark kind
@@ -179,6 +182,7 @@ Shared commons (all regions, low weight): fallen branches, berries (small), boar
 
 1. Adopt the land → biome → region → signature/landmark structure and the forest table above (or
    change it)?
-2. Landmarks: placed by quota in each bounded land (proposed), or keep random rolls?
+2. For a future land, should each landmark kind have only the one guaranteed placement, or
+   should some kinds have a larger minimum? The forest currently guarantees one of each.
 3. Lore: who are the bandits and the old man, and what is a shrine to a god's avatar?
 4. Edge: ring 5 with ragged lobes into 6 (now), or another size?

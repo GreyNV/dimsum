@@ -61,8 +61,11 @@ class PlacesMixin:
             self._entry("lore", f"{name}: {LOCATION_GRADE_NAMES[after].lower()}. {tail}")
 
     def location_rarity_percent(self, key):
-        """Deep mastery of a chunk's region location makes rare and uncommon spots likelier."""
-        return LOCATION_DEEP_RARITY_PERCENT if self.grade_of(self.location_of_chunk(key)) >= 3 else 100
+        """Deep mastery of the region or its landmark improves wild spot tiers here."""
+        site = self.game.world.site_for(key)
+        site_location = LOCATION_OF_SITE.get(site.id) if site is not None else None
+        deep = (self.grade_of(self.location_of_chunk(key)) >= 3 or self.grade_of(site_location) >= 3)
+        return LOCATION_DEEP_RARITY_PERCENT if deep else 100
 
     # ----- the camp ----------------------------------------------------------------------
     def _pitch_camp(self):

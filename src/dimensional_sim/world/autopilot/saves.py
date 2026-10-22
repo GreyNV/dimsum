@@ -284,9 +284,18 @@ def _from_v21(data):
             "location_done": done, "location_focus": {}, "camp": None}
 
 
+def _from_v22(data):
+    """New chunks use encounter v12; already rolled plans remain fixed through this life."""
+    fields(data, SAVE_FIELDS)
+    if data["encounters"] not in ("encounters-v11", ENCOUNTER_VERSION):
+        raise ValueError("unsupported expedition encounter version")
+    return {**data, "schema_version": 23, "encounters": ENCOUNTER_VERSION}
+
+
 MIGRATIONS = {6: _from_v6, 7: _from_v7, 8: _from_v8, 9: _from_v9, 10: _from_v10, 11: _from_v11, 12: _from_v12,
               13: _from_v13, 14: _from_v14, 15: _from_v15, 16: _from_v16,
-              17: _from_v17, 18: _from_v18, 19: _from_v19, 20: _from_v20, 21: _from_v21}
+              17: _from_v17, 18: _from_v18, 19: _from_v19, 20: _from_v20, 21: _from_v21,
+              22: _from_v22}
 
 
 def upgrade(data):

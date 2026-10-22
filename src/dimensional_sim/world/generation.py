@@ -14,14 +14,15 @@ from .models import (
 )
 from .seeds import canonical_json, content_digest, derive_seed
 
-GENERATOR_VERSION = 7   # v3: tile-level organic region borders (regions.RegionField), game trails
+GENERATOR_VERSION = 8   # v3: tile-level organic region borders (regions.RegionField), game trails
                         # v4: + continuous rivers (water.WaterField), fords and bridges
                         # v5: + landmark sites (sites.site_at, pinned catalog.SITES)
                         # v6: + natural woods: groves with open clearings, sparse rims, lone
                         #       trees, boulder piles and clumped brush (open_terrain._grove_block)
                         # v7: + the edge of the land (edges.py): thicket, fallen trees and broken
                         #       bridges close the sides of the outermost reachable chunks
-SUPPORTED_GENERATOR_VERSIONS = (1, 2, 3, 4, 5, 6, 7)
+                        # v8: + a minimum of one of every fitting landmark in each bounded land
+SUPPORTED_GENERATOR_VERSIONS = (1, 2, 3, 4, 5, 6, 7, 8)
 
 
 def validated_dimensions(dimensions):
@@ -121,6 +122,7 @@ class ChunkGenerator:
                 [asdict(value) for value in self.region_catalog.values()])
         self.site_catalog = None
         self.site_catalog_digest = None
+        self._bounded_site_plans = {}
         if self.generator_version >= 5:
             from .catalog import SITES, SiteDef
             definitions = SITES if site_catalog is None else site_catalog
@@ -213,6 +215,15 @@ class ChunkGenerator:
         if self.generator_version < 5:
             return None
         spec = self._spec(key)
+        if self.generator_version >= 8 and key.dimension in self.land_catalog:
+            plan = self._bounded_site_plans.get(key.dimension)
+            if plan is None:
+                from .sites import bounded_site_plan
+                plan = bounded_site_plan(self.world_seed, spec, self.land_catalog[key.dimension],
+                                         self.site_catalog, self.chunk_region, self.biome_for,
+                                         spec.width, spec.height)
+                self._bounded_site_plans[key.dimension] = plan
+            return plan.get(key)
         region = self.chunk_region(key)
         if region is None:
             return None

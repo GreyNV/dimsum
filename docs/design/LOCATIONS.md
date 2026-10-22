@@ -40,7 +40,9 @@ Decisions (2026-10-22):
 **Grades:**
 1. **Known.** The Journal shows where that place's encounters appear and how often.
 2. **Mastered.** A camp can be made there. The player picks the camp's focus.
-3. **Deep.** Rare and uncommon finds there are 1.5× as likely (`LOCATION_DEEP_RARITY_PERCENT`).
+3. **Deep.** Rare and uncommon wild spots are 1.5× as likely (`LOCATION_DEEP_RARITY_PERCENT`)
+   in a mastered region or the chunk holding a mastered landmark. Landmark-specific actions
+   have fixed weighted rolls and do not have rarity tiers.
 
 ## The camp
 
@@ -90,7 +92,7 @@ Decisions (2026-10-22):
   "Camped: The Old Road."
 - **Anchor.** It lists mastered places and points to Journal › Places.
 
-## Saves (schema 22)
+## Saves (schemas 22-23)
 
 - **Added:** `location_done`, `location_focus` and `camp` (`location`, `dimension`, `cx`, `cy`,
   `idle_since`, `left`).
@@ -99,5 +101,7 @@ Decisions (2026-10-22):
 - **Migration from 21.** Each encounter's lifetime count goes to its landmark, or to the region that
   favours it most (Old Road on ties). The old campfire unlock is removed without refund: schema 18
   granted it to every older save, so it cannot tell who paid.
+- **Migration from 22.** Encounter version 12 adds the landmark deep-mastery wild-spot bonus.
+  Chunks already rolled in the current life keep their saved plans; new chunks use the new odds.
 
 Tests: `tests/test_world_places.py`, plus updates across the suite.

@@ -24,7 +24,7 @@ from .models import DELTAS, ChunkKey, integer
 from .seeds import derive_seed
 from .tuning import SPOTS_PER_CHUNK
 
-ENCOUNTER_VERSION = "encounters-v11"  # v11: landmark sites roll their own encounters (v10: rarity tiers)
+ENCOUNTER_VERSION = "encounters-v12"  # v12: deep landmark mastery improves wild spot tiers in its chunk
 NEAR = (None, "T", "^", "w")
 SPOT_ACTIONS = tuple(a for a in ACTIONS if a.placement == "spot")
 POOLS = {"dark_forest": tuple(a for a in SPOT_ACTIONS if "dark_forest" in a.biomes)}

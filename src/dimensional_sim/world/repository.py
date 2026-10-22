@@ -14,7 +14,7 @@ from .models import (
     ChunkKey, DimensionSpec, asset_from_dict, asset_to_dict, fields, integer,
 )
 
-WORLD_SCHEMA_VERSION = 8   # 8: generator v7 (the edge of the land, pinned land catalog); 7: generator v6 (natural woods); 6: v5 (sites, pinned site catalog); 5: v4 (rivers); 4: v3; 1-6 still load
+WORLD_SCHEMA_VERSION = 9   # 9: generator v8 (guaranteed landmarks); 8: v7 (land edge); older worlds still load
 MAX_MAP_RADIUS = 32
 
 
@@ -203,7 +203,7 @@ class WorldRepository:
 
     def to_dict(self):
         data = {
-            "schema_version": {1: 1, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7}.get(self.generator_version, WORLD_SCHEMA_VERSION),
+            "schema_version": {1: 1, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7, 7: 8}.get(self.generator_version, WORLD_SCHEMA_VERSION),
             "generator_version": self.generator_version,
             "world_seed": self.world_seed,
             "cache_limit": self.cache_limit,
@@ -237,7 +237,7 @@ class WorldRepository:
         if type(data) is not dict or type(data.get("schema_version")) is not int:
             raise ValueError("unsupported world schema")
         schema = data["schema_version"]
-        if schema not in (1, 2, 3, 4, 5, 6, 7, WORLD_SCHEMA_VERSION):
+        if schema not in (1, 2, 3, 4, 5, 6, 7, 8, WORLD_SCHEMA_VERSION):
             raise ValueError("unsupported world schema")
         required = ("schema_version", "generator_version", "world_seed", "cache_limit",
                     "dimensions", "catalog", "catalog_digest", "discovery")
@@ -252,7 +252,7 @@ class WorldRepository:
         fields(data, required)
         if (type(data["generator_version"]) is not int or
                 data["generator_version"] not in SUPPORTED_GENERATOR_VERSIONS or
-                data["generator_version"] != {1: 1, 2: 2, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7}[schema]):
+                data["generator_version"] != {1: 1, 2: 2, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7, 9: 8}[schema]):
             raise ValueError("unsupported generator version")
         if any(type(data[name]) is not list for name in ("dimensions", "catalog", "discovery")):
             raise ValueError("world collections must be arrays")

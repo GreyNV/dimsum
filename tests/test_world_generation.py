@@ -156,7 +156,7 @@ class RegionTerrainTests(unittest.TestCase):
         self.assertEqual(restored.generator_version, 1)
         self.assertEqual(canonical(restored.get(key)), before)
         self.assertEqual(json.loads(canonical_json(restored.to_dict())), payload)
-        self.assertEqual(WorldRepository(482910, dimensions, assets).generator_version, 7)
+        self.assertEqual(WorldRepository(482910, dimensions, assets).generator_version, 8)
         self.assertEqual(WorldRepository(482910, dimensions, assets, generator_version=2).region_version, 2)
 
     def test_v2_region_catalog_is_pinned_and_tampering_is_rejected(self):
@@ -340,9 +340,9 @@ class RepositoryTests(unittest.TestCase):
         world.visit(ChunkKey("forest", 0, 0))
         snapshot = json.loads(canonical_json(world.to_dict()))
         changes = (
-            lambda p: p.update(schema_version=9),
+            lambda p: p.update(schema_version=10),
             lambda p: p.update(schema_version=True),
-            lambda p: p.update(generator_version=8),
+            lambda p: p.update(generator_version=9),
             lambda p: p.update(generator_version=6),
             lambda p: p.update(land_catalog_digest="tampered"),
             lambda p: p["land_catalog"][0].update(edge_ring=9),

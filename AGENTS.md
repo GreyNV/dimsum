@@ -34,7 +34,8 @@ world/catalog.py: ALL content as validated data: biomes (danger curve), enemies,
   How to add content without engine edits: docs/design/CONTENT_SYSTEMS.md.
 world/effects.py: gear Effects combined per stat (no item is named in engine code).
 world/drops.py: cascading rarity rolls (rare -> uncommon -> common) for encounter spots and DropTable bonus drops.
-world/sites.py: landmark sites (generator v5): which chunk holds one, its clearing and structures; site actions roll inside it.
+world/sites.py: landmark sites (generator v5, bounded-land quotas in v8): which chunk holds one,
+  its clearing and structures; site actions roll inside it.
 world/autopilot/camp.py: the anchor camp: buildings (bound with ash to persist), the storage chest, camp work trips, carry load.
 world/equipment.py: current-life weapon/body slots. Leads, knowledge and Journal roll controls live in autopilot state.
 world/actions.py: action bucket (known -> eligible -> weighted) and explain(); regions.py: chunk regions.
@@ -50,7 +51,7 @@ world/autopilot/story.py: the main story (catalog STORY steps, placement="story"
   it are unreachable because open_terrain seals the outer sides (thicket, fallen trees "K", broken bridge "Y").
 world/autopilot/places.py: location mastery (catalog LOCATIONS: regions and kinds of landmark) and camps: the
   campfire is "Make camp", allowed only in a mastered place; a camp holds the avatar to that place and its focus.
-  docs/design/LOCATIONS.md. (Per-encounter mastery and Journal favor/guarantee are gone, schema 22.)
+  docs/design/LOCATIONS.md. (Per-encounter mastery and Journal favor/guarantee are gone, schema 23.)
 world/simulate.py: `cli simulate` (seeded metrics), `cli inspect` (why a spot did/didn't appear, region provenance), `cli regions` (layout).
 Action pipeline + lifecycle states: docs/design/ACTION_SYSTEM.md; per-action audit: ACTION_ARCHITECTURE_AUDIT.md.
 Unlock/knowledge != always available: never add a permanent action button; extend buckets, outcomes or leads.
