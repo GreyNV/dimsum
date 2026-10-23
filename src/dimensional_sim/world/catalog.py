@@ -420,6 +420,9 @@ CATEGORY_STYLES = {
 
 
 # ----- enemies -----------------------------------------------------------------
+ENEMY_SOUND_PROFILES = ("impact", "beast", "water", "bone", "spectral", "canine")
+
+
 @dataclass(frozen=True)
 class EnemyDef:
     """A creature that hunts the avatar. Its fight spot (ActionDef.enemy) sets where it
@@ -432,6 +435,7 @@ class EnemyDef:
     cause: str
     cause_text: str                # "Cause: <cause_text>" in the life report
     sprite: str                    # client art key (combat_art.js ENEMY_SPRITES)
+    sound_profile: str = "impact"  # client sound shape, shared by creatures with similar voices
     step_ms: int = 300             # one chasing step this often (lower = faster)
     drains: str = "health"         # what a touch takes: "health" (a bite) or "hunger" (it feeds on you)
     fears_fire: bool = True        # stays out of the anchor camp and campfire light
@@ -442,6 +446,8 @@ class EnemyDef:
         identifier(self.id, "enemy ID")
         identifier(self.cause, "death cause")
         identifier(self.sprite, "enemy sprite")
+        if self.sound_profile not in ENEMY_SOUND_PROFILES:
+            raise ValueError(f"invalid enemy sound profile: {self.id}")
         integer(self.hit, "enemy hit", 1, 100)
         integer(self.aggro_radius, "aggro radius", 1, 30)
         integer(self.step_ms, "enemy step", 100, 2000)
@@ -457,19 +463,19 @@ class EnemyDef:
 
 ENEMIES = {e.id: e for e in (
     EnemyDef("bramble_boar", "Wild boar", hit=8, aggro_radius=11, cause="boar",
-             cause_text="a wild boar", sprite="boar"),
+             cause_text="a wild boar", sprite="boar", sound_profile="beast"),
     # Fast and fragile: hides by the water, bites lighter, notices you late (small aggro radius).
     EnemyDef("river_lurker", "River lurker", hit=4, aggro_radius=4, cause="lurker",
-             cause_text="a river lurker", sprite="lurker", step_ms=200),
+             cause_text="a river lurker", sprite="lurker", sound_profile="water", step_ms=200),
     # Slow and stubborn: rises at ruins, takes many blows, walks you down slowly.
     EnemyDef("restless_bones", "Restless bones", hit=6, aggro_radius=5, cause="bones",
-             cause_text="restless bones", sprite="skeleton", step_ms=450),
+             cause_text="restless bones", sprite="skeleton", sound_profile="bone", step_ms=450),
     # Gentle but draining: it does not bite, it feeds - each touch takes hunger, not health.
     EnemyDef("pale_wisp", "Pale wisp", hit=6, aggro_radius=6, cause="wisp",
-             cause_text="a pale wisp", sprite="wisp", step_ms=350, drains="hunger"),
+             cause_text="a pale wisp", sprite="wisp", sound_profile="spectral", step_ms=350, drains="hunger"),
     # Night only: quick and keen-nosed, it follows the avatar into firelight.
     EnemyDef("wolf", "Wolf", hit=9, aggro_radius=10, cause="wolf", cause_text="a wolf in the night",
-             sprite="wolf", step_ms=250, fears_fire=False,
+             sprite="wolf", sound_profile="canine", step_ms=250, fears_fire=False,
              life_depth_hit_percent=15, life_depth_hp_per_ring=1),
 )}
 # Enemies placed by map assets (not by spot rolls) count against this fight spot's window.

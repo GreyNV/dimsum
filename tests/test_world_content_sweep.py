@@ -92,7 +92,7 @@ class PresentationTests(unittest.TestCase):
 
     def test_new_systems_have_sounds(self):
         sound = (BROWSER / "sound.js").read_text(encoding="utf-8")
-        for name in ("step", "swing", "hit", "kill", "hurt", "ambush", "loot", "rare", "level", "shimmer", "kindle",
+        for name in ("step", "swing", "hit", "kill", "enemy_alert", "enemy_attack", "ambush", "loot", "rare", "level", "shimmer", "kindle",
                      "death", "chop", "rattle"):
             self.assertIn(name, sound)
 

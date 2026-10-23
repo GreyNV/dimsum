@@ -206,19 +206,24 @@ class BrowserAdapterTests(unittest.TestCase):
         worker = threading.Thread(target=server.serve_forever, daemon=True)
         worker.start()
         try:
-            connection = HTTPConnection("127.0.0.1", server.server_port, timeout=3)
-            connection.request("GET", "/api/state")
-            response = connection.getresponse()
-            self.assertEqual(response.status, 200)
-            self.assertEqual(len(json.loads(response.read())["chunks"]), 9)
+            def request(method, path, body=None, headers=None):
+                connection = HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+                try:
+                    connection.request(method, path, body, headers or {})
+                    response = connection.getresponse()
+                    return response.status, response.read()
+                finally:
+                    connection.close()
+
+            status, raw = request("GET", "/api/state")
+            self.assertEqual(status, 200)
+            self.assertEqual(len(json.loads(raw)["chunks"]), 9)
             for body, headers, status in (
                 ("{}", {"Content-Type": "application/json"}, 400),
                 ("{}", {"Content-Type": "application/json", "Origin": "https://example.com"}, 403),
                 ("{}", {"Content-Type": "text/plain"}, 415)):
-                connection.request("POST", "/api/input", body, headers)
-                response = connection.getresponse()
-                self.assertEqual(response.status, status)
-                response.read()
+                actual, _ = request("POST", "/api/input", body, headers)
+                self.assertEqual(actual, status)
             # Every ES module imported by a served module must itself be served.
             pending, seen = ["/app.js"], set()
             while pending:
@@ -226,17 +231,13 @@ class BrowserAdapterTests(unittest.TestCase):
                 if path in seen:
                     continue
                 seen.add(path)
-                connection.request("GET", path)
-                response = connection.getresponse()
-                self.assertEqual(response.status, 200, path)
-                source = response.read().decode()
+                status, raw = request("GET", path)
+                self.assertEqual(status, 200, path)
+                source = raw.decode()
                 pending += ["/" + name for name in re.findall(r"from '\./([\w.-]+\.js)'", source)]
             self.assertIn("/actors.js", seen)
-            connection.request("GET", "/../../pyproject.toml")
-            response = connection.getresponse()
-            self.assertEqual(response.status, 404)
-            response.read()
-            connection.close()
+            status, _ = request("GET", "/../../pyproject.toml")
+            self.assertEqual(status, 404)
         finally:
             server.shutdown()
             server.server_close()

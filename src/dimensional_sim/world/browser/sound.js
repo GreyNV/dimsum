@@ -42,18 +42,28 @@ const levels = ex => Object.values(ex?.attributes || {}).reduce((sum, row) => su
 export function soundEvents(prev, next, surfaceAt = () => 'grass') {
   if (!prev || !next) return [];
   const out = [], pe = prev.expedition, ne = next.expedition;
-  if (pe && ne && ne.life !== pe.life) return [{name: 'death'}];
+  const strike = ne?.last_strike;
+  if (strike && (ne.life !== pe?.life || strike.serial > (pe?.last_strike?.serial || 0)))
+    out.push({name: 'enemy_attack', profile: strike.profile});
+  if (ne?.anchor_space?.kind === 'death' && pe?.anchor_space?.kind !== 'death')
+    return [...out, {name: 'death'}];
+  if (pe && ne && ne.life !== pe.life)
+    return pe.anchor_space?.kind === 'death' ? out : [...out, {name: 'death'}];
   if (ne?.anchor_space && !pe?.anchor_space) out.push({name: 'anchor'});
   const p0 = prev.player, p1 = next.player;
   if (p1.x !== p0.x || p1.y !== p0.y) out.push({name: 'step', surface: surfaceAt(p1.x, p1.y)});
   if (p1.animation === 'attack' && (p0.animation !== 'attack' || p1.animation_ms < p0.animation_ms))
     out.push({name: 'swing', shape: ne?.weapon?.shape || 'punch'});
   const before = new Map(prev.targets.map(t => [t.id, t]));
+  let alerted = false;
   for (const t of next.targets) {
     const old = before.get(t.id);
+    if (!alerted && !strike && t.hunting === 'hunt' && old?.hunting !== 'hunt') {
+      out.push({name: 'enemy_alert', profile: t.sound_profile});
+      alerted = true;
+    }
     if (!old) continue;
-    if (t.hp < old.hp) out.push({name: t.hp === 0 ? 'kill' : 'hit', sprite: t.sprite});
-    if ((t.strikes || 0) > (old.strikes || 0)) out.push({name: 'hurt', sprite: t.sprite});
+    if (t.hp < old.hp) out.push({name: t.hp === 0 ? 'kill' : 'hit', profile: t.sound_profile});
   }
   if (pe && ne) {
     const seq = Math.max(0, ...(pe.log || []).map(e => e.seq));
@@ -179,14 +189,27 @@ export class SoundEngine {
         else if (event.shape === 'swing') this.burst({freq: 450, to: 1600, q: 1.6, dur: .24, gain: .5, attack: .06});
         else { this.burst({type: 'lowpass', freq: 900, dur: .06, gain: .12}); this.tone({freq: 150, to: 80, dur: .07, gain: .08}); }
       },
-      hit: () => { this.tone({freq: 190, to: 60, dur: .14, gain: .3}); this.burst({type: 'lowpass', freq: 2400, dur: .05, gain: .2}); this.rattle(event.sprite, 3); },
-      kill: () => { this.rattle(event.sprite, 7); this.tone({type: 'sawtooth', freq: 260, to: 70, dur: .45, gain: .08}); this.burst({type: 'lowpass', freq: 700, to: 200, dur: .5, gain: .12}); this.tone({freq: 120, to: 50, dur: .2, gain: .3}); },
-      hurt: () => {
-        if (event.sprite === 'wisp') {   // it feeds rather than bites: a cold, falling chime
-          this.tone({freq: 1320, to: 660, dur: .5, gain: .06, attack: .02}); this.tone({freq: 1328, to: 664, dur: .5, gain: .05, attack: .03});
-          return;
-        }
-        this.tone({freq: 95, to: 45, dur: .22, gain: .35}); this.burst({type: 'lowpass', freq: 600, dur: .14, gain: .2}); },
+      hit: () => { this.tone({freq: 190, to: 60, dur: .14, gain: .3}); this.burst({type: 'lowpass', freq: 2400, dur: .05, gain: .2}); this.rattle(event.profile, 3); },
+      kill: () => { this.rattle(event.profile, 7); this.tone({type: 'sawtooth', freq: 260, to: 70, dur: .45, gain: .08}); this.burst({type: 'lowpass', freq: 700, to: 200, dur: .5, gain: .12}); this.tone({freq: 120, to: 50, dur: .2, gain: .3}); },
+      enemy_alert: () => {
+        if (event.profile === 'spectral') this.tone({freq: 880, to: 600, dur: .42, gain: .12, attack: .04});
+        else if (event.profile === 'bone') this.rattle('bone', 4);
+        else if (event.profile === 'water') this.burst({freq: 1500, to: 650, dur: .28, gain: .23, attack: .04});
+        else { this.tone({type: 'sawtooth', freq: event.profile === 'canine' ? 310 : 220,
+          to: 145, dur: .28, gain: .09, attack: .025}); this.burst({freq: 800, dur: .12, gain: .1}); }
+      },
+      enemy_attack: () => {
+        // A midrange impact remains audible on phone and laptop speakers.
+        this.burst({freq: 1800, to: 550, dur: .17, gain: .38});
+        this.tone({type: 'triangle', freq: 420, to: 160, dur: .18, gain: .22});
+        if (event.profile === 'spectral') {
+          this.tone({freq: 1320, to: 660, dur: .45, gain: .12, attack: .02});
+          this.tone({freq: 1328, to: 664, dur: .45, gain: .08, attack: .03});
+        } else if (event.profile === 'bone') this.rattle('bone', 5);
+        else if (event.profile === 'water') this.burst({freq: 2200, to: 450, dur: .24, gain: .2});
+        else this.tone({type: 'sawtooth', freq: event.profile === 'canine' ? 390 : 250,
+          to: 100, dur: .2, gain: .09});
+      },
       ambush: () => { this.tone({type: 'sawtooth', freq: 110, to: 98, dur: .6, gain: .06, attack: .02}); this.tone({type: 'sawtooth', freq: 116.5, to: 104, dur: .6, gain: .06, attack: .02}); this.burst({type: 'lowpass', freq: 400, dur: .5, gain: .08}); },
       loot: () => this.notes([660 + r() * 4, 990], {step: .07, dur: .12, gain: .12}),
       rare: () => this.notes([523, 659, 784, 1047, 1319], {step: .07, dur: .3, gain: .09}),
@@ -201,7 +224,7 @@ export class SoundEngine {
       nightfall: () => { this.notes([392, 330, 262], {type: 'sine', step: .35, dur: 1.4, gain: .05}); },
       release: () => { this.tone({freq: 587, to: 294, dur: .8, gain: .05, attack: .02}); this.tone({freq: 392, to: 196, dur: .9, gain: .04, attack: .05}); },
       kindle: () => { this.burst({type: 'highpass', freq: 1800, dur: .4, gain: .08, attack: .1}); for (let i = 0; i < 5; i++) this.burst({freq: 2500 + r() * 2000, q: 3, dur: .02, gain: .08, delay: .1 + r() * .5}); },
-      death: () => { this.tone({freq: 330, to: 82, dur: 1.6, gain: .12, attack: .05}); this.tone({type: 'triangle', freq: 247, to: 62, dur: 1.8, gain: .06, attack: .1}); this.burst({type: 'lowpass', freq: 500, to: 120, dur: 1.4, gain: .08}); },
+      death: () => { this.tone({freq: 620, to: 180, dur: 1.3, gain: .13, attack: .03}); this.tone({freq: 330, to: 82, dur: 1.6, gain: .12, attack: .05}); this.tone({type: 'triangle', freq: 247, to: 62, dur: 1.8, gain: .06, attack: .1}); this.burst({type: 'lowpass', freq: 1200, to: 240, dur: .8, gain: .13}); },
       shimmer: () => { this.tone({freq: 466, to: 440, dur: 2.2, gain: .05, attack: .6}); this.tone({freq: 470, to: 446, dur: 2.2, gain: .05, attack: .7});
         this.notes([1760, 1661, 1976], {type: 'sine', step: .3, dur: .9, gain: .015, delay: .4}); },
       anchor: () => { this.notes([294, 440, 587], {type: 'sine', step: .18, dur: 1.2, gain: .06}); },
@@ -218,9 +241,9 @@ export class SoundEngine {
     PATCH[name]?.();
   }
 
-  /** Bones clatter: a run of dry clicks (only for skeleton-like enemies). */
-  rattle(sprite, n) {
-    if (sprite !== 'skeleton') return;
+  /** Bones clatter: a run of dry clicks for the bone sound profile. */
+  rattle(profile, n) {
+    if (profile !== 'bone') return;
     for (let i = 0; i < n; i++)
       this.tone({type: 'square', freq: 900 + this.random() * 900, dur: .018, gain: .05, delay: .03 + i * (.035 + this.random() * .03)});
   }

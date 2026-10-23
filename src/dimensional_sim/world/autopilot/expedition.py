@@ -80,7 +80,7 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self._clear_caches()
         self.step_cell = None      # manual control: last cell checked for a spot underfoot (not saved)
         self.auto_hold = None      # manual control: the held key that stepped onto a running spot (not saved)
-        self.strikes = {}          # presentation only, not saved: boar attacks landed per target id
+        self.strikes = {}          # presentation only, not saved: enemy attacks landed per target id
         self._new_life_state()
         self.anchor = self._anchor()
         self.elder = self._elder_cell()
@@ -105,6 +105,8 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.food_cooldown_ms = 0
         self.monster_ms = 0
         self.cause = None
+        self.strike_serial = 0     # presentation only: last attack survives the fatal anchor transition
+        self.last_strike = None
         self.depth = 0
         self.task = None   # {"type": TASK_TYPES, "spot", "elapsed_ms", "duration_ms"}
         self.goal = None   # {"kind": "spot"|"target"|"wander"|"home", "id", "x", "y"}

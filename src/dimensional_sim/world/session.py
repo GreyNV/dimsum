@@ -105,7 +105,7 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual",
         kinds = expedition.target_kinds()
         for t in targets:   # how to draw and name each enemy (catalog EnemyDef)
             enemy = ENEMIES[BY_ID[kinds[t["id"]]].enemy]
-            t["name"], t["sprite"] = enemy.name, enemy.sprite
+            t["name"], t["sprite"], t["sound_profile"] = enemy.name, enemy.sprite, enemy.sound_profile
             t["hunting"] = expedition.hunting.get(t["id"], {}).get("mode")   # "hunt" | "flee" | None
         frame_extra = {"spots": [] if in_anchor else expedition.visible_spots(),
                        "target_kinds": {t["id"]: kinds[t["id"]] for t in targets},
@@ -156,6 +156,7 @@ def _expedition_view(e, control, *, debug, detail):
             "equipped": dict(e.equipped),
             "inventory_slots": INVENTORY_SLOTS, "life": e.life, "total_ms": e.total_ms,
             "depth": e.depth, "best_depth": e.best_depth,
+            "last_strike": dict(e.last_strike) if e.last_strike else None,
             "anchor_space": None if not shop_open else {
                 "kind": "contact" if e.contact else "opening" if e.opening else "death",
                 "at_camp": bool(e.contact and e.at_camp()),

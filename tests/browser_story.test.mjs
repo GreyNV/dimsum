@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {storyLine} from '../src/dimensional_sim/world/browser/story_ui.js';
-import {ANCHOR_TEXT, openingBeatText} from '../src/dimensional_sim/world/browser/anchor_ui.js';
+import {ANCHOR_TEXT, anchorDialogue, openingBeatText} from '../src/dimensional_sim/world/browser/anchor_ui.js';
 
 test('story line: objective, then why it waits, that it is close, or where to look', () => {
   const current = {objective: 'Reach the grey wall', rings: [6, 6], waits: [], here: false};
@@ -24,6 +24,15 @@ test('the opening tells its story in short beats before the shop', () => {
   assert.match(beats.join(' '), /ash/);
   assert.match(beats.join(' '), /anchor/);
   assert.match(beats.join(' '), /cannot die/);
+});
+
+test('the anchor names the cause of death on every return', () => {
+  const ex = {anchor_space: {kind: 'death', first_return: false},
+    report: {lines: ['Survived: 4m 12s', 'Cause: a wolf in the night', 'Returning to anchor...']}};
+  assert.equal(anchorDialogue(ex), 'Cause: a wolf in the night');
+  assert.match(anchorDialogue({...ex, anchor_space: {kind: 'death', first_return: true}}),
+    /Cause: a wolf in the night.*dimensional ash/);
+  assert.equal(anchorDialogue({...ex, anchor_space: {kind: 'contact'}}), '');
 });
 
 test('story cards: only new story lines, grouped by the place they came from', async () => {

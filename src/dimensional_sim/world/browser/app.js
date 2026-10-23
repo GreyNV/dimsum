@@ -45,6 +45,7 @@ const ELDER_LEAVE_MS = 2200;
 /* Synthesized sound (sound.js): events from snapshot diffs, ambience from the scene. */
 const sound = new SoundEngine({settings: loadSettings(readUi(SOUND_KEY))});
 let soundScene = {water: 0, fire: 0}, lastVolume = sound.settings.volume || 2;
+let soundHintShown = false;
 function setSound(settings) {
   if (settings.volume > 0) lastVolume = settings.volume;
   sound.apply(settings); writeUi(SOUND_KEY, JSON.stringify(sound.settings));
@@ -146,8 +147,15 @@ function adopt(next, sentControl = null) {
     pictures.delete(chunk.id);   // painted lazily: visible now, others one per frame
   }
   retainResident(chunks, next.resident); retainResident(pictures, next.resident);
-  if (state && !window.DIMSUM_FASTFORWARD)
-    for (const event of soundEvents(state, next, (x, y) => surfaceOf(tileAt([...chunks.values()], x, y)?.glyph))) sound.play(event);
+  if (state && !window.DIMSUM_FASTFORWARD) {
+    const cues = soundEvents(state, next, (x, y) => surfaceOf(tileAt([...chunks.values()], x, y)?.glyph));
+    if (!sound.live && sound.volume > 0 && !soundHintShown &&
+        cues.some(event => event.name === 'enemy_alert' || event.name === 'enemy_attack')) {
+      soundHintShown = true;
+      toast('Tap or press a key to enable enemy sounds.', 5000);
+    }
+    for (const event of cues) sound.play(event);
+  }
   soundScene = listen(next);
   observeCombat(next);
   observeExpedition(next);

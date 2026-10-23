@@ -93,6 +93,8 @@ class WispTests(unittest.TestCase):
         from dimensional_sim.world.catalog import EnemyDef
         with self.assertRaises(ValueError):
             EnemyDef("x", "X", 1, 1, "x", "x", "x", drains="mana")
+        with self.assertRaises(ValueError):
+            EnemyDef("x", "X", 1, 1, "x", "x", "x", sound_profile="unknown")
 
 
 if __name__ == "__main__":

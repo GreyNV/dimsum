@@ -170,6 +170,8 @@ class CombatMixin:
         """One enemy attack on the avatar (its counter feeds the client's lunge animation)."""
         enemy = self.enemy_of(target)
         self.strikes[target.id] = self.strikes.get(target.id, 0) + 1
+        self.strike_serial += 1
+        self.last_strike = {"serial": self.strike_serial, "profile": enemy.sound_profile}
         if self.task and self.task["type"] == "rest":
             self.task = None   # nobody rests through a bite: healing stops while something bites
         if enemy.drains == "hunger":   # it feeds: hunger runs down (starving is the vitals' job)

@@ -32,6 +32,14 @@ export const ANCHOR_TEXT = Object.freeze({
     begin: 'Resume this life'},
 });
 
+export function anchorDialogue(ex) {
+  const anchor = ex?.anchor_space;
+  if (anchor?.kind === 'opening') return ANCHOR_TEXT.opening.dialogue;
+  if (anchor?.kind !== 'death') return '';
+  const cause = ex.report?.lines?.find(line => line.startsWith('Cause: ')) || '';
+  return [cause, anchor.first_return ? ANCHOR_TEXT.death.dialogue : ''].filter(Boolean).join(' ');
+}
+
 /** Which opening beat is showing (client only: a reload starts the story again, which is harmless). */
 let openingBeat = 0, lastExpedition = null, openingStart = null, beatStart = null, openingEnd = null;
 const ANCHOR_FADE_MS = 4500, BODY_FADE_MS = 2500, LIGHT_UP_MS = 1800;
@@ -71,7 +79,8 @@ export function renderAnchor(ex) {
     : `Next life in ${Math.ceil(anchor.remaining_ms / 1000)}s.`;
   $('anchor-ash').textContent = String(ex.meta?.ash ?? 0);
   const beat = openingBeatText(ex);
-  const signature = JSON.stringify([ex.shop, ex.meta, ex.anchor_offerings, anchor.kind, anchor.at_camp, anchor.first_return, openingBeat]);
+  const dialogue = anchorDialogue(ex);
+  const signature = JSON.stringify([ex.shop, ex.meta, ex.anchor_offerings, anchor.kind, anchor.at_camp, dialogue, openingBeat]);
   if (panel.dataset.inventory === signature) return;
   panel.dataset.inventory = signature;
   panel.classList.toggle('anchor-telling', !!beat);
@@ -89,7 +98,6 @@ export function renderAnchor(ex) {
   }
   $('anchor-eyebrow').textContent = text.eyebrow;
   $('anchor-title').textContent = text.title;
-  const dialogue = anchor.kind === 'opening' || anchor.first_return ? text.dialogue : '';
   $('anchor-dialogue').hidden = !dialogue;
   $('anchor-dialogue').textContent = dialogue;
   $('anchor-hint').textContent = anchor.at_camp

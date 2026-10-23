@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from dimensional_sim.world import session as session_module
+from dimensional_sim.world.runtime import Target
 from dimensional_sim.world.web import CATCH_UP_SLICE_MS, OFFLINE_CAP_MS, WebGame
 
 IDLE = json.dumps({"move": None, "attack": False, "paused": False, "known": []})
@@ -18,6 +19,24 @@ def begun(game, now=0.0):
 
 
 class WebBridgeTests(unittest.TestCase):
+    def test_fatal_enemy_attack_reaches_the_anchor_frame_without_a_live_target(self):
+        game = begun(WebGame(seed=3))
+        e = game.expedition
+        here = e.game.player.chunk
+        target = Target("audio-test", here, e.game.player.x + 1, e.game.player.y, 3)
+        e.game.targets[target.id] = target
+        e.admitted[target.id] = "bramble_boar"
+        self.assertEqual(json.loads(game.state(0))["targets"][-1]["sound_profile"], "beast")
+        e.health = 1
+        e._enemy_bites(target)
+        e._die()
+        frame = json.loads(game.state(0))
+        self.assertEqual(frame["targets"], [])
+        self.assertEqual(frame["expedition"]["last_strike"], {"serial": 1, "profile": "beast"})
+        self.assertIn("Cause: a wild boar", frame["expedition"]["report"]["lines"])
+        self.assertIsNone(json.loads(WebGame(game.save()).state(0))["expedition"]["last_strike"],
+                          "audio cues are presentation only and never enter saves")
+
     def test_new_game_frames_and_save_round_trip(self):
         game = WebGame(seed=7)
         frame = json.loads(game.input(IDLE, 0.0))
