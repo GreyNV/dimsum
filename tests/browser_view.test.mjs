@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {visualHash, residentBounds, cameraView, follow, retainResident, tileAt, stickDirection, Controls, TILE_W, TILE_H} from '../src/dimensional_sim/world/browser/view.js';
 import {groundMarks, paintChunk, RES, TREE, terrainColor, OBJECT_PAD, clearStamps, stampCount, TILE_VARIANTS, TREE_VARIANTS, ROCK_VARIANTS} from '../src/dimensional_sim/world/browser/art.js';
 import {ENEMY, ROLE, spriteSize, paintSprite, punchReach, hiddenBehind, occludingTreeTiles, SPOTS, POSE, drawSpot, CAMP, ELDER} from '../src/dimensional_sim/world/browser/actors.js';
-import {activityText, newRewards, ATTRIBUTES, usedAttributes, rewardTexts, reportIsFresh, reportStorageKey, ExpeditionHud, prologueView, shopSections, debugText} from '../src/dimensional_sim/world/browser/hud.js';
+import {activityLabel, activityText, newRewards, ATTRIBUTES, usedAttributes, rewardTexts, reportIsFresh, reportStorageKey, ExpeditionHud, prologueView, shopSections, debugText} from '../src/dimensional_sim/world/browser/hud.js';
 import {anchorAction} from '../src/dimensional_sim/world/browser/anchor_ui.js';
 import {locationAction} from '../src/dimensional_sim/world/browser/location_ui.js';
 import {drawMinimap, visibleAt} from '../src/dimensional_sim/world/browser/minimap.js';
@@ -230,6 +230,10 @@ test('HUD describes the auto-pilot from snapshot fields only',()=>{
   assert.equal(activityText({...base,expedition:{...base.expedition,activity:{name:'Forest spring',kind:'drink',verb:'Drinking at',progress:456}}}),'Drinking at forest spring - 45%');
   assert.equal(activityText({...base,expedition:{...base.expedition,activity:{name:'Fallen boughs',kind:'gather',verb:'Gathering',
     interaction:'Collecting fallen wood',progress:500}}}),'Collecting fallen wood - 50%','the interaction names what the avatar does');
+  assert.equal(activityLabel({name:'Bramble berries',interaction:'Picking berries'}),'Picking berries');
+  assert.equal(activityLabel({name:'Fallen boughs',interaction:'Collecting fallen wood'}),'Collecting fallen wood');
+  assert.equal(activityLabel({name:'Mossy rock',interaction:'Meditating by the rock'}),'Meditating by the rock');
+  assert.equal(activityLabel({name:'Build a storage chest',interaction:'Building a storage chest'}),'Building a storage chest');
   assert.match(activityText({...base,expedition:{...base.expedition,mode:'fight'}}),/Fists up - fighting/);
   assert.equal(activityText(base,true),'Paused - the forest can wait');
   assert.equal(activityText({}),null,'legacy manual frames fall back');
@@ -270,8 +274,8 @@ test('prologue: dark awakening with memories, eyes open, then the old man speaks
   assert.equal(talk(1000).text,elder[1]);
   assert.equal(prologueView(null).stage,null);
   const ex=(stage,progress)=>({expedition:{control:'auto',prologue:{stage,progress,lines:[]},activity:{name:'x',kind:stage,progress}}});
-  assert.equal(activityText(ex('awaken',420)),'Wake up - 42%');
-  assert.equal(activityText(ex('stand_up',990)),'Stand up - 99%');
+  assert.equal(activityText(ex('awaken',420)),'Waking up - 42%');
+  assert.equal(activityText(ex('stand_up',990)),'Standing up - 99%');
   assert.equal(activityText(ex('listen',10)),'Listening to the old man');
   ELDER.paint.forEach((row,r)=>{assert.equal(row.length,ELDER.paint[0].length);assert.equal(ELDER.glyph[r].length,row.length);});
   for(const role of new Set(ELDER.paint.join('').replaceAll(' ',''))) assert.ok('hrswogb'.includes(role),role);
@@ -412,7 +416,7 @@ test('anchor shop groups server rows and the debug overlay explains buckets',()=
     screening:[{chunk:'forest:1:0',action:'bramble_boar',result:'rejected: window full (1/1 at once)'}]});
   for(const needle of ['seed 7','bramble_berries 13 (22.4%)','bramble_boar 1/1','food 1/5','gnarled_tree: locked','window full'])
     assert.ok(text.includes(needle),needle);
-  assert.match(activityText({expedition:{control:'auto',activity:{kind:'craft',name:'Carve a walking staff',progress:500}}}),/^Carve a walking staff - 50%/);
+  assert.match(activityText({expedition:{control:'auto',activity:{kind:'craft',name:'Carve a walking staff',interaction:'Carving a walking staff',progress:500}}}),/^Carving a walking staff - 50%/);
 });
 
 test('anchor clicks map to purchases and begin; Journal controls are not anchor buttons any more',()=>{

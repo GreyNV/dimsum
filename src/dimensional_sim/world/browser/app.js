@@ -3,7 +3,7 @@ import {TILE_W, TILE_H, ZOOM, clamp, residentBounds, cameraView, follow, glide, 
 import {PALETTE, OBJECT_PAD, paintChunk, treeAt, treeKind, drawObjects, canopyFade, pathCover, trailFade, put, putSwayed, setResolution} from './art.js';
 import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawUnarmedReach, drawDamage, drawFloat, drawReveal, drawSpot, drawSpotCompletion, drawCamp, drawBuildings, drawCampfire, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
 import {PAGES, needsDetail, pageModel, PANELS, COLLAPSE_KEY, loadCollapsed, toggleCollapsed, defaultCollapsed, subtabsOf} from './pages.js';
-import {debugText, ExpeditionHud, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
+import {debugText, ExpeditionHud, activityLabel, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
 import {clockText, regionCue, skillSlots, worldMode} from './world_ui.js';
 import {locationAction, renderLocationContext} from './location_ui.js';
 import {$, el, readUi, writeUi} from './dom.js';
@@ -176,7 +176,7 @@ function adopt(next, sentControl = null) {
   $('attack-state').textContent = next.expedition?.auto_target ? 'TARGET IN REACH' : 'AUTO STRIKE';
   $('region-tip').textContent = regionCue(next.expedition?.region);
   const progress = next.expedition?.activity;
-  $('action-name').textContent = progress?.name || (active ? 'Choose your path' : 'Exploring');
+  $('action-name').textContent = activityLabel(progress) || (active ? 'Choosing a path' : 'Exploring');
   $('action-percent').textContent = progress ? `${Math.floor(progress.progress / 10)}%` : '';
   $('action-fill').style.width = `${progress ? progress.progress / 10 : 0}%`;
   for (const [index, slot] of skillSlots(next.expedition).entries()) {

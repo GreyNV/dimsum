@@ -11,6 +11,13 @@ export const LABEL = Object.freeze(Object.fromEntries(ATTRIBUTES.map(([id, name]
 export const ITEM_COLOR_DEFAULT = '#e7d7b0';
 
 /** One-line description of what the auto-pilot is doing. */
+export function activityLabel(activity) {
+  if (!activity) return null;
+  if (activity.interaction) return activity.interaction;
+  if (activity.verb && activity.name) return `${activity.verb} ${activity.name.toLowerCase()}`;
+  return activity.name || 'Working';
+}
+
 export function activityText(state, paused = false) {
   if (paused) return 'Paused - the forest can wait';
   const ex = state.expedition;
@@ -22,17 +29,11 @@ export function activityText(state, paused = false) {
   if (ex.prologue) {
     const p = ex.prologue;
     if (p.stage === 'listen') return 'Listening to the old man';
-    return `${p.stage === 'awaken' ? 'Wake up' : 'Stand up'} - ${Math.floor(p.progress / 10)}%`;
+    return `${p.stage === 'awaken' ? 'Waking up' : 'Standing up'} - ${Math.floor(p.progress / 10)}%`;
   }
   if (ex.activity) {
     const pct = Math.floor(ex.activity.progress / 10);
-    if (ex.activity.kind === 'rest') return `${ex.activity.name || 'Resting at the anchor camp'} - ${pct}%`;
-    if (ex.activity.kind === 'pray') return `Praying to the gods - ${pct}%`;
-    if (ex.activity.kind === 'think') return `Thinking about the road - ${pct}%`;
-    if (ex.activity.kind === 'contemplate') return `Contemplating the forest - ${pct}%`;
-    if (ex.activity.kind === 'craft' || ex.activity.kind === 'build') return `${ex.activity.name} - ${pct}%`;
-    if (ex.activity.interaction) return `${ex.activity.interaction} - ${pct}%`;
-    return `${ex.activity.verb || 'Investigating'} ${ex.activity.name.toLowerCase()} - ${pct}%`;
+    return `${activityLabel(ex.activity)} - ${pct}%`;
   }
   if (ex.mode === 'home') return 'Badly hurt - heading back to the anchor camp';
   if (ex.mode === 'fight') return `${ex.weapon?.item ? 'Weapon up' : 'Fists up'} - fighting a ${(ex.opponent || 'foe').toLowerCase()}`;

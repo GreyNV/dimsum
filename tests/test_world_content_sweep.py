@@ -68,6 +68,12 @@ class ReachabilityTests(unittest.TestCase):
 
 
 class PresentationTests(unittest.TestCase):
+    def test_every_action_describes_what_the_avatar_is_doing(self):
+        for action in ACTIONS:
+            with self.subTest(action=action.id):
+                self.assertTrue(action.interaction, "active actions need a progress label")
+                self.assertTrue(action.interaction.split()[0].endswith("ing"), action.interaction)
+
     def test_item_glyphs_are_unique(self):
         glyphs = [i.glyph for i in ITEMS.values()]
         dupes = {g for g in glyphs if glyphs.count(g) > 1}

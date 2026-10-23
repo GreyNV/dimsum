@@ -52,7 +52,7 @@ STAT_KEYS = ("chunks", "food_spots", "enemy_spots", "pity", "rejected", "complet
 
 PROLOGUE_MS = {"awaken": 10_000, "stand_up": 3_500, "listen": 25_000}
 PROLOGUE_NEXT = {"awaken": "stand_up", "stand_up": "listen"}
-PROLOGUE_NAMES = {"awaken": "Wake up", "stand_up": "Stand up", "listen": "Listen to the old man"}
+PROLOGUE_NAMES = {"awaken": "Waking up", "stand_up": "Standing up", "listen": "Listening to the old man"}
 # Memory fragments shown on the dark screen while the avatar wakes up.
 MEMORIES = (
     "The forest road. Wagon wheels, laughter, a song left half-finished.",
