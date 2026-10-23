@@ -37,7 +37,7 @@ for (const name of ['pyodide.js', 'pyodide.asm.mjs', 'pyodide.asm.wasm', 'python
   if (existsSync(join(pyodide, name))) cpSync(join(pyodide, name), join(dist, 'pyodide', name));
 }
 
-// 4. The Python package (source files) plus a manifest the worker loads.
+// 4. One Python source bundle: one request instead of one per module at startup.
 const pkg = join(root, 'src', 'dimensional_sim');
 const files = [];
 (function walk(dir) {
@@ -48,10 +48,11 @@ const files = [];
   }
 })(pkg);
 files.sort();
+const sources = {};
 for (const file of files) {
-  mkdirSync(dirname(join(dist, 'py', file)), {recursive: true});
-  cpSync(join(root, 'src', file), join(dist, 'py', file));
+  sources[file] = readFileSync(join(root, 'src', file), 'utf8');
 }
 const version = JSON.parse(readFileSync(join(web, 'package.json'), 'utf8')).version;
-writeFileSync(join(dist, 'py', 'manifest.json'), JSON.stringify({version, built: new Date().toISOString(), files}));
+mkdirSync(join(dist, 'py'));
+writeFileSync(join(dist, 'py', 'source.json'), JSON.stringify({version, built: new Date().toISOString(), files: sources}));
 console.log(`dimsum web build: ${files.length} python files, pyodide ${JSON.parse(readFileSync(join(pyodide, 'package.json'), 'utf8')).version}`);

@@ -57,6 +57,7 @@ class WorldRepository:
         self._catalog = self._generator.catalog
         self._cache_limit = cache_limit
         self._resident = OrderedDict()
+        self._resident_revision = 0
         self._recycled = OrderedDict()   # recently evicted chunks: identical on regeneration, so reuse them
         self._discovery = {}
         self._generation_count = 0
@@ -80,6 +81,11 @@ class WorldRepository:
     @property
     def resident_count(self):
         return len(self._resident)
+
+    @property
+    def resident_revision(self):
+        """Changes when the resident chunk set changes, for read-only navigation memos."""
+        return self._resident_revision
 
     @property
     def generation_count(self):
@@ -140,6 +146,7 @@ class WorldRepository:
         if key not in self._resident:
             chunk = self._recycled.pop(key, None) or self._generator.generate(key)
             self._resident[key] = chunk
+            self._resident_revision += 1
             self._generation_count += 1
             self._discovery.setdefault(key, ("generated", chunk.asset.biome))
             while len(self._resident) > self.cache_limit:
@@ -184,6 +191,7 @@ class WorldRepository:
         for key in tuple(self._resident):
             if key not in retained:
                 self._recycle(key, self._resident.pop(key))
+                self._resident_revision += 1
         # Center is last touched, never evicted by neighborhood prefetch.
         for key in reversed(selected):
             self.get(key)

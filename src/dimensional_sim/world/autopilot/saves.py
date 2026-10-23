@@ -6,7 +6,7 @@ it. Older saves are migrated one schema at a time by MIGRATIONS; schemas 1-5
 (before the hosted build) are no longer supported and are rejected.
 """
 from ..catalog import RECIPE_KEEP_COST, DEATH_CAUSES, UNLOCKS
-from ..catalog import ATTRIBUTES, BUILDINGS, BY_ID, ITEMS, LOCATION_FOCUS, LOCATIONS, REGIONS
+from ..catalog import ATTRIBUTES, BUILDINGS, BY_ID, ITEMS, LOCATION_FOCUS, LOCATIONS
 from ..encounters import ENCOUNTER_VERSION
 from ..equipment import validate_equipped
 from ..journal import new_journal, validate_journal
@@ -387,6 +387,28 @@ def _load_progress(result, data):
 
 def _load_life(result, data):
     """Vitals, currencies, purchases, per-life counters, pity spots and spot plans."""
+    _load_vitals(result, data)
+    _load_anchor_camp(result, data)
+    result.pressure = valid_pressure(data["pressure"], result.dimension)
+    result.shimmer = valid_shimmer(data["shimmer"], result.dimension)
+    if type(data["converted"]) is not dict or any(item not in ITEMS for item in data["converted"]):
+        raise ValueError("invalid converted resources")
+    result.converted = {item: integer(count, "converted resources", 1)
+                        for item, count in data["converted"].items()}
+    _load_anchor_powers(result, data)
+    _load_night(result, data)
+    if type(data["unlocked"]) is not list or any(u not in UNLOCKS for u in data["unlocked"]) \
+            or len(set(data["unlocked"])) != len(data["unlocked"]):
+        raise ValueError("invalid unlocks")
+    result.unlocked = set(data["unlocked"])
+    _load_camp(result, data)
+    _load_counters(result, data)
+    _load_spot_plans(result, data)
+    _load_anchor_clock(result, data)
+
+
+def _load_vitals(result, data):
+    """Hunger, health, death cause, depth and ash."""
     result.hunger = integer(data["hunger"], "hunger", 0, VITAL_MAX)
     result.health = integer(data["health"], "health", 0, VITAL_MAX)
     result.food_cooldown_ms = integer(data["food_cooldown_ms"], "food cooldown", 0, FOOD_COOLDOWN_MS)
@@ -396,6 +418,10 @@ def _load_life(result, data):
     result.depth = integer(data["depth"], "depth", 0)
     result.best_depth = integer(data["best_depth"], "best depth", result.depth)
     result.ash = integer(data["ash"], "ash", 0)
+
+
+def _load_anchor_camp(result, data):
+    """Buildings at the anchor camp, the storage chest and a lit campfire."""
     for name in ("buildings", "bound_buildings"):
         values = data[name]
         if type(values) is not list or len(set(values)) != len(values) or any(v not in BUILDINGS for v in values):
@@ -420,12 +446,10 @@ def _load_life(result, data):
             raise ValueError("a campfire stands beside its seat")
         fire = dict(fire)
     result.campfire = fire
-    result.pressure = valid_pressure(data["pressure"], result.dimension)
-    result.shimmer = valid_shimmer(data["shimmer"], result.dimension)
-    if type(data["converted"]) is not dict or any(item not in ITEMS for item in data["converted"]):
-        raise ValueError("invalid converted resources")
-    result.converted = {item: integer(count, "converted resources", 1)
-                        for item, count in data["converted"].items()}
+
+
+def _load_anchor_powers(result, data):
+    """Contact and possession timers, and the opening flag."""
     result.contact_ready_ms = integer(data["contact_ready_ms"], "contact cooldown", 0,
                                       result.total_ms + CONTACT_COOLDOWN_MS)
     result.possess_charge = integer(data["possess_charge"], "possession charge", 0, POSSESS_COOLDOWN_MS)
@@ -443,6 +467,10 @@ def _load_life(result, data):
     if type(data["opening"]) is not bool or (data["opening"] and (data["anchor_ms"] is None or result.life != 1)):
         raise ValueError("invalid opening")
     result.opening = data["opening"]
+
+
+def _load_night(result, data):
+    """The night clock and the enemies hunting the avatar."""
     result.night_tick = integer(data["night_tick"], "night tick", 0,
                                 (result.total_ms + DAY_START_MS) // NIGHT_SPAWN_EVERY_MS)
     hunting = data["hunting"]
@@ -454,10 +482,10 @@ def _load_life(result, data):
         if ident not in result.game.targets or row["mode"] not in ("hunt", "flee"):
             raise ValueError("invalid hunting enemy")
         result.hunting[ident] = {"mode": row["mode"], "since": integer(row["since"], "hunt start", 0, result.total_ms)}
-    if type(data["unlocked"]) is not list or any(u not in UNLOCKS for u in data["unlocked"]) \
-            or len(set(data["unlocked"])) != len(data["unlocked"]):
-        raise ValueError("invalid unlocks")
-    result.unlocked = set(data["unlocked"])
+
+
+def _load_camp(result, data):
+    """A camp held in a mastered place (Places)."""
     camp = data["camp"]
     if camp is not None:
         fields(camp, ("location", "dimension", "cx", "cy", "idle_since", "left"))
@@ -471,6 +499,10 @@ def _load_life(result, data):
             integer(camp["idle_since"], "camp idle", 0, result.total_ms)
         camp = dict(camp)
     result.camp = camp
+
+
+def _load_counters(result, data):
+    """Life stats, drought counters and pity spots."""
     if type(data["stats"]) is not dict or set(data["stats"]) != set(STAT_KEYS):
         raise ValueError("invalid life stats")
     result.stats = {k: integer(v, "life stat", 0) for k, v in data["stats"].items()}
@@ -482,6 +514,10 @@ def _load_life(result, data):
                                                                   for e in v) for v in forced.values()):
         raise ValueError("invalid pity spots")
     result.forced = {k: list(v) for k, v in forced.items()}
+
+
+def _load_spot_plans(result, data):
+    """Rolled spot plans per chunk, checked against the world's dimensions."""
     plans = data["spot_plans"]
     if type(plans) is not dict or len(plans) > 100000:
         raise ValueError("invalid spot plans")
@@ -506,6 +542,10 @@ def _load_life(result, data):
             integer(row[1], "spot x", 0, spec.width - 1)
             integer(row[2], "spot y", 0, spec.height - 1)
         result.spot_plans[ident] = [tuple(row) for row in rows]
+
+
+def _load_anchor_clock(result, data):
+    """Journal, monster clock and the anchor countdown."""
     result.journal = validate_journal(data["journal"])
     result.monster_ms = min(integer(data["monster_ms"], "monster clock", 0, LEGACY_MONSTER_MAX_MS),
                             MONSTER_STEP_MS - 1)

@@ -4,7 +4,7 @@ A chunk is rolled once per life when the avatar first enters it (the roll is sav
 as a spot plan for exact replay). Spawn windows cap how many of an encounter exist
 at once; pity forces a spot of a starved category after a few empty chunks.
 """
-from ..actions import Context, bucket, bucket_reasons
+from ..actions import Context, bucket
 from .. import effects
 from ..catalog import ASSET_ENEMY_ACTION, BY_ID, ITEMS
 from ..encounters import EncounterSpot, chunk_spots, features, forced_spot, roll_window, spot_id

@@ -4,14 +4,13 @@ Shared by the local HTTP adapter (browser_server.py) and the hosted web build, w
 runs this module in the browser through Pyodide (world/web.py). No http, socket or
 threading imports belong here; callers own any locking and should pass `now`.
 """
-import time
 
 from .animation import rotate
 from .autopilot import INVENTORY_SLOTS, Expedition
 from .autopilot.constants import CONTACT_COOLDOWN_MS, POSSESS_COOLDOWN_MS, POSSESS_SPEED_PERCENT
 from . import details
 from .autopilot.ecology import cell_of
-from .catalog import BY_ID, DEFAULT_TREES, ENEMIES, ITEMS, REGION_TREES, REGIONS, TREE_KINDS, UNLOCKS, rarity_glint
+from .catalog import BY_ID, DEFAULT_TREES, ENEMIES, ITEMS, REGION_TREES, TREE_KINDS, UNLOCKS, rarity_glint
 from .models import ChunkKey, chunk_ident, integer
 from .progression import attribute_report
 from .runtime import InputCommand

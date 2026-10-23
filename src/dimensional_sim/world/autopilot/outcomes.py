@@ -3,7 +3,7 @@ from dataclasses import replace
 
 from .. import effects
 from ..actions import bucket, outcome_chance, reasons_against
-from ..catalog import BY_ID, ITEMS, RECIPE_KEEP_COST, RECIPE_NAMES
+from ..catalog import BY_ID, ITEMS, RECIPE_KEEP_COST, RECIPE_NAMES, WOOD_YIELD_ITEM
 from ..encounters import features, lead_spot, roll_loot
 from ..equipment import equip_item
 from ..journal import record_action, record_items
@@ -179,7 +179,7 @@ class OutcomesMixin:
         rolled = roll_loot(entry if condition is None or condition.drops else replace(entry, drops=None), seed)
         chop = effects.total(self.equipped, "wood_yield") if "wood" in entry.tags else 0
         if chop:   # an axe: more wood from every wood harvest
-            rolled = [*rolled, ("stick", chop)]   # once per harvest, however many rows rolled
+            rolled = [*rolled, (WOOD_YIELD_ITEM, chop)]   # once per harvest, however many rows rolled
         items = [(item, kept) for item, count in rolled if (kept := self._add_item(item, count))]
         if entry.heal:
             self.health = min(VITAL_MAX, self.health + entry.heal * POINT)

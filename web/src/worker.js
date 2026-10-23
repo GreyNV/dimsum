@@ -21,21 +21,18 @@ async function boot() {
   progress('Loading Python runtime', 0.05);
   py = await loadPyodide({indexURL: '/pyodide/'});
   progress('Loading the world', 0.6);
-  const manifest = await (await fetch('/py/manifest.json', {cache: 'no-cache'})).json();
+  const response = await fetch('/py/source.json', {cache: 'no-cache'});
+  if (!response.ok) throw new Error('missing Python source bundle');
+  const bundle = await response.json();
   const base = '/home/pyodide/game';
-  const texts = await Promise.all(manifest.files.map(async file => {
-    const response = await fetch(`/py/${file}?v=${encodeURIComponent(manifest.built)}`);
-    if (!response.ok) throw new Error(`missing ${file}`);
-    return [file, await response.text()];
-  }));
-  for (const [file, text] of texts) {
+  for (const [file, text] of Object.entries(bundle.files)) {
     const path = `${base}/${file}`;
     py.FS.mkdirTree(path.slice(0, path.lastIndexOf('/')));
     py.FS.writeFile(path, text);
   }
   py.runPython(`import sys\nsys.path.insert(0, ${JSON.stringify(base)})\nsys.dont_write_bytecode = True`);
   py.runPython('from dimensional_sim.world.web import WebGame');
-  return manifest;
+  return {version: bundle.version, built: bundle.built};
 }
 
 function now() { return performance.now() / 1000; }

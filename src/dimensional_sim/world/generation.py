@@ -5,7 +5,7 @@ catalog digest. All cell decisions use labeled SHA-derived seeds. Paths connecti
 template exits/spawns remain open; decoration may block only unreserved floor.
 Loot has a reserved independent seed namespace, but this slice grants no loot.
 """
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import asdict, replace
 
 from .models import (
@@ -83,6 +83,7 @@ def _reachable(collision, origin):
 
 
 class ChunkGenerator:
+    SOURCE_CACHE_LIMIT = 256
     """Select/combine a pinned catalog without access-order-dependent state.
 
     All requested biome/geometry combinations must exist in the catalog. Optional
@@ -159,29 +160,45 @@ class ChunkGenerator:
             raise ValueError("unknown dimension or invalid chunk key")
         return self._specs[key.dimension]
 
+    def _dimension_seed(self, spec):
+        """The seed of one dimension: fixed once the generator exists, so it is derived once."""
+        seeds = self.__dict__.setdefault("_dimension_seeds", {})
+        seed = seeds.get(spec.id)
+        if seed is None:
+            if self.generator_version == 1:
+                seed = derive_seed(
+                    self.world_seed, "generator", 1, "catalog",
+                    self.catalog_digest, "dimension", canonical_json(asdict(spec)))
+            else:
+                parts = (self.world_seed, "generator", min(self.generator_version, 2), "catalog", self.catalog_digest,
+                         "regions", self.region_catalog_digest)
+                if self.region_version >= 2:
+                    parts += ("region-version", self.region_version)
+                seed = derive_seed(*parts, "dimension", canonical_json(asdict(spec)))
+            seeds[spec.id] = seed
+        return seed
+
     def _seed(self, key):
-        spec = self._spec(key)
-        if self.generator_version == 1:
-            dimension_seed = derive_seed(
-                self.world_seed, "generator", 1, "catalog",
-                self.catalog_digest, "dimension", canonical_json(asdict(spec)))
-        else:
-            parts = (self.world_seed, "generator", min(self.generator_version, 2), "catalog", self.catalog_digest,
-                     "regions", self.region_catalog_digest)
-            if self.region_version >= 2:
-                parts += ("region-version", self.region_version)
-            dimension_seed = derive_seed(*parts, "dimension", canonical_json(asdict(spec)))
-        return derive_seed(dimension_seed, "chunk", key.x, key.y)
+        return derive_seed(self._dimension_seed(self._spec(key)), "chunk", key.x, key.y)
 
     def _source(self, key):
-        spec = self._spec(key)
-        seed = self._seed(key)
-        terrain_seed = derive_seed(seed, "terrain")
-        # Authoring order is not a hidden weighting mechanism.
-        biomes = tuple(sorted(spec.biomes))
-        biome = biomes[derive_seed(terrain_seed, "biome") % len(biomes)]
-        pool = self._pools[(spec.id, biome)]
-        return pool[derive_seed(terrain_seed, "template") % len(pool)]
+        """The template asset a chunk is built from. Pure in (generator, key), so it is cached:
+        the auto-pilot asks for chunk biomes tens of thousands of times an hour."""
+        sources = self.__dict__.setdefault("_sources", OrderedDict())
+        source = sources.get(key)
+        if source is None:
+            spec = self._spec(key)
+            terrain_seed = derive_seed(self._seed(key), "terrain")
+            # Authoring order is not a hidden weighting mechanism.
+            biomes = tuple(sorted(spec.biomes))
+            biome = biomes[derive_seed(terrain_seed, "biome") % len(biomes)]
+            pool = self._pools[(spec.id, biome)]
+            source = sources[key] = pool[derive_seed(terrain_seed, "template") % len(pool)]
+            if len(sources) > self.SOURCE_CACHE_LIMIT:
+                sources.popitem(last=False)
+        else:
+            sources.move_to_end(key)
+        return source
 
     def region_field(self, biome, spec):
         """Generator v3: the cached tile-level region field of one biome."""

@@ -128,10 +128,6 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         """The player's god is steering the avatar (manual control)."""
         return self.possess_end_ms is not None
 
-    @property
-    def manual_control(self):
-        return self.possessing
-
     def possession_charge(self):
         """Charge at the current simulation time, independent of advance partitioning."""
         elapsed = self.total_ms - self.possess_charge_at_ms

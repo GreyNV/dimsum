@@ -110,16 +110,21 @@ class Exploration:
         gx = self.player.chunk.x * width + self.player.x
         gy = self.player.chunk.y * height + self.player.y
         radius = self.reveal_radius
+        dimension = self.player.chunk.dimension
+        rows_of = {}   # (cx, cy) -> that chunk's seen rows, or None while it is unknown
         for dy in range(-radius, radius + 1):
             for dx in range(-radius, radius + 1):
                 if dx * dx + dy * dy > radius * radius:
                     continue
                 x, y = gx + dx, gy + dy
-                key = ChunkKey(self.player.chunk.dimension, x // width, y // height)
-                if self.world.status(key) == "unknown":
-                    continue
-                rows = self.seen.setdefault(key, [0] * height)
-                rows[y % height] |= 1 << (x % width)
+                cell = (x // width, y // height)
+                if cell not in rows_of:
+                    key = ChunkKey(dimension, *cell)
+                    rows_of[cell] = None if self.world.status(key) == "unknown" else \
+                        self.seen.setdefault(key, [0] * height)
+                rows = rows_of[cell]
+                if rows is not None:
+                    rows[y % height] |= 1 << (x % width)
 
     def reveal_area(self, radius):
         """Remember every cell within `radius` tiles (a map-reading reward). Generates the

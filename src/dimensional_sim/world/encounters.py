@@ -53,10 +53,6 @@ class EncounterSpot:
     x: int
     y: int
 
-    @property
-    def definition(self):
-        return BY_ID[self.encounter]
-
 
 def spot_id(key, index):
     return f"enc:{key.dimension}:{key.x}:{key.y}:{index}"

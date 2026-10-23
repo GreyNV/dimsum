@@ -60,10 +60,6 @@ def known(action, unlocked):
         (action.recipe is None or action.recipe in ctx.recipes)
 
 
-def known_actions(unlocked):
-    return tuple(a for a in ACTIONS if known(a, unlocked))
-
-
 def _requirement_reasons(action, ctx):
     result = []
     for req in action.requirements:

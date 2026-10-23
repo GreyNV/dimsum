@@ -87,6 +87,15 @@ class GenerationTests(unittest.TestCase):
             self.assertEqual(left.generate(ChunkKey("forest", x, -2)),
                              right.generate(ChunkKey("forest", x, -2)))
 
+    def test_source_cache_is_bounded_and_eviction_does_not_change_selection(self):
+        generator = ChunkGenerator(32, (DimensionSpec("forest", width=8, height=6),), builtin_assets(8, 6))
+        first = ChunkKey("forest", 0, 0)
+        expected = generator._source(first)
+        for x in range(generator.SOURCE_CACHE_LIMIT + 20):
+            generator._source(ChunkKey("forest", x + 1, 0))
+        self.assertLessEqual(len(generator._sources), generator.SOURCE_CACHE_LIMIT)
+        self.assertEqual(generator._source(first), expected)
+
     def test_catalog_digest_matches_registry(self):
         world = make_world()
         registry = AssetRegistry()
@@ -235,6 +244,19 @@ class RegionTerrainTests(unittest.TestCase):
 
 
 class RepositoryTests(unittest.TestCase):
+    def test_resident_revision_changes_only_when_chunk_membership_changes(self):
+        world = make_world(cache_limit=1)
+        first, second = ChunkKey("forest", 0, 0), ChunkKey("forest", 1, 0)
+        initial = world.resident_revision
+        world.get(first)
+        self.assertGreater(world.resident_revision, initial)
+        loaded = world.resident_revision
+        world.get(first)
+        world.peek(first)
+        self.assertEqual(world.resident_revision, loaded)
+        world.get(second)
+        self.assertGreater(world.resident_revision, loaded)
+
     def test_new_world_empty_optional_catalog_uses_builtins_and_supports_multiple_sizes(self):
         default, empty = WorldRepository(), WorldRepository(assets=())
         self.assertEqual(default.catalog, empty.catalog)

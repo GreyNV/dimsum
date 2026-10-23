@@ -66,6 +66,7 @@ EFFECT_STATS = {
     "food_window_bonus": "add",     # extra at-once cap (low and high) for every food source
     "wood_yield": "add",            # extra sticks from every wood harvest (an axe chops)
 }
+WOOD_YIELD_ITEM = "stick"           # what a wood_yield effect adds to each harvest tagged "wood"
 
 
 # ----- attack profiles ------------------------------------------------------------
@@ -1469,6 +1470,8 @@ def validate_catalog():
         raise ValueError("every action category needs a CategoryStyle")
     if ASSET_ENEMY_ACTION not in BY_ID or BY_ID[ASSET_ENEMY_ACTION].enemy is None:
         raise ValueError("ASSET_ENEMY_ACTION must be a fight spot")
+    if WOOD_YIELD_ITEM not in ITEMS:
+        raise ValueError("WOOD_YIELD_ITEM must name an item")
     for region in REGIONS.values():
         if region.biome not in BIOMES:
             raise ValueError(f"region {region.id} names unknown biome {region.biome}")

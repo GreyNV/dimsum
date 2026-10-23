@@ -39,22 +39,25 @@ class NavigationMixin:
     def _resident(self):
         """Resident 3x3 chunks around the avatar (memoized while the cache is unchanged)."""
         center, world = self.game.player.chunk, self.game.world
-        memo_key = (center, world.generation_count, world.resident_count, id(world))
+        memo_key = (center, world.resident_revision, id(world))
         memo = self._resident_memo
-        if memo is not None and memo[0] == memo_key and all(world.peek(c.key) is c for c in memo[1]):
+        if memo is not None and memo[0] == memo_key:
             return memo[1]
         result = self._resident_scan(center)
-        self._resident_memo = (memo_key, result)
+        self._resident_memo = ((center, world.resident_revision, id(world)), result)
         return result
 
     def _resident_scan(self, center):
-        result = []
-        for dy in (-1, 0, 1):
-            for dx in (-1, 0, 1):
-                chunk = self.game.world.peek(ChunkKey(center.dimension, center.x + dx, center.y + dy))
-                if chunk is not None:
-                    result.append(chunk)
-        return result
+        """The full 3x3 around the avatar, loading any neighbour the cache dropped. Decisions read
+        only this set, so they never depend on cache history: a save loaded from disk (whose cache
+        starts with the anchor's chunk) decides exactly like the run that wrote it."""
+        world = self.game.world
+        keys = [ChunkKey(center.dimension, center.x + dx, center.y + dy) for dy in (-1, 0, 1) for dx in (-1, 0, 1)]
+        for key in keys:
+            if world.peek(key) is None:
+                world.get(key)
+        result = [world.peek(key) or world.get(key) for key in keys]
+        return [chunk for chunk in result if chunk is not None]
 
     def _elder_cell(self):
         """Where the old man stands: two steps beside the anchor (one if cramped)."""

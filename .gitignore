@@ -17,6 +17,12 @@ node_modules/
 # Local tooling and generated evidence (large; regenerate locally)
 .codex/tools/
 .codex/artifacts/
+.codex/skills/
+.codex/worktrees/
+/Claude outputs/
+# Local refactor evidence and developer scripts are kept outside the app repository.
+/docs/technical/refactoring.md
+/tools/golden_master.py
 *.log
 
 # Agent scratch: headless browser profiles hold cookies/login stores; never commit
