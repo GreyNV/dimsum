@@ -132,7 +132,7 @@ function updateActivity() {
   if (!state) return;
   const tile = tileAt([...chunks.values()], state.player.x, state.player.y);
   const near = state.targets.find(t => t.hp > 0 && Math.abs(t.x - state.player.x) + Math.abs(t.y - state.player.y) <= 2);
-  const surface = near ? `${near.name || 'Something'} nearby - ${near.hp} HP` : tile?.glyph === '%' ? 'Fording the river' : tile?.glyph === 'H' ? 'On an old bridge' : tile?.blocked ? 'Obstructed ground' : tile?.glyph === '=' ? 'On the old forest trail' : 'Among the trees';
+  const surface = near ? `${near.name || 'Something'}${near.tier ? ' ' + near.tier : ''} nearby - ${near.hp} HP` : tile?.glyph === '%' ? 'Fording the river' : tile?.glyph === 'H' ? 'On an old bridge' : tile?.blocked ? 'Obstructed ground' : tile?.glyph === '=' ? 'On the old forest trail' : 'Among the trees';
   const auto = activityText(state, paused);
   const text = auto ?? (paused ? 'Paused - the forest can wait' : state.player.animation === 'attack' ? (state.expedition?.weapon?.item ? 'Weapon up' : 'Fists up') : surface);
   if ($('activity').textContent !== text) $('activity').textContent = text;
@@ -293,8 +293,10 @@ function attackPhase(player) {
  * so it never vanishes into the leaves while walking behind a tree. */
 let canopyLayer = null;
 /** Repaint the canopies that stand in front of an actor at tile (tx, ty), only over `box`
- * (the actor's own picture, world px [x0, y0, x1, y1]; default: around the tile). */
-function repaintCanopies(tx, ty, resident, alpha = 1, box = null) {
+ * (the actor's own picture, world px [x0, y0, x1, y1]; default: around the tile). `hole`
+ * ({x, y, rx, ry, density}, world px) punches a dotted opening in the leaves (dotHole).
+ * Returns whether any canopy stood in front. */
+function repaintCanopies(tx, ty, resident, alpha = 1, box = null, hole = null) {
   const cx = (tx + .5) * TILE_W, cy = (ty + .5) * TILE_H;
   const [bx0, by0, bx1, by1] = box || [cx - 22, cy - 48, cx + 22, cy + 14];
   const trees = [];
@@ -310,8 +312,8 @@ function repaintCanopies(tx, ty, resident, alpha = 1, box = null) {
       ? Math.min(canopyFade(tile.x - ax, tile.y - ay), trailFade(pathCover(chunk, lx, ly), ax, ay)) : 1;
     if (t.x < bx1 && t.x + t.canvas.lw > bx0 && t.y < by1 && t.y + t.canvas.lh > by0) trees.push(t);
   }
-  if (!trees.length) return;
-  if (alpha >= 1) { for (const t of trees) { ctx.globalAlpha = t.fade; putSwayed(ctx, t.canvas, t.x, t.y, t.shear); } ctx.globalAlpha = 1; return; }
+  if (!trees.length) return false;
+  if (alpha >= 1 && !hole) { for (const t of trees) { ctx.globalAlpha = t.fade; putSwayed(ctx, t.canvas, t.x, t.y, t.shear); } ctx.globalAlpha = 1; return; }
   // See-through leaves: the overlapping trees are composed at full strength off-screen (so
   // nearer canopies still hide farther trunks), then laid over the actor at `alpha`.
   const m = ctx.getTransform();
@@ -322,7 +324,7 @@ function repaintCanopies(tx, ty, resident, alpha = 1, box = null) {
   x0 = Math.max(x0, bx0); y0 = Math.max(y0, by0); x1 = Math.min(x1, bx1); y1 = Math.min(y1, by1);   // only over the actor
   const X0 = Math.max(0, Math.floor(m.a * x0 + m.e)), Y0 = Math.max(0, Math.floor(m.d * y0 + m.f));
   const X1 = Math.min(canvas.width, Math.ceil(m.a * x1 + m.e)), Y1 = Math.min(canvas.height, Math.ceil(m.d * y1 + m.f));
-  if (X1 <= X0 || Y1 <= Y0) return;
+  if (X1 <= X0 || Y1 <= Y0) return true;
   canopyLayer ||= document.createElement('canvas');
   if (canopyLayer.width < X1 - X0) canopyLayer.width = X1 - X0;
   if (canopyLayer.height < Y1 - Y0) canopyLayer.height = Y1 - Y0;
@@ -332,10 +334,31 @@ function repaintCanopies(tx, ty, resident, alpha = 1, box = null) {
   g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'low';
   for (const t of trees) { g.globalAlpha = t.fade; putSwayed(g, t.canvas, t.x, t.y, t.shear); }
   g.globalAlpha = 1;
+  if (hole) dotHole(g, m, X0, Y0, hole);
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = alpha;
   ctx.drawImage(canopyLayer, 0, 0, X1 - X0, Y1 - Y0, X0, Y0, X1 - X0, Y1 - Y0);
   ctx.restore();
+  return true;
 }
+/** The tree dot reveal (docs/design/COMBAT_STATS_ART_PLAN.md step 8): leaves in front of the
+ * avatar open in an ordered (Bayer) dot pattern, densest at its middle and thinning to nothing at
+ * the ellipse's edge, so it shows through the crown while the tree stays whole. `density` 0..1
+ * lets the dots creep in over a moment instead of popping. Device px on the composed layer `g`. */
+const BAYER = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+function dotHole(g, m, X0, Y0, {x, y, rx, ry, density}) {
+  const dot = Math.max(2, Math.round(m.a * .9));   // about a world pixel, never below 2 device px
+  const cx = m.a * x + m.e - X0, cy = m.d * y + m.f - Y0, RX = rx * m.a, RY = ry * m.d;
+  g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'destination-out'; g.fillStyle = '#000';
+  for (let yy = Math.floor((cy - RY) / dot) * dot; yy < cy + RY; yy += dot) {
+    for (let xx = Math.floor((cx - RX) / dot) * dot; xx < cx + RX; xx += dot) {
+      const d = Math.hypot((xx - cx) / RX, (yy - cy) / RY);
+      if (d >= 1) continue;
+      if ((BAYER[(yy / dot) & 3][(xx / dot) & 3] + .5) / 16 < Math.min(1, (1 - d) * 1.9) * density) g.fillRect(xx, yy, dot, dot);
+    }
+  }
+  g.restore();
+}
+let coveredSince = null;   // when leaves last closed over the avatar (the dots creep in from then)
 /** Exactly one request in flight. Server fixed ticks and input lease own timing. */
 async function poll() {
   if (polling || stopped) return;
@@ -474,7 +497,7 @@ function render(now) {
       if(tile && isWater(tile.glyph)) pool.push([(state.player.x+dx)*TILE_W,(state.player.y+dy)*TILE_H,TILE_W,TILE_H]);
     }
     if(pool.length && !state.expedition?.prologue) drawReflection(ctx,pool,actor.y+ACTOR_FOOT,c=>drawPlayer(c,state.player,actor.x,actor.y,
-      attackPhase(state.player),{clock:state.clock_ms,reducedMotion,weapon:state.expedition?.weapon}),.38);
+      attackPhase(state.player),{clock:state.clock_ms,reducedMotion,weapon:state.expedition?.weapon,worn:state.expedition?.worn||{}}),.38);
     // Enemies standing by water are mirrored in it too.
     for(const t of state.targets) {
       if(t.hp<=0 || !inSight(t.x,t.y)) continue;
@@ -568,9 +591,17 @@ function render(now) {
         const glow = possessionGlow(state.expedition?.possession, possessedSince === null ? Infinity : now - possessedSince);
         if (glow) drawPossessionGround(ctx, actor.x, actor.y, {clock: now, glow, foot: ACTOR_FOOT, reducedMotion});
         drawPlayer(ctx,state.player,actor.x,actor.y,attackPhase(state.player),
-          {activity, clock:state.clock_ms, reducedMotion, weapon: state.expedition?.weapon});
+          {activity, clock:state.clock_ms, reducedMotion, weapon: state.expedition?.weapon, worn: state.expedition?.worn || {},
+           running: !!state.expedition?.possession?.active});   // possessed (+20% speed): it runs
         if (glow) drawPossessionAura(ctx, actor.x, actor.y, {clock: now, glow, lift: TORSO_LIFT, reducedMotion,
           sinceMs: possessedSince === null ? Infinity : now - possessedSince});
+        // Leaves in front close over the avatar again, opened by the dot reveal round its body.
+        if (!state.expedition?.anchor_space) {
+          const density = reducedMotion ? 1 : coveredSince === null ? .35 : Math.min(1, .35 + (now - coveredSince) / 900);
+          const covered = repaintCanopies(item.tx, item.ty, revealed, 1, null,
+            {x: actor.x, y: actor.y - TORSO_LIFT, rx: 20, ry: 30, density});
+          if (!covered) coveredSince = null; else coveredSince ??= now;
+        }
       }
       else if(item.kind==='elder') drawElder(ctx,(item.tx+.5)*TILE_W+item.shift,(item.ty+.5)*TILE_H,
         {clock:state.clock_ms,facing:item.facing,alpha:item.alpha,talking:item.talking,reducedMotion});

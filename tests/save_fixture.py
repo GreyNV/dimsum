@@ -6,7 +6,7 @@ from dimensional_sim.world.autopilot import saves
 def v21(data):
     """`data` (a current to_dict()) as schema 21 wrote it: encounter mastery and Journal
     favor/guarantee instead of location mastery and camps."""
-    old = {k: v for k, v in data.items() if k not in saves.V22_FIELDS}
+    old = {k: v for k, v in data.items() if k not in saves.V22_FIELDS + saves.V25_FIELDS}
     old.update(schema_version=21, mastery={}, journal_favor={}, journal_guarantee=None,
                journal_guarantee_region=None, guarantee_used=False,
                log=[entry for entry in data["log"] if entry["type"] != "story"])

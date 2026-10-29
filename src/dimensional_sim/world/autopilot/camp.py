@@ -152,10 +152,12 @@ class CampMixin:
         return sum(self.inventory.values())
 
     def load_percent(self):
-        """Movement interval in percent of normal: 100 + the carry penalty (capped)."""
+        """Movement interval in percent of normal: 100 + the carry penalty (capped), shortened by
+        Agility and possession."""
         extra = max(0, self.carried_units() - CARRY_FREE)
         load = 100
         if extra:
             relief = (self.speed("endurance") + self.speed("strength")) // 2   # permille, >= 1000
             load += min(CARRY_MAX_PERCENT, extra * CARRY_PERCENT_PER_ITEM * 1000 // relief)
+        load = load * 1000 // (1000 + self.move_bonus_permille())   # Agility: faster steps (training.py)
         return load * 100 // POSSESS_SPEED_PERCENT if self.possessing else load

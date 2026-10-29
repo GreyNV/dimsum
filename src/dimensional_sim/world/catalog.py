@@ -15,6 +15,7 @@ TESTS: tests/test_world_catalog.py validates every table and cross-reference.
 from dataclasses import dataclass, field
 
 from .models import identifier, integer
+from . import tuning
 
 ATTRIBUTES = ("strength", "endurance", "agility", "intelligence", "perception", "willpower", "building")
 
@@ -29,30 +30,81 @@ def _color(value, what):
 
 # ----- biomes ------------------------------------------------------------------
 @dataclass(frozen=True)
+class FightOdds:
+    """From `ring` outward (until a later row takes over): the percent chance that a fight spot
+    rolls a starred (★) or elder (★★) enemy, and that a common one brings company."""
+    ring: int
+    star: int
+    elder: int
+    extra: int
+
+    def __post_init__(self):
+        integer(self.ring, "fight odds ring", 0, 1000)
+        for name in ("star", "elder", "extra"):
+            integer(getattr(self, name), f"fight odds {name}", 0, 100)
+        if self.star + self.elder > 100:
+            raise ValueError("star and elder odds exceed 100")
+
+
+@dataclass(frozen=True)
 class BiomeDef:
-    """A kind of land. Danger grows with distance from the anchor in rings: enemy hits
-    scale by danger_num/danger_den per ring and enemies gain hp_per_ring hit points."""
+    """A kind of land. Its enemies have fixed numbers (hit_percent and hp_percent scale the
+    catalog values for the whole land, so a later land is harder everywhere); going deeper
+    never makes an enemy stronger, it only makes starred enemies and company more likely."""
     id: str
     name: str
-    danger_num: int = 3
-    danger_den: int = 2
-    hp_per_ring: int = 1
-    ring_cap: int = 40             # rings past this add no more danger
+    hit_percent: int = 100         # every enemy bite in this land
+    hp_percent: int = 100          # every enemy's hit points in this land
+    fight_odds: tuple = ()         # FightOdds rows by ring (empty: only common enemies, alone)
+    ring_cap: int = 40             # rings past this add nothing more (odds, rarity)
     spot_rarity_per_ring: int = 0  # percent added to non-common spot tier odds per ring (0 = depth-neutral)
     mastery_percent: int = 100     # how much work its locations need to be mastered (later lands need more)
 
     def __post_init__(self):
         identifier(self.id, "biome ID")
         integer(self.spot_rarity_per_ring, "spot rarity per ring", 0, 100)
-        integer(self.danger_num, "danger growth numerator", 1, 100)
-        integer(self.danger_den, "danger growth denominator", 1, 100)
-        integer(self.hp_per_ring, "enemy HP per ring", 0, 100)
+        integer(self.hit_percent, "land enemy hit percent", 10, 10000)
+        integer(self.hp_percent, "land enemy HP percent", 10, 10000)
+        if type(self.fight_odds) is not tuple or any(not isinstance(o, FightOdds) for o in self.fight_odds) \
+                or [o.ring for o in self.fight_odds] != sorted({o.ring for o in self.fight_odds}):
+            raise ValueError(f"fight odds must be FightOdds rows in rising rings: {self.id}")
         integer(self.ring_cap, "danger ring cap", 0, 1000)
         integer(self.mastery_percent, "location mastery percent", 10, 10000)
 
+    def odds_at(self, ring):
+        """The FightOdds row that applies at `ring` (None before the first row)."""
+        rows = [o for o in self.fight_odds if o.ring <= min(ring, self.ring_cap)]
+        return rows[-1] if rows else None
+
+
+@dataclass(frozen=True)
+class FightTier:
+    """How much stronger, and richer, a rolled enemy is than the common one."""
+    id: str
+    mark: str                      # shown after the enemy's name ("" for common)
+    title: str                     # name prefix ("Old", "Elder"; "" for common)
+    hp_percent: int
+    hit_percent: int
+    loot_rolls: int                # how many times its loot is rolled
+
+    def __post_init__(self):
+        identifier(self.id, "fight tier ID")
+        integer(self.hp_percent, "tier HP percent", 100, 1000)
+        integer(self.hit_percent, "tier hit percent", 100, 1000)
+        integer(self.loot_rolls, "tier loot rolls", 1, 5)
+
+
+FIGHT_TIERS = {t.id: t for t in (
+    FightTier("common", "", "", 100, 100, 1),
+    FightTier("star", "★", "Old", 200, 150, 2),
+    FightTier("elder", "★★", "Elder", 350, 220, 3),
+)}
 
 BIOMES = {b.id: b for b in (
-    BiomeDef("dark_forest", "Dark forest"),
+    # docs/design/STATS_AND_ENEMIES_AUDIT.md: no ring growth; deeper rings bring stars and company.
+    BiomeDef("dark_forest", "Dark forest", fight_odds=(
+        FightOdds(2, 6, 0, 6), FightOdds(3, 10, 0, 12), FightOdds(4, 14, 3, 18),
+        FightOdds(5, 22, 6, 28), FightOdds(6, 26, 9, 35))),
     BiomeDef("ash_plain", "Ash plain", mastery_percent=300),   # terrain exists (assets.py); no content yet
 )}
 
@@ -72,7 +124,7 @@ WOOD_YIELD_ITEM = "stick"           # what a wood_yield effect adds to each harv
 # ----- attack profiles ------------------------------------------------------------
 @dataclass(frozen=True)
 class AttackDef:
-    """How a weapon (or bare fists) strikes: authoritative reach along the facing, stopped by
+    """How a weapon (or bare fists) strikes: authoritative reach, a circle round the avatar, stopped by
     walls (trees, rocks, structures) and by the first enemy in the line. `shape` is the
     client's animation ("punch", "thrust", "swing"). Ranged fields are reserved: a future bow
     sets `projectile`, `ammo` (an item consumed per shot) and keeps `needs_sight`."""
@@ -86,7 +138,7 @@ class AttackDef:
 
     def __post_init__(self):
         identifier(self.id, "attack ID")
-        integer(self.reach, "attack reach", 1, 8)
+        integer(self.reach, "attack reach", 1, 3)   # runtime.MAX_ATTACK_REACH
         if self.shape not in ("punch", "thrust", "swing"):
             raise ValueError(f"unknown attack shape: {self.id}")
         if self.projectile or self.ammo is not None or not self.needs_sight:
@@ -424,10 +476,48 @@ ENEMY_SOUND_PROFILES = ("impact", "beast", "water", "bone", "spectral", "canine"
 
 
 @dataclass(frozen=True)
+class FightPattern:
+    """How an enemy fights (docs/design/COMBAT_STATS_ART_PLAN.md, step 5): it closes in, shows a
+    tell (wind-up), strikes, recovers - open to blows - and may back off before coming again.
+    A strike lands only if the avatar is still where it hits, so a watchful player (or a quick
+    avatar) can step aside during the wind-up and hit back while it recovers.
+      strike "bite": every cell within `reach` of the enemy when the wind-up ends.
+      strike "charge": a straight dash of up to `reach` cells toward where the avatar stood when
+      the wind-up began; it stops on the avatar (a hit), at a wall (stunned twice as long) or at
+      the end of the dash."""
+    id: str
+    strike: str
+    windup_ms: int
+    reach: int
+    recover_ms: int
+    retreat: int = 0               # cells it backs off after recovering (0: stays close)
+    dash_step_ms: int = 100        # charge: one cell this often
+
+    def __post_init__(self):
+        identifier(self.id, "fight pattern ID")
+        if self.strike not in ("bite", "charge"):
+            raise ValueError(f"a pattern bites or charges: {self.id}")
+        integer(self.windup_ms, "wind-up", 100, 5000)
+        integer(self.reach, "strike reach", 1, 10)
+        integer(self.recover_ms, "recovery", 0, 5000)
+        integer(self.retreat, "retreat", 0, 10)
+        integer(self.dash_step_ms, "dash step", 20, 1000)
+
+
+FIGHT_PATTERNS = {p.id: p for p in (
+    FightPattern("charge", "charge", windup_ms=600, reach=6, recover_ms=900, retreat=3, dash_step_ms=75),
+    FightPattern("lunge", "bite", windup_ms=450, reach=1, recover_ms=450, retreat=2),
+    FightPattern("heavy", "bite", windup_ms=900, reach=1, recover_ms=900),
+    FightPattern("drift", "bite", windup_ms=600, reach=1, recover_ms=600, retreat=1),
+)}
+
+
+@dataclass(frozen=True)
 class EnemyDef:
     """A creature that hunts the avatar. Its fight spot (ActionDef.enemy) sets where it
     appears, its HP and its loot; this sets how it fights. `hit` is vital points per bite
-    at ring 0 (the biome scales it); `cause` is the journal's death-cause id."""
+    (fixed in its land: the biome's hit_percent, then the rolled FightTier); `cause` is the
+    journal's death-cause id."""
     id: str
     name: str
     hit: int
@@ -439,8 +529,7 @@ class EnemyDef:
     step_ms: int = 300             # one chasing step this often (lower = faster)
     drains: str = "health"         # what a touch takes: "health" (a bite) or "hunger" (it feeds on you)
     fears_fire: bool = True        # stays out of the anchor camp and campfire light
-    life_depth_hit_percent: int = 0  # linear bite growth per deepest ring this life; replaces biome curve
-    life_depth_hp_per_ring: int = 0   # linear HP growth per deepest ring this life
+    pattern: str = "lunge"         # FightPattern: how it closes in, telegraphs and strikes
 
     def __post_init__(self):
         identifier(self.id, "enemy ID")
@@ -453,8 +542,8 @@ class EnemyDef:
         integer(self.step_ms, "enemy step", 100, 2000)
         if type(self.fears_fire) is not bool:
             raise ValueError(f"fears_fire must be boolean: {self.id}")
-        integer(self.life_depth_hit_percent, "life depth hit growth", 0, 100)
-        integer(self.life_depth_hp_per_ring, "life depth HP growth", 0, 100)
+        if self.pattern not in FIGHT_PATTERNS:
+            raise ValueError(f"unknown fight pattern: {self.id}")
         if self.drains not in ("health", "hunger"):
             raise ValueError(f"enemy drains health or hunger: {self.id}")
         if not 1 <= len(self.name) <= 40 or not 1 <= len(self.cause_text) <= 60:
@@ -462,21 +551,20 @@ class EnemyDef:
 
 
 ENEMIES = {e.id: e for e in (
-    EnemyDef("bramble_boar", "Wild boar", hit=8, aggro_radius=11, cause="boar",
-             cause_text="a wild boar", sprite="boar", sound_profile="beast"),
+    EnemyDef("bramble_boar", "Wild boar", hit=25, aggro_radius=11, cause="boar",
+             cause_text="a wild boar", sprite="boar", sound_profile="beast", pattern="charge"),
     # Fast and fragile: hides by the water, bites lighter, notices you late (small aggro radius).
-    EnemyDef("river_lurker", "River lurker", hit=4, aggro_radius=4, cause="lurker",
+    EnemyDef("river_lurker", "River lurker", hit=12, aggro_radius=4, cause="lurker",
              cause_text="a river lurker", sprite="lurker", sound_profile="water", step_ms=200),
     # Slow and stubborn: rises at ruins, takes many blows, walks you down slowly.
-    EnemyDef("restless_bones", "Restless bones", hit=6, aggro_radius=5, cause="bones",
-             cause_text="restless bones", sprite="skeleton", sound_profile="bone", step_ms=450),
+    EnemyDef("restless_bones", "Restless bones", hit=20, aggro_radius=5, cause="bones",
+             cause_text="restless bones", sprite="skeleton", sound_profile="bone", step_ms=450, pattern="heavy"),
     # Gentle but draining: it does not bite, it feeds - each touch takes hunger, not health.
-    EnemyDef("pale_wisp", "Pale wisp", hit=6, aggro_radius=6, cause="wisp",
-             cause_text="a pale wisp", sprite="wisp", sound_profile="spectral", step_ms=350, drains="hunger"),
+    EnemyDef("pale_wisp", "Pale wisp", hit=18, aggro_radius=6, cause="wisp",
+             cause_text="a pale wisp", sprite="wisp", sound_profile="spectral", step_ms=350, drains="hunger", pattern="drift"),
     # Night only: quick and keen-nosed, it follows the avatar into firelight.
-    EnemyDef("wolf", "Wolf", hit=9, aggro_radius=10, cause="wolf", cause_text="a wolf in the night",
-             sprite="wolf", sound_profile="canine", step_ms=250, fears_fire=False,
-             life_depth_hit_percent=15, life_depth_hp_per_ring=1),
+    EnemyDef("wolf", "Wolf", hit=18, aggro_radius=10, cause="wolf", cause_text="a wolf in the night",
+             sprite="wolf", sound_profile="canine", step_ms=250, fears_fire=False),
 )}
 # Enemies placed by map assets (not by spot rolls) count against this fight spot's window.
 ASSET_ENEMY_ACTION = "bramble_boar"
@@ -542,6 +630,23 @@ class OutcomeDef:
             raise ValueError("a note outcome needs text")
 
 
+XP = -1   # ActionDef.xp: earned by the base-time rule (action_xp); 0 = this action pays no XP
+
+
+def action_xp(action):
+    """XP an action pays (docs/design/STATS_AND_ENEMIES_AUDIT.md): base seconds x the global rate x
+    its rarity; self actions earn less, story milestones more. A fight's figure is its whole worth
+    (every hit point plus the finishing blow); the expedition pays it hit by hit."""
+    if action.category == "fight":
+        return action.hp * tuning.FIGHT_XP_PER_HP * (100 + tuning.FINISH_XP_PERCENT) // 100
+    xp = action.duration_ms * tuning.XP_PER_SECOND * tuning.RARITY_XP_PERCENT[action.rarity] // 100_000
+    if action.placement == "self":
+        xp = xp * tuning.SELF_XP_PERCENT // 100
+    elif action.placement == "story":
+        xp = xp * tuning.STORY_XP_PERCENT // 100
+    return max(1, xp)
+
+
 @dataclass(frozen=True)
 class ActionDef:
     id: str
@@ -605,6 +710,8 @@ class ActionDef:
             raise ValueError(f"invalid category/placement: {self.id}")
         if self.attribute not in ATTRIBUTES or self.rarity not in RARITIES or self.near not in NEAR:
             raise ValueError(f"invalid attribute/rarity/near: {self.id}")
+        if self.xp == XP:
+            object.__setattr__(self, "xp", action_xp(self))
         integer(self.xp, "action XP", 0, 10000)
         integer(self.duration_ms, "action duration", 1, 600000)
         integer(self.weight, "action weight", 1, 10000)
@@ -617,7 +724,7 @@ class ActionDef:
             raise ValueError("only need actions have need policy")
         if self.trigger == "need" and not self.need_priority:
             raise ValueError("need actions require a priority")
-        integer(self.hp, "action HP", 0, 6)
+        integer(self.hp, "action HP", 0, 12)
         integer(self.heal, "action heal", 0, 100)
         if type(self.biomes) is not tuple or not self.biomes:
             raise ValueError(f"action needs biomes: {self.id}")
@@ -722,19 +829,19 @@ class ActionDef:
 L = Loot
 ACTIONS = (
     # --- known from the first life -------------------------------------------
-    ActionDef("bramble_berries", "Berry bush", "forage", "spot", "perception", 40, 2400, 11,
+    ActionDef("bramble_berries", "Berry bush", "forage", "spot", "perception", XP, 2400, 11,
               "Pick berries from a thorny bramble patch.", "Picked bramble berries without getting scratched (much).",
               window=(1, 2), loot=(L("wild_berries", 4, 4), L("bramble_thorn", 1, 1, 35)),
               roles=("base", "discovery"), outcomes=(OutcomeDef("lead", "trampled_bushes", chance=15, ttl_ms=90_000),),
               ecology="berries", interaction="Picking berries"),
-    ActionDef("fallen_branches", "Fallen branches", "gather", "spot", "strength", 30, 2200, 18,
+    ActionDef("fallen_branches", "Fallen branches", "gather", "spot", "strength", XP, 2200, 18,
               "Gather sticks from branches across the trail.", "Hauled a pile of fallen branches off the trail.",
               regions=("old_road", "deep_woods", "bramble_thicket"), tags=("wood",),
               loot=(L("stick", 1, 1), L("stick", 1, 1, 50)), roles=("base", "discovery"), ecology="wood",
               outcomes=(OutcomeDef("knowledge", "primitive_crafting", at_count=5),
                         OutcomeDef("lead", "broken_branches", chance=15, ttl_ms=90_000)),
               interaction="Picking up sticks"),
-    ActionDef("animal_tracks", "Animal tracks", "observe", "spot", "perception", 50, 3000, 12,
+    ActionDef("animal_tracks", "Animal tracks", "observe", "spot", "perception", XP, 3000, 12,
               "Read the tracks of what lives here.", "Read fresh tracks in the mud - something heavy passed here.",
               regions=("deep_woods", "still_glade"), roles=("base", "discovery"), ecology="game",
               outcomes=(OutcomeDef("knowledge", "deer_sign"),
@@ -742,30 +849,30 @@ ACTIONS = (
                         OutcomeDef("recipe", "snare", chance=15,
                                    text="A hare run through the brambles. A loop of thorny stem would catch it.")),
               interaction="Looking at the tracks"),
-    ActionDef("follow_deer_tracks", "Deer tracks", "observe", "lead", "perception", 35, 3800, 1,
+    ActionDef("follow_deer_tracks", "Deer tracks", "observe", "lead", "perception", XP, 3800, 1,
               "Follow a fresh trail before the deer moves on.", "Followed the tracks to a quiet deer crossing.",
               knowledge="deer_sign", roles=("lead", "contextual"),
               outcomes=(OutcomeDef("lead", "hunt_deer", chance=55, ttl_ms=60_000, group="trail"),
                         OutcomeDef("note", "deer_gone", chance=30, group="trail",
                                    text="The tracks crossed a stream and vanished.")), art="deer_trail",
               interaction="Following the tracks"),
-    ActionDef("hunt_deer", "Deer", "hunt", "lead", "agility", 80, 5500, 1,
+    ActionDef("hunt_deer", "Deer", "hunt", "lead", "agility", XP, 5500, 1,
               "Approach the deer while this trail is still fresh.", "Brought down a deer at the crossing.",
               knowledge="deer_sign", roles=("lead", "combat", "contextual"),
               loot=(L("venison", 1, 1),), drops="deer_spoils", art="deer", interaction="Hunting the deer"),
     # --- forest chains: a find, a clue that leads on, sometimes a payoff ---------------
-    ActionDef("broken_branches", "Broken branches", "observe", "lead", "perception", 30, 2600, 1,
+    ActionDef("broken_branches", "Broken branches", "observe", "lead", "perception", XP, 2600, 1,
               "Branches snapped off at the same height, in a line into the trees.",
               "Followed a line of broken branches.", roles=("lead", "contextual"), lead_spread=1,
               outcomes=(OutcomeDef("lead", "cut_wood", chance=55, ttl_ms=120_000, group="clue"),
                         OutcomeDef("note", "branches_nowhere", chance=45, group="clue",
                                    text="The broken branches led nowhere.")),
               interaction="Looking at the broken branches"),
-    ActionDef("cut_wood", "Cut wood", "gather", "lead", "strength", 40, 3400, 1,
+    ActionDef("cut_wood", "Cut wood", "gather", "lead", "strength", XP, 3400, 1,
               "Wood someone cut and stacked, then left behind.", "Took what was left of a stack of cut wood.",
               roles=("lead", "contextual"), loot=(L("stick", 1, 2),), drops="wood_stash", tags=("wood",),
               interaction="Taking the wood"),
-    ActionDef("trampled_bushes", "Trampled bushes", "observe", "lead", "perception", 30, 2400, 1,
+    ActionDef("trampled_bushes", "Trampled bushes", "observe", "lead", "perception", XP, 2400, 1,
               "Bushes pushed flat and stripped. Something big feeds here.",
               "Looked over the trampled bushes.", roles=("lead", "contextual"),
               outcomes=(OutcomeDef("lead", "feeding_ground", chance=50, ttl_ms=90_000, group="clue"),
@@ -774,85 +881,85 @@ ACTIONS = (
                         OutcomeDef("note", "fed_and_gone", chance=25, group="clue",
                                    text="Whatever fed here is long gone.")),
               interaction="Looking at the marks"),
-    ActionDef("feeding_ground", "Feeding ground", "forage", "lead", "perception", 40, 3000, 1,
+    ActionDef("feeding_ground", "Feeding ground", "forage", "lead", "perception", XP, 3000, 1,
               "Bushes the animals have not finished yet.", "Picked what the animals had left.",
               roles=("lead", "contextual"), loot=(L("wild_berries", 2, 3), L("bramble_thorn", 1, 2, 50)),
               interaction="Picking what is left"),
-    ActionDef("angry_boar", "Angry boar", "fight", "lead", "strength", 100, 1, 1,
+    ActionDef("angry_boar", "Angry boar", "fight", "lead", "strength", XP, 1, 1,
               "A boar guarding its feeding ground.", "Drove off a boar guarding its feeding ground.",
-              hp=3, enemy="bramble_boar", loot=(L("boar_meat", 1, 1), L("boar_hide", 1, 1, 60)),
+              hp=9, enemy="bramble_boar", loot=(L("boar_meat", 1, 1), L("boar_hide", 1, 1, 60)),
               drops="boar_spoils", roles=("lead", "combat", "contextual"), art="bramble_boar",
               interaction="Fighting the boar"),
-    ActionDef("mushroom_dust", "Mushroom dust", "observe", "lead", "perception", 35, 2600, 1,
+    ActionDef("mushroom_dust", "Mushroom dust", "observe", "lead", "perception", XP, 2600, 1,
               "Pale dust on the leaves, drifting from somewhere nearby.", "Followed a trail of mushroom dust.",
               roles=("lead", "contextual"),
               outcomes=(OutcomeDef("lead", "rotten_log", chance=60, ttl_ms=90_000, group="clue"),
                         OutcomeDef("note", "dust_gone", chance=40, group="clue", text="The dust blew away.")),
               interaction="Following the dust"),
-    ActionDef("rotten_log", "Rotten log", "forage", "lead", "perception", 45, 3200, 1,
+    ActionDef("rotten_log", "Rotten log", "forage", "lead", "perception", XP, 3200, 1,
               "A hollow log covered in mushrooms - not all of them safe.",
               "Picked the safe mushrooms off a rotten log.", roles=("lead", "contextual"),
               loot=(L("pale_mushroom", 1, 3, 70),), drops="rotten_log", interaction="Picking mushrooms"),
-    ActionDef("trail_marker", "Odd trail marker", "study", "lead", "intelligence", 60, 3400, 1,
+    ActionDef("trail_marker", "Odd trail marker", "study", "lead", "intelligence", XP, 3400, 1,
               "A marker that points the wrong way.", "Compared the odd marker with the carvings.",
               roles=("lead", "contextual"),
               outcomes=(OutcomeDef("lead", "looping_path", chance=50, ttl_ms=120_000, group="clue"),
                         OutcomeDef("note", "marker_wrong", chance=50, group="clue",
                                    text="The marker was just wrong.")),
               interaction="Comparing the marks"),
-    ActionDef("looping_path", "Looping path", "observe", "lead", "intelligence", 80, 4000, 1,
+    ActionDef("looping_path", "Looping path", "observe", "lead", "intelligence", XP, 4000, 1,
               "A path that bends back on itself. From here you can see how the land lies.",
               "Walked the looping path and learned the lay of the land.", roles=("lead", "contextual"),
               lead_spread=1, outcomes=(OutcomeDef("reveal", "area", text="You can see the paths around you now."),),
               interaction="Walking the loop"),
-    ActionDef("map_scrap", "Hand-drawn map", "study", "lead", "intelligence", 40, 3000, 1,
+    ActionDef("map_scrap", "Hand-drawn map", "study", "lead", "intelligence", XP, 3000, 1,
               "A scrap of map from an old backpack, with a mark on it.", "Worked out where the map points.",
               roles=("lead", "contextual"),
               outcomes=(OutcomeDef("lead", "hidden_stash", chance=60, ttl_ms=150_000, group="clue"),
                         OutcomeDef("note", "map_useless", chance=40, group="clue",
                                    text="The map was too faded to follow.")),
               interaction="Reading the map"),
-    ActionDef("hidden_stash", "Hidden stash", "scavenge", "lead", "strength", 50, 3600, 1,
+    ActionDef("hidden_stash", "Hidden stash", "scavenge", "lead", "strength", XP, 3600, 1,
               "The spot marked on the map. Someone may have got here first.",
               "Dug up the spot marked on the map.", roles=("lead", "contextual"), lead_spread=1,
               loot=(L("cloth_scrap", 1, 2, 60), L("rope", 1, 1, 40)), drops="hidden_stash",
               interaction="Digging up the stash"),
-    ActionDef("forest_spring", "Forest spring", "drink", "spot", "endurance", 40, 2000, 9,
+    ActionDef("forest_spring", "Forest spring", "drink", "spot", "endurance", XP, 2000, 9,
               "Drink and catch your breath.", "Drank from a cold spring and caught your breath.",
               window=(1, 2), heal=10, roles=("base", "discovery"), interaction="Drinking water",
               outcomes=(OutcomeDef("lead", "fresh_footprints", chance=8, ttl_ms=90_000),)),
     # --- the riverbank: anything beside a river or ford, in any region ------------------
-    ActionDef("reed_bed", "Reeds", "forage", "spot", "perception", 35, 2600, 7,
+    ActionDef("reed_bed", "Reeds", "forage", "spot", "perception", XP, 2600, 7,
               "Tall reeds at the water's edge. Birds nest here, and fish hide below.",
               "Pushed through the reeds at the water's edge.", near="w", window=(1, 2), roles=("base", "discovery"),
               loot=(L("bird_egg", 1, 1, 50),),
               outcomes=(OutcomeDef("lead", "fish_scales", chance=30, ttl_ms=90_000),),
               interaction="Searching the reeds"),
-    ActionDef("fishing_pool", "Fishing pool", "hunt", "spot", "agility", 45, 3600, 9,
+    ActionDef("fishing_pool", "Fishing pool", "hunt", "spot", "agility", XP, 3600, 9,
               "A slow, deep pool under the bank. Fish - if you are patient.",
               "Waited at a deep pool for the fish to bite.", near="w", window=(0, 2), ecology="fish",
               roles=("base",), loot=(L("river_fish", 1, 1, 75),),
               outcomes=(OutcomeDef("lead", "lurker_burrow", chance=10, ttl_ms=60_000,
                                    text="Something big moves under the water."),),
               interaction="Fishing"),
-    ActionDef("river_shallows", "Shallows", "observe", "spot", "perception", 40, 2400, 4,
+    ActionDef("river_shallows", "Shallows", "observe", "spot", "perception", XP, 2400, 4,
               "Clear, shallow water over stones. Easy to read what lives here.",
               "Watched the shallows for a while.", near="w", roles=("base", "discovery"),
               outcomes=(OutcomeDef("lead", "ripples", chance=35, ttl_ms=60_000),),
               interaction="Looking into the water"),
-    ActionDef("fishing_net", "Old fishing net", "scavenge", "spot", "strength", 40, 3000, 3,
+    ActionDef("fishing_net", "Old fishing net", "scavenge", "spot", "strength", XP, 3000, 3,
               "A net caught on the bank, half rotten. The rope is still good.",
               "Untangled an old fishing net from the bank.", near="w", rarity="uncommon", window=(0, 1),
               roles=("base", "discovery"), loot=(L("rope", 1, 1), L("cloth_scrap", 1, 1, 50)),
               outcomes=(OutcomeDef("lead", "float_line", chance=35, ttl_ms=120_000),),
               interaction="Untangling the net"),
-    ActionDef("river_lurker", "River lurker", "fight", "spot", "strength", 80, 1, 3,
+    ActionDef("river_lurker", "River lurker", "fight", "spot", "strength", XP, 1, 3,
               "A fast, slick thing that waits by the water. It bites lighter than a boar.",
-              "Drove off a river lurker.", near="w", window=(0, 1), hp=2, enemy="river_lurker",
+              "Drove off a river lurker.", near="w", window=(0, 1), hp=5, enemy="river_lurker",
               loot=(L("river_fish", 1, 1, 50),), drops="lurker_spoils", roles=("base", "combat"),
               interaction="Fighting the lurker"),
     # --- river chains -------------------------------------------------------------------
-    ActionDef("fish_scales", "Fish scales", "observe", "lead", "perception", 30, 2200, 1,
+    ActionDef("fish_scales", "Fish scales", "observe", "lead", "perception", XP, 2200, 1,
               "Silver scales caught in the reeds. Something feeds nearby.", "Followed the scales along the bank.",
               near="w", roles=("lead", "contextual"),
               outcomes=(OutcomeDef("lead", "busy_pool", chance=50, ttl_ms=90_000, group="clue"),
@@ -861,37 +968,37 @@ ACTIONS = (
                         OutcomeDef("note", "scales_gone", chance=30, group="clue",
                                    text="Only scales - whatever left them has gone.")),
               interaction="Following the scales"),
-    ActionDef("busy_pool", "Busy pool", "hunt", "lead", "agility", 50, 3400, 1,
+    ActionDef("busy_pool", "Busy pool", "hunt", "lead", "agility", XP, 3400, 1,
               "Fish rising in a quiet pool.", "Caught fish in a quiet pool.", near="w",
               roles=("lead", "contextual"), loot=(L("river_fish", 1, 2, 80),), interaction="Fishing"),
-    ActionDef("ripples", "Ripples", "observe", "lead", "perception", 35, 2400, 1,
+    ActionDef("ripples", "Ripples", "observe", "lead", "perception", XP, 2400, 1,
               "Rings on the water that do not move with the current.", "Watched the strange ripples.",
               near="w", roles=("lead", "contextual"),
               outcomes=(OutcomeDef("lead", "lurker_burrow", chance=50, ttl_ms=60_000, group="clue",
                                    text="A burrow in the bank. Something is home."),
                         OutcomeDef("note", "just_current", chance=50, group="clue", text="Just the current.")),
               interaction="Watching the ripples"),
-    ActionDef("lurker_burrow", "River lurker", "fight", "lead", "strength", 80, 1, 1,
+    ActionDef("lurker_burrow", "River lurker", "fight", "lead", "strength", XP, 1, 1,
               "A river lurker, out of its burrow and angry.", "Drove off a river lurker from its burrow.",
-              hp=2, enemy="river_lurker", loot=(L("river_fish", 1, 1, 50),), drops="lurker_spoils",
+              hp=5, enemy="river_lurker", loot=(L("river_fish", 1, 1, 50),), drops="lurker_spoils",
               roles=("lead", "combat", "contextual"), art="river_lurker", interaction="Fighting the lurker"),
     # --- the night: wolves pursue the avatar even at camp (autopilot/night.py) ----
-    ActionDef("night_wolf", "Wolf", "fight", "lead", "strength", 60, 1, 1,
+    ActionDef("night_wolf", "Wolf", "fight", "lead", "strength", XP, 1, 1,
               "A wolf out of the dark. It hunts at night and slinks away at dawn.", "Drove off a wolf in the dark.",
-              hp=3, enemy="wolf", loot=(L("wolf_fang", 1, 1, 45),), tags=("night",),
+              hp=7, enemy="wolf", loot=(L("wolf_fang", 1, 1, 45),), tags=("night",),
               roles=("lead", "combat", "contextual"), interaction="Fighting the wolf"),
-    ActionDef("float_line", "Torn float line", "observe", "lead", "perception", 35, 2600, 1,
+    ActionDef("float_line", "Torn float line", "observe", "lead", "perception", XP, 2600, 1,
               "Floats and line from the net, drifting downstream.", "Traced the float line downstream.",
               lead_spread=1, near="w", roles=("lead", "contextual"),
               outcomes=(OutcomeDef("lead", "fishing_platform", chance=60, ttl_ms=120_000, group="clue"),
                         OutcomeDef("note", "line_lost", chance=40, group="clue",
                                    text="The line snagged and sank.")),
               interaction="Following the line"),
-    ActionDef("fishing_platform", "Broken fishing platform", "scavenge", "lead", "strength", 45, 3400, 1,
+    ActionDef("fishing_platform", "Broken fishing platform", "scavenge", "lead", "strength", XP, 3400, 1,
               "Planks and posts in the water. Someone fished from here.", "Pulled rope and bait off a broken platform.",
               near="w", roles=("lead", "contextual"), loot=(L("rope", 1, 2), L("river_fish", 1, 1, 40)),
               interaction="Pulling up the planks"),
-    ActionDef("bootprints", "Muddy bootprints", "observe", "lead", "perception", 35, 2600, 1,
+    ActionDef("bootprints", "Muddy bootprints", "observe", "lead", "perception", XP, 2600, 1,
               "Bootprints from the old campfire, heading for water.", "Followed muddy bootprints.",
               lead_spread=1, roles=("lead", "contextual"),
               outcomes=(OutcomeDef("lead", "fishing_camp", chance=50, ttl_ms=150_000, group="clue"),
@@ -900,18 +1007,18 @@ ACTIONS = (
                         OutcomeDef("note", "prints_lost", chance=20, group="clue",
                                    text="The prints vanished on hard ground.")),
               interaction="Following the bootprints"),
-    ActionDef("fishing_camp", "Fishing camp", "scavenge", "lead", "perception", 50, 3600, 1,
+    ActionDef("fishing_camp", "Fishing camp", "scavenge", "lead", "perception", XP, 3600, 1,
               "A fisherman's camp by the river, left in a hurry.", "Searched a fisherman's camp by the river.",
               near="w", lead_spread=1, roles=("lead", "contextual"), loot=(L("river_fish", 1, 2), L("rope", 1, 1, 50)),
               drops="fishing_camp", interaction="Searching the camp"),
-    ActionDef("fresh_footprints", "Fresh footprints", "observe", "lead", "perception", 30, 2400, 1,
+    ActionDef("fresh_footprints", "Fresh footprints", "observe", "lead", "perception", XP, 2400, 1,
               "Footprints from the spring, heading upstream.", "Traced fresh footprints upstream.",
               roles=("lead", "contextual"),
               outcomes=(OutcomeDef("lead", "hidden_ford", chance=55, ttl_ms=120_000, group="clue"),
                         OutcomeDef("note", "prints_washed", chance=45, group="clue",
                                    text="The rain had washed the prints away.")),
               interaction="Following the footprints"),
-    ActionDef("double_shadow", "Double shadow", "observe", "lead", "perception", 45, 3000, 1,
+    ActionDef("double_shadow", "Double shadow", "observe", "lead", "perception", XP, 3000, 1,
               "A second shadow on the moss, pointing where no sun could put it.",
               "Followed a shadow that did not belong to anything.", roles=("lead", "contextual"),
               outcomes=(OutcomeDef("lead", "split_shadow_tree", chance=60, ttl_ms=150_000, group="clue",
@@ -919,12 +1026,12 @@ ACTIONS = (
                         OutcomeDef("note", "shadow_gone", chance=40, group="clue",
                                    text="The second shadow slipped under the rock and was gone.")),
               interaction="Following the shadow"),
-    ActionDef("split_shadow_tree", "Split-shadow tree", "meditate", "lead", "willpower", 90, 4500, 1,
+    ActionDef("split_shadow_tree", "Split-shadow tree", "meditate", "lead", "willpower", XP, 4500, 1,
               "A tree that throws two shadows, one for a sun that is not there.",
               "Stood between the two shadows of a tree until the air hummed.", near="T", lead_spread=1,
               roles=("lead", "contextual"), interaction="Standing between the shadows",
               outcomes=(OutcomeDef("shimmer", "split_shadow", text="The air hums. Rare things feel closer here."),)),
-    ActionDef("hidden_ford", "Hidden ford", "observe", "lead", "intelligence", 60, 3200, 1,
+    ActionDef("hidden_ford", "Hidden ford", "observe", "lead", "intelligence", XP, 3200, 1,
               "Stepping stones under the water. From here the river makes sense.",
               "Found a hidden ford and learned the lie of the river.", near="w", lead_spread=1,
               roles=("lead", "contextual"),
@@ -932,168 +1039,168 @@ ACTIONS = (
                         OutcomeDef("lead", "lurker_burrow", chance=25, ttl_ms=60_000,
                                    text="Something was waiting at the ford.")),
               interaction="Crossing the stones"),
-    ActionDef("bramble_boar", "Wild boar", "fight", "spot", "strength", 100, 1, 9,
+    ActionDef("bramble_boar", "Wild boar", "fight", "spot", "strength", XP, 1, 9,
               "A territorial boar that charges anything nearby. Meat and hide.",
-              "Drove off a wild boar.", window=(1, 2), hp=3, enemy="bramble_boar",
+              "Drove off a wild boar.", window=(1, 2), hp=9, enemy="bramble_boar",
               loot=(L("boar_meat", 1, 1), L("boar_hide", 1, 1, 60)), drops="boar_spoils",
               roles=("base", "combat"), interaction="Fighting the boar",
               outcomes=(OutcomeDef("recipe", "hide_wrap", chance=30,
                                    text="Skinning it, you see how the hide could be worn."),)),
     # --- opened by dimensional levels (UNLOCKS) ------------------------------------
-    ActionDef("gnarled_tree", "Old tree", "climb", "spot", "agility", 60, 3200, 10,
+    ActionDef("gnarled_tree", "Old tree", "climb", "spot", "agility", XP, 3200, 10,
               "Climb for bird eggs and a look over the canopy.", "Climbed a gnarled tree and scouted the canopy.",
               unlock="climbing", near="T", window=(1, 1),
               loot=(L("bird_egg", 1, 1, 60), L("stick", 1, 1, 40)), roles=("unlockable",), ecology="eggs",
               interaction="Climbing for eggs"),
-    ActionDef("dead_tree", "Dead tree", "gather", "spot", "strength", 45, 3600, 8,
+    ActionDef("dead_tree", "Dead tree", "gather", "spot", "strength", XP, 3600, 8,
               "A standing dead tree, dry right through. Good firewood - with an axe.",
               "Chopped a dead tree into an armful of wood.", near="T", ecology="wood", tags=("wood",),
               requirements=(Requirement("gear", "axe"),), loot=(L("stick", 2, 3),),
               roles=("base", "contextual"), interaction="Chopping the dead tree"),
-    ActionDef("mushroom_ring", "Mushrooms", "forage", "spot", "perception", 55, 3200, 8,
+    ActionDef("mushroom_ring", "Mushrooms", "forage", "spot", "perception", XP, 3200, 8,
               "Pale mushrooms that are safe - if you know which ones.",
               "Gathered the safe mushrooms from a pale ring.", unlock="mushroom_lore",
               regions=("deep_woods",), window=(1, 1),
               loot=(L("pale_mushroom", 1, 2),), roles=("unlockable", "discovery"), ecology="fungi",
               outcomes=(OutcomeDef("lead", "mushroom_dust", chance=20, ttl_ms=90_000),), interaction="Picking mushrooms"),
-    ActionDef("mossy_stone", "Mossy rock", "meditate", "spot", "willpower", 60, 4000, 7,
+    ActionDef("mossy_stone", "Mossy rock", "meditate", "spot", "willpower", XP, 4000, 7,
               "Sit with the stone until the forest goes quiet.", "Sat by a mossy stone until the forest went quiet.",
               unlock="meditation", near="^", roles=("unlockable",), interaction="Meditating by the rock",
               outcomes=(OutcomeDef("lead", "double_shadow", chance=12, ttl_ms=90_000,
                                    text="Your shadow has company. A second one, cast the wrong way."),)),
     # --- rare phenomena: small impossible things, never currency -------------------------
-    ActionDef("hanging_leaf", "Hanging leaf", "observe", "spot", "perception", 70, 3000, 3,
+    ActionDef("hanging_leaf", "Hanging leaf", "observe", "spot", "perception", XP, 3000, 3,
               "A leaf hangs in the air at eye level, not falling, not moving.",
               "Watched a leaf that would not fall.", regions=("deep_woods", "still_glade"), rarity="rare",
               window=(0, 1), roles=("base", "discovery"), interaction="Watching the leaf",
               outcomes=(OutcomeDef("reveal", "area", text="For a moment the whole forest held its breath, and you saw far."),)),
-    ActionDef("backward_ripple", "Backward ripple", "observe", "spot", "perception", 70, 3000, 3,
+    ActionDef("backward_ripple", "Backward ripple", "observe", "spot", "perception", XP, 3000, 3,
               "For a few heartbeats the water here runs uphill.",
               "Watched the stream run backward, then right itself.", near="w", rarity="rare", window=(0, 1),
               roles=("base", "discovery"), interaction="Watching the water",
               outcomes=(OutcomeDef("renew", "fish", text="The pools around here are full of fish again."),)),
-    ActionDef("moonlit_pool", "Clear pool", "drink", "spot", "endurance", 45, 2600, 5,
+    ActionDef("moonlit_pool", "Clear pool", "drink", "spot", "endurance", XP, 2600, 5,
               "A still pool that steadies body and mind.", "Drank from a still pool beneath the branches.",
               unlock="meditation", rarity="uncommon", window=(0, 1), heal=12, roles=("unlockable",),
               interaction="Drinking water"),
-    ActionDef("old_carvings", "Old carvings", "study", "spot", "intelligence", 80, 3600, 5,
+    ActionDef("old_carvings", "Old carvings", "study", "spot", "intelligence", XP, 3600, 5,
               "Marks that look almost like a summoning circle.",
               "Traced old carvings - the marks look almost like a summoning circle.",
               unlock="road_lore", rarity="uncommon", roles=("unlockable", "discovery"),
               outcomes=(OutcomeDef("lead", "trail_marker", chance=30, ttl_ms=120_000),), interaction="Reading the carvings"),
     # --- opened by Willpower (shrine path) ------------------------------------------
-    ActionDef("wayside_shrine", "Roadside shrine", "pray", "spot", "willpower", 50, 3600, 6,
+    ActionDef("wayside_shrine", "Roadside shrine", "pray", "spot", "willpower", XP, 3600, 6,
               "A moss-grown shrine on the old road. Prayer here is always heard.",
               "Knelt at a wayside shrine and prayed to the gods who spared you.",
               unlock="shrine_path", regions=("old_road",), rarity="uncommon", window=(1, 1),
               roles=("unlockable",), interaction="Praying at the shrine"),
     # --- site actions: rolled only inside a landmark (SITES) ------------------------
-    ActionDef("camp_packs", "Old backpacks", "scavenge", "site", "strength", 40, 3100, 10,
+    ActionDef("camp_packs", "Old backpacks", "scavenge", "site", "strength", XP, 3100, 10,
               "Packs left by travellers who never came back.",
               "Rummaged through packs the travellers left behind.", unlock="scavenging", site="abandoned_camp",
               loot=(L("stick", 1, 2), L("cloth_scrap", 1, 2, 70)), drops="traveller_cache",
               outcomes=(OutcomeDef("lead", "map_scrap", chance=35, ttl_ms=120_000),),
               roles=("site", "unlockable", "discovery"), interaction="Searching the bags"),
-    ActionDef("camp_firepit", "Old campfire", "scavenge", "site", "perception", 35, 2600, 8,
+    ActionDef("camp_firepit", "Old campfire", "scavenge", "site", "perception", XP, 2600, 8,
               "Ashes, a cooking spit and whatever was left tied up nearby.",
               "Sifted a cold firepit and untied what was left.", unlock="scavenging", site="abandoned_camp",
               loot=(L("rope", 1, 1, 60), L("bramble_thorn", 1, 1, 40)), roles=("site", "unlockable", "discovery"),
               outcomes=(OutcomeDef("lead", "bootprints", chance=35, ttl_ms=120_000),),
               interaction="Searching the ashes"),
-    ActionDef("camp_bedroll", "Torn blanket", "scavenge", "site", "endurance", 35, 2800, 7,
+    ActionDef("camp_bedroll", "Torn blanket", "scavenge", "site", "endurance", XP, 2800, 7,
               "Bedding stuffed with wool - and a way to stitch it into something useful.",
               "Pulled the stuffing from a torn bedroll.", unlock="scavenging", site="abandoned_camp",
               loot=(L("cloth_scrap", 1, 3),), roles=("site", "unlockable", "discovery"),
               outcomes=(OutcomeDef("recipe", "padded_jerkin"),), interaction="Pulling out the stuffing"),
-    ActionDef("tower_rubble", "Fallen stones", "scavenge", "site", "strength", 45, 3400, 10,
+    ActionDef("tower_rubble", "Fallen stones", "scavenge", "site", "strength", XP, 3400, 10,
               "Fallen stones, rotten beams and the nails that held them.",
               "Dug nails and splinters out of the tower rubble.", unlock="road_lore", site="fallen_watchtower",
               loot=(L("iron_nails", 1, 2, 80), L("stick", 1, 1)), drops="traveller_cache",
               roles=("site", "unlockable"), interaction="Digging through the stones"),
-    ActionDef("tower_stair", "Broken stairs", "climb", "site", "agility", 60, 3600, 6,
+    ActionDef("tower_stair", "Broken stairs", "climb", "site", "agility", XP, 3600, 6,
               "What is left of the stair still reaches a nest and the old lookout.",
               "Climbed the broken stair to the lookout.", unlock="road_lore", site="fallen_watchtower",
               loot=(L("bird_egg", 1, 1, 50),), roles=("site", "unlockable"), interaction="Climbing the stairs"),
-    ActionDef("tower_armory", "Old weapon rack", "scavenge", "site", "strength", 55, 4000, 5,
+    ActionDef("tower_armory", "Old weapon rack", "scavenge", "site", "strength", XP, 4000, 5,
               "Racks crushed under the wall. Studs and straps for whoever can use them.",
               "Pried studs and straps from the collapsed armory.", unlock="road_lore", site="fallen_watchtower",
               loot=(L("iron_nails", 2, 3),), roles=("site", "unlockable", "discovery"),
               outcomes=(OutcomeDef("recipe", "studded_wrap"),), interaction="Pulling out nails"),
-    ActionDef("tower_marks", "Scratched warnings", "study", "site", "intelligence", 75, 4200, 6,
+    ActionDef("tower_marks", "Scratched warnings", "study", "site", "intelligence", XP, 4200, 6,
               "Faded warnings scratched into the tower wall.",
               "Studied the faded warning marks on the tower wall.", unlock="road_lore", site="fallen_watchtower",
               art="old_carvings", roles=("site", "unlockable"), interaction="Reading the warnings"),
-    ActionDef("lumber_logs", "Log pile", "gather", "site", "strength", 40, 3000, 10,
+    ActionDef("lumber_logs", "Log pile", "gather", "site", "strength", XP, 3000, 10,
               "Cut logs stacked to season - the loggers never came back for them.",
               "Split kindling and sticks off a stack of seasoned logs.", unlock="scavenging", site="woodcutters_clearing",
               loot=(L("stick", 2, 3),), tags=("wood",), roles=("site", "unlockable"), interaction="Breaking off sticks"),
-    ActionDef("lumber_shed", "Tool shed", "scavenge", "site", "perception", 45, 3200, 8,
+    ActionDef("lumber_shed", "Tool shed", "scavenge", "site", "perception", XP, 3200, 8,
               "A lean-to of planks, its tools long gone. Some of the fittings are still there.",
               "Pried rope and nails from a woodcutters' tool shed.", unlock="scavenging", site="woodcutters_clearing",
               loot=(L("rope", 1, 1, 70), L("iron_nails", 1, 2, 60)), drops="traveller_cache",
               roles=("site", "unlockable", "discovery"), outcomes=(OutcomeDef("recipe", "axe"),),
               interaction="Searching the shed"),
-    ActionDef("lumber_oak", "Fallen tree", "climb", "site", "agility", 50, 3000, 6,
+    ActionDef("lumber_oak", "Fallen tree", "climb", "site", "agility", XP, 3000, 6,
               "A great oak left where it fell, its crown full of old nests.",
               "Climbed through the crown of a felled oak.", unlock="scavenging", site="woodcutters_clearing",
               loot=(L("bird_egg", 1, 2, 70), L("stick", 1, 2)), tags=("wood",), roles=("site", "unlockable"),
               interaction="Climbing the branches"),
-    ActionDef("lodge_racks", "Hide racks", "scavenge", "site", "strength", 45, 3400, 9,
+    ActionDef("lodge_racks", "Hide racks", "scavenge", "site", "strength", XP, 3400, 9,
               "Frames of hides left to dry. Some are still good.",
               "Cut the sound hides down from a hunter's drying racks.", unlock="snares", site="hunters_lodge",
               loot=(L("boar_hide", 1, 2), L("rope", 1, 1, 40)), roles=("site", "unlockable"),
               interaction="Taking the hides"),
-    ActionDef("lodge_snares", "Old traps", "hunt", "site", "perception", 45, 3000, 8,
+    ActionDef("lodge_snares", "Old traps", "hunt", "site", "perception", XP, 3000, 8,
               "A line of snares around the lodge, one of them still sprung.",
               "Walked the old snare line around the lodge.", unlock="snares", site="hunters_lodge",
               loot=(L("snared_hare", 1, 1, 70), L("bramble_thorn", 1, 2)), roles=("site", "unlockable"),
               outcomes=(OutcomeDef("recipe", "snare"),), interaction="Checking the traps"),
-    ActionDef("lodge_trophies", "Antler wall", "scavenge", "site", "intelligence", 55, 3600, 5,
+    ActionDef("lodge_trophies", "Antler wall", "scavenge", "site", "intelligence", XP, 3600, 5,
               "Antlers and tusks nailed above the lodge door.",
               "Took down what was worth keeping from the trophy wall.", unlock="snares", site="hunters_lodge",
               drops="hunter_trophies", roles=("site", "unlockable", "discovery"),
               outcomes=(OutcomeDef("recipe", "spear"),), interaction="Taking down the antlers"),
-    ActionDef("shrine_altar", "Broken altar", "pray", "site", "willpower", 60, 4200, 8,
+    ActionDef("shrine_altar", "Broken altar", "pray", "site", "willpower", XP, 4200, 8,
               "The altar is split in two, but someone still listens here.",
               "Prayed at the broken altar of a ruined shrine.", unlock="shrine_path", site="ruined_shrine",
               roles=("site", "unlockable"), interaction="Praying at the altar"),
-    ActionDef("shrine_offerings", "Coin bowls", "scavenge", "site", "perception", 50, 3200, 7,
+    ActionDef("shrine_offerings", "Coin bowls", "scavenge", "site", "perception", XP, 3200, 7,
               "Bowls of green coins and beads, left for gods nobody remembers.",
               "Sifted the offering bowls of a ruined shrine.", unlock="meditation", site="ruined_shrine",
               drops="shrine_offerings", roles=("site", "unlockable"), interaction="Taking the coins"),
-    ActionDef("shrine_pillars", "Carved pillars", "study", "site", "intelligence", 85, 4400, 6,
+    ActionDef("shrine_pillars", "Carved pillars", "study", "site", "intelligence", XP, 4400, 6,
               "Pillars carved with circles inside circles - the same marks as the anchor stone.",
               "Traced the circles carved into the shrine pillars.", unlock="meditation", site="ruined_shrine",
               roles=("site", "unlockable"), interaction="Studying the carvings"),
-    ActionDef("barrow_goods", "Old grave", "scavenge", "site", "strength", 60, 4200, 8,
+    ActionDef("barrow_goods", "Old grave", "scavenge", "site", "strength", XP, 4200, 8,
               "The barrow's mouth has fallen in. Whatever was buried with them is within reach.",
               "Dug through the fallen mouth of an old barrow.", unlock="road_lore", site="old_barrow",
               loot=(L("cloth_scrap", 1, 2, 60),), drops="barrow_hoard", roles=("site", "unlockable"),
               interaction="Digging in the grave"),
-    ActionDef("barrow_stones", "Stone circle", "meditate", "site", "willpower", 70, 4600, 7,
+    ActionDef("barrow_stones", "Stone circle", "meditate", "site", "willpower", XP, 4600, 7,
               "Standing stones around the mound. The air between them is very still.",
               "Sat inside the ring of standing stones until the stillness passed.", unlock="road_lore",
               site="old_barrow", heal=10, roles=("site", "unlockable"), interaction="Sitting in the circle"),
-    ActionDef("barrow_bones", "Bone pile", "observe", "site", "perception", 50, 3000, 6,
+    ActionDef("barrow_bones", "Bone pile", "observe", "site", "perception", XP, 3000, 6,
               "Bones of animals that came to the barrow and never left.",
               "Picked through a pile of old bones by the barrow.", unlock="road_lore", site="old_barrow",
               loot=(L("boar_tusk", 1, 1, 30), L("stick", 1, 1)), roles=("site", "unlockable"),
               interaction="Searching the bones"),
     # Ruins are guarded: restless bones rise at burial mounds and fallen watchtowers, known
     # from the first life (a locked ruin is dangerous long before it is worth searching).
-    ActionDef("barrow_dead", "Restless bones", "fight", "site", "strength", 110, 1, 9,
+    ActionDef("barrow_dead", "Restless bones", "fight", "site", "strength", XP, 1, 9,
               "Bones that will not lie still. Slow, but hard to put down.",
-              "Put the restless bones back to rest.", site="old_barrow", hp=5, enemy="restless_bones",
+              "Put the restless bones back to rest.", site="old_barrow", hp=12, enemy="restless_bones",
               loot=(L("old_bone", 1, 2),), drops="bones_spoils", roles=("site", "combat"),
               interaction="Fighting the bones"),
-    ActionDef("tower_guard", "Fallen guard", "fight", "site", "strength", 90, 1, 5,
+    ActionDef("tower_guard", "Fallen guard", "fight", "site", "strength", XP, 1, 5,
               "What is left of a watchman, still walking his round in rusted mail.",
-              "Laid the fallen guard to rest.", site="fallen_watchtower", hp=4, enemy="restless_bones",
+              "Laid the fallen guard to rest.", site="fallen_watchtower", hp=12, enemy="restless_bones",
               loot=(L("old_bone", 1, 1), L("iron_nails", 1, 1, 50)), drops="bones_spoils", roles=("site", "combat"),
               interaction="Fighting the guard"),
-    ActionDef("shrine_wisp", "Pale wisp", "fight", "site", "willpower", 90, 1, 6,
+    ActionDef("shrine_wisp", "Pale wisp", "fight", "site", "willpower", XP, 1, 6,
               "A cold light that drifts between the pillars. It does not bite - it feeds.",
-              "Scattered the pale wisp.", site="ruined_shrine", hp=3, enemy="pale_wisp",
+              "Scattered the pale wisp.", site="ruined_shrine", hp=8, enemy="pale_wisp",
               loot=(L("tarnished_coin", 1, 1, 50),), roles=("site", "combat"), interaction="Scattering the wisp"),
     # --- self actions -----------------------------------------------------------
     ActionDef("think", "Think about the road", "reflect", "self", "intelligence", 0, 3000, 40,
@@ -1102,28 +1209,28 @@ ACTIONS = (
     ActionDef("contemplate", "Contemplate the forest", "reflect", "self", "willpower", 0, 5000, 30,
               "A longer, wordless pause.", "Contemplated the forest for a while.", trigger="after_location",
               roles=("reflection", "contextual"), interaction="Contemplating the forest"),
-    ActionDef("craft_jerkin", "Stitch a padded jerkin", "craft", "self", "endurance", 30, 6000, 1,
+    ActionDef("craft_jerkin", "Stitch a padded jerkin", "craft", "self", "endurance", XP, 6000, 1,
               "Cloth and rope become a jerkin: enemy hits hurt 20% less this life.",
               "Stitched cloth scraps into a padded jerkin.", cost=(("cloth_scrap", 3), ("rope", 1)),
               effect="padded_jerkin", trigger="need", need_priority=4, recipe="padded_jerkin",
               workplace="crafting_station",
               roles=("craft", "contextual"), requirements=(Requirement("knowledge", "primitive_crafting"),),
               interaction="Stitching a padded jerkin"),
-    ActionDef("craft_studded", "Stud the hide wrap", "craft", "self", "strength", 40, 6000, 1,
+    ActionDef("craft_studded", "Stud the hide wrap", "craft", "self", "strength", XP, 6000, 1,
               "Nails hammered into a hide wrap: enemy hits hurt 45% less this life.",
               "Hammered iron studs into the hide wrap.", cost=(("hide_wrap", 1), ("iron_nails", 3)),
               effect="studded_wrap", trigger="need", need_priority=2, recipe="studded_wrap",
               workplace="crafting_station",
               roles=("craft", "contextual"), requirements=(Requirement("knowledge", "primitive_crafting"),),
               interaction="Studding the hide wrap"),
-    ActionDef("craft_snare", "Set a bramble snare", "craft", "self", "perception", 30, 6000, 1,
+    ActionDef("craft_snare", "Set a bramble snare", "craft", "self", "perception", XP, 6000, 1,
               "Sticks and a thorn become a snare that usually catches a hare.",
               "Set a bramble snare and checked it.", recipe="snare",
               cost=(("stick", 2), ("bramble_thorn", 1)), loot=(L("snared_hare", 1, 1, 75),), trigger="need",
               need_priority=3, need_hunger_below=60, need_no_food=True,
               workplace="crafting_station",
               roles=("craft", "contextual"), interaction="Setting a bramble snare"),
-    ActionDef("craft_wrap", "Wrap boar hide", "craft", "self", "endurance", 30, 5000, 1,
+    ActionDef("craft_wrap", "Wrap boar hide", "craft", "self", "endurance", XP, 5000, 1,
               "Two hides become a wrap: boar hits hurt 30% less this life.",
               "Wrapped boar hide around your arms and chest.", recipe="hide_wrap",
               cost=(("boar_hide", 2),), effect="hide_wrap", trigger="need",
@@ -1132,37 +1239,37 @@ ACTIONS = (
               roles=("craft", "contextual"), interaction="Wrapping boar hide"),
     # Weapons (crafting station). The spear and the axe are built on a staff: crafting one
     # replaces the staff, and a worn weapon is never replaced by a craft that keeps it.
-    ActionDef("craft_staff", "Cut a walking staff", "craft", "self", "strength", 25, 5000, 1,
+    ActionDef("craft_staff", "Cut a walking staff", "craft", "self", "strength", XP, 5000, 1,
               "A straight length of wood: hits from two steps away, a little harder.",
               "Cut and smoothed a walking staff.", cost=(("stick", 5),), effect="walking_staff",
               trigger="need", need_priority=5, workplace="crafting_station",
               roles=("craft", "contextual"), requirements=(Requirement("knowledge", "primitive_crafting"),),
               interaction="Cutting a walking staff"),
-    ActionDef("craft_spear", "Make a spear", "craft", "self", "strength", 45, 7000, 1,
+    ActionDef("craft_spear", "Make a spear", "craft", "self", "strength", XP, 7000, 1,
               "Nails and rope turn the staff into a spear: hits from three steps away.",
               "Bound an iron point to the staff - a spear.", cost=(("walking_staff", 1), ("iron_nails", 2), ("rope", 1)),
               effect="spear", trigger="need", need_priority=3, recipe="spear", workplace="crafting_station",
               roles=("craft", "contextual"), requirements=(Requirement("knowledge", "primitive_crafting"),),
               interaction="Binding a spear point"),
-    ActionDef("craft_axe", "Make an axe", "craft", "self", "strength", 45, 7000, 1,
+    ActionDef("craft_axe", "Make an axe", "craft", "self", "strength", XP, 7000, 1,
               "An iron head on the staff: heavy close blows, and it chops wood.",
               "Fixed an iron head to the staff - an axe.", cost=(("walking_staff", 1), ("iron_nails", 3)),
               effect="axe", trigger="need", need_priority=4, recipe="axe", workplace="crafting_station",
               roles=("craft", "contextual"), requirements=(Requirement("knowledge", "primitive_crafting"),),
               interaction="Fitting an axe head"),
     # --- buildings at the anchor camp --------------------------------------------------
-    ActionDef("make_campfire", "Make camp", "camp", "self", "building", 15, 4000, 1,
+    ActionDef("make_campfire", "Make camp", "camp", "self", "building", XP, 4000, 1,
               "A campfire in a mastered place: rest by it as at the anchor, and the avatar keeps to this place.",
               "Made camp by a small fire.", cost=(("stick", 3),), places="campfire",
               trigger="need", need_flag="camp_wanted", need_priority=1, roles=("contextual",),
               requirements=(Requirement("location", "here", 2),), interaction="Making a campfire"),
-    ActionDef("build_station", "Build a crafting station", "build", "self", "building", 120, 20000, 1,
+    ActionDef("build_station", "Build a crafting station", "build", "self", "building", XP, 20000, 1,
               "A workbench by the anchor stone: crafting becomes possible at the camp.",
               "Built a crafting station beside the anchor stone.", cost=(("stick", 12), ("boar_hide", 2)),
               builds="crafting_station", workplace="camp", trigger="need", need_priority=1,
               roles=("craft", "contextual"), requirements=(Requirement("knowledge", "primitive_crafting"),),
               interaction="Building a crafting station"),
-    ActionDef("build_chest", "Build a storage chest", "build", "self", "building", 150, 25000, 1,
+    ActionDef("build_chest", "Build a storage chest", "build", "self", "building", XP, 25000, 1,
               "A nailed chest at the camp that holds materials between trips.",
               "Built a storage chest at the camp.", cost=(("stick", 10), ("iron_nails", 4), ("rope", 2)),
               builds="storage_chest", workplace="crafting_station", trigger="need", need_priority=6,
@@ -1175,20 +1282,20 @@ ACTIONS = (
 # rings (autopilot/story.py); finishing it teaches the step's knowledge, which every later life
 # keeps. Story text: docs/design/STORY.md.
 STORY_ACTIONS = (
-    ActionDef("old_man_camp", "The old man's camp", "study", "story", "intelligence", 60, 5000, 1,
+    ActionDef("old_man_camp", "The old man's camp", "study", "story", "intelligence", XP, 5000, 1,
               "A cold fire, a bedroll and a page pinned under a stone.",
               "Read the old man's notes by his cold fire.", art="camp_firepit", roles=("story",),
               outcomes=(OutcomeDef("knowledge", "story_camp"),), interaction="Reading the old man's notes"),
-    ActionDef("summoner_mark", "Summoner's mark", "study", "story", "intelligence", 90, 6000, 1,
+    ActionDef("summoner_mark", "Summoner's mark", "study", "story", "intelligence", XP, 6000, 1,
               "The anchor stone's circle, cut into a boulder by the road.",
               "Traced a summoner's mark. Its arrow points away from the anchor.", art="old_carvings",
               unlock="road_lore", roles=("story",),
               outcomes=(OutcomeDef("knowledge", "story_mark"),), interaction="Tracing the old mark"),
-    ActionDef("old_man", "The old man", "observe", "story", "intelligence", 120, 12000, 1,
+    ActionDef("old_man", "The old man", "observe", "story", "intelligence", XP, 12000, 1,
               "The old man from the road, waiting by a fallen log.",
               "Listened to the old man's story of the summoners.", art="elder", roles=("story",),
               outcomes=(OutcomeDef("knowledge", "story_elder"),), interaction="Listening to the old man"),
-    ActionDef("dead_gate", "Dead gate", "study", "story", "intelligence", 250, 9000, 1,
+    ActionDef("dead_gate", "Dead gate", "study", "story", "intelligence", XP, 9000, 1,
               "A ring of standing stones taller than a house. Its keystone has three empty sockets.",
               "Studied the dead gate deep in the forest.", art="dead_gate", roles=("story",),
               requirements=(Requirement("level", "willpower", 3),),

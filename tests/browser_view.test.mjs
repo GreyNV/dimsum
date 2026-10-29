@@ -360,7 +360,7 @@ test('pixel player paints whole world pixels with feet on the frame bottom and a
     for(const [,x,y,w,h] of rects) assert.ok([x,y,w,h].every(Number.isInteger)&&(x-10)%PIXEL===0&&w%PIXEL===0);
     assert.equal(Math.max(...rects.map(([,,y,,h])=>y+h)),20+pixelPlayerFrame(compact).height,'feet row');
   }
-  assert.deepEqual(pixelPlayerPose(pose('east','walk',0)),pixelPlayerPose(pose('east','walk',260)));
+  assert.deepEqual(pixelPlayerPose(pose('east','walk',0)),pixelPlayerPose(pose('east','walk',520)));
   assert.notDeepEqual(pixelPlayerPose(pose('east','walk',130)),pixelPlayerPose(pose('east','walk',390)));
 });
 function recordingCtx(){

@@ -113,6 +113,7 @@ const lum = (r, g, b) => (.2126 * r + .7152 * g + .0722 * b) / 255;
  */
 export function asciify(source, w, h, kIn, kOut = kIn, {cell = null, pad = 0, ground = true, absolute = null, base = null, glyphs = null, style = null} = {}) {
   const st = {gain: .8, ...STYLE, ...(style || {})};
+  glyphs = glyphs || st.glyphs || null;   // a style may restrict the character set
   const [cw, chh] = cell || st.cell || [CELL_W, CELL_H];
   const cols = Math.ceil(w / cw), rows = Math.ceil(h / chh);
   const SW = source.width, SH = source.height;

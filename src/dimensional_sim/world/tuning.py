@@ -21,7 +21,7 @@ ASH_PER_RING = 1
 UNARMED_REACH = 1             # one cardinal cell; the default punch hitbox
 # Unarmed punches gain +1 damage per this many (softcapped) Strength levels. Was 5 while the
 # walking staff gave +1; 3 restores the measured balance without a weapon (docs/design/BALANCING.md).
-STRENGTH_LEVELS_PER_PUNCH = 3
+STRENGTH_LEVELS_PER_PUNCH = 5
 
 # Need-driven crafting thresholds (autopilot policy, not rules).
 SNARE_WHEN_HUNGER_BELOW = 60   # points; only when no food is carried
@@ -56,3 +56,36 @@ NIGHT_SPAWN_MAX = 90         # cap the late-life pressure
 NIGHT_FOES_BY_RING = ((0, 1), (2, 2), (5, 3))   # (from ring, wolves at once) - deeper is more dangerous
 NIGHT_SPAWN_NEAR, NIGHT_SPAWN_FAR = 7, 13       # steps from the avatar a wolf appears (out of sight)
 FIRE_LIGHT_RADIUS = 4         # daylight enemies fear this radius; night wolves ignore it
+
+# XP from base time (docs/design/STATS_AND_ENEMIES_AUDIT.md, step 6). An action's XP is its base
+# duration in seconds x XP_PER_SECOND, times its rarity's percent; self actions (crafts, building,
+# the campfire) earn SELF_XP_PERCENT of that, the story's milestones STORY_XP_PERCENT. Because XP
+# follows base time, not the time taken, a faster avatar earns more XP per hour.
+XP_PER_SECOND = 14
+RARITY_XP_PERCENT = {"common": 100, "uncommon": 110, "rare": 150}
+SELF_XP_PERCENT = 40
+STORY_XP_PERCENT = 150
+# Fights pay per landed hit: XP per hit point taken off the enemy, and the finishing blow adds
+# FINISH_XP_PERCENT of the whole enemy's worth. A starred enemy has more HP, so it pays more.
+FIGHT_XP_PER_HP = 8
+FINISH_XP_PERCENT = 25
+
+# Walking pays per tile stepped, never per second, about a quarter of all XP. The avatar walks
+# about 11,000 tiles an hour (the audit's first figure, 2,000, sampled once a second and missed
+# most steps), so: about 1,100 Agility, 700-1,400 Endurance and 1,000 Perception XP an hour.
+AGILITY_TILES_PER_XP = 10       # 1 Agility XP every 10 tiles
+ENDURANCE_TILES_PER_XP = 15     # 1 Endurance XP every 15 tiles, twice as fast hungry or heavily loaded
+ENDURANCE_HARD_HUNGER = 30      # points of hunger at or below which walking is "hungry"
+PERCEPTION_CELLS_PER_XP = 100   # 1 Perception XP per 100 newly seen cells (exploring, not pacing)
+
+# Movement: the whole Agility multiplier speeds walking on a log curve,
+# bonus = MOVE_BONUS_PER_DECADE x log10(multiplier) permille: +3% at x2, +10% at x10.
+MOVE_BONUS_PER_DECADE = 100
+
+# The autopilot's dodge (combat.dodge_percent): walking trains Agility and Perception to about
+# level 10 each within a life, so a level is worth one percent: 5% fresh, about 25-30% for a
+# seasoned life, never past 40%. (At 2% a level, capped at 60%, it reached the cap in 40 minutes
+# and no enemy killed anyone.)
+DODGE_BASE_PERCENT = 5
+DODGE_PERCENT_PER_LEVEL = 1
+DODGE_MAX_PERCENT = 40

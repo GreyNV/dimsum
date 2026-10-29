@@ -4,6 +4,7 @@ import json
 import unittest
 
 from dimensional_sim.world.autopilot import Expedition, saves
+from dimensional_sim.world.autopilot.constants import SCHEMA_VERSION
 from dimensional_sim.world.catalog import (BY_ID, CAMP_GRADE, CAMP_IDLE_MS, LOCATION_OF_REGION, LOCATION_OF_SITE,
                                            LOCATIONS, REGIONS, SITES, location_thresholds)
 from dimensional_sim.world.models import ChunkKey
@@ -103,16 +104,16 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(loaded.location_done, {"bramble_thicket": 7, "abandoned_camp": 4})
         self.assertEqual(loaded.unlocked, {"return_anchor"})
         self.assertEqual((loaded.location_focus, loaded.camp), ({}, None))
-        self.assertEqual(loaded.to_dict()["schema_version"], 23)
+        self.assertEqual(loaded.to_dict()["schema_version"], SCHEMA_VERSION)
 
     def test_schema_22_keeps_rolled_encounters_when_the_new_odds_arrive(self):
         e = far_and_hurt()
-        old = e.to_dict()
+        old = {k: v for k, v in e.to_dict().items() if k not in saves.V25_FIELDS}
         old["schema_version"] = 22
         old["encounters"] = "encounters-v11"
         loaded = Expedition.from_dict(json.loads(json.dumps(old)))
         self.assertEqual(loaded.spot_plans, e.spot_plans)
-        self.assertEqual(loaded.to_dict()["schema_version"], 23)
+        self.assertEqual(loaded.to_dict()["schema_version"], SCHEMA_VERSION)
 
 
 if __name__ == "__main__":

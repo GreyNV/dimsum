@@ -26,7 +26,7 @@ PURE_LAYERS = {"runtime", "renderer", "animation"}
 NETWORK_MODULES = {"socket", "http", "urllib", "requests", "subprocess", "asyncio"}
 # Client art: these modules draw catalog art keys, and naming the key is how art is looked up.
 CLIENT_ART = {"art.js", "ascii_art.js", "actors.js", "combat_art.js", "nature_art.js", "natural_ground.js",
-              "painted.js", "painted_props.js", "place_art.js", "player_art.js", "sprites.js"}
+              "painted.js", "painted_props.js", "place_art.js", "player_art.js", "sprites.js", "traveller_art.js"}
 # Location art never draws the player (AGENTS.md: player graphics never belong in locations).
 LOCATION_ART = {"art.js", "nature_art.js", "natural_ground.js", "painted_props.js", "place_art.js", "minimap.js"}
 
@@ -167,6 +167,29 @@ class LayeringTests(unittest.TestCase):
     def test_location_art_never_draws_the_player(self):
         for name in LOCATION_ART:
             self.assertNotIn("player_art.js", js_imports(BROWSER / name), name)
+
+
+class OwnershipTests(unittest.TestCase):
+    def test_only_the_vitals_mixin_changes_hunger_health_and_the_cause_of_death(self):
+        # A new life sets them in expedition.py; a save restores them in saves.py.
+        owners = {"vitals.py", "expedition.py", "saves.py"}
+        for path in python_files(WORLD / "autopilot"):
+            if path.name in owners:
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                targets = node.targets if isinstance(node, ast.Assign) else \
+                    [node.target] if isinstance(node, (ast.AugAssign, ast.AnnAssign)) else []
+                for target in targets:
+                    if isinstance(target, ast.Attribute) and target.attr in ("hunger", "health", "cause") \
+                            and isinstance(target.value, ast.Name) and target.value.id == "self":
+                        self.fail(f"{path.name}:{node.lineno} sets self.{target.attr}; use the vitals "
+                                  "mixin (_heal, _feed, _hurt, _hunger_bite)")
+
+
+class ContractTests(unittest.TestCase):
+    def test_no_weapon_reaches_further_than_a_save_may_claim_a_hit(self):
+        from dimensional_sim.world.runtime import MAX_ATTACK_REACH
+        self.assertLessEqual(max(a.reach for a in catalog.ATTACKS.values()), MAX_ATTACK_REACH)
 
 
 class DeterminismTests(unittest.TestCase):

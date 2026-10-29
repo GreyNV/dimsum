@@ -44,6 +44,8 @@ class SpawningMixin:
             if rolled or added:
                 self.admitted.pop(ident)
                 self.game.targets.pop(ident, None)
+                self.hunting.pop(ident, None)
+                self.fight_paid.pop(ident, None)
                 self._note(chunk_id, ident, encounter, "retired: camp sanctuary")
 
     def _reset_spawns(self):

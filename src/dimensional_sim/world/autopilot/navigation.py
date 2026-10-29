@@ -6,7 +6,7 @@ field per (goals, resident set, blocked cells), so repeated planning is cheap.
 """
 from collections import deque
 
-from ..models import DELTAS, ChunkKey
+from ..models import DELTAS, DIRECTIONS, ChunkKey
 from .constants import DIRECTION_DELTAS
 
 
@@ -235,3 +235,78 @@ class NavigationMixin:
 
     def _approach(self, gx, gy):
         return {(gx + dx, gy + dy) for dx, dy in DELTAS.values()}
+
+    # ----- any-angle travel ------------------------------------------------------------------
+    LOOKAHEAD = 12   # cells of the path ahead the avatar aims along
+
+    def _cardinal_toward(self, dx, dy):
+        return next(d for d, delta in DELTAS.items() if delta == (dx, dy))
+
+    def _clear_line(self, grid, blocked, start, end):
+        """A straight walk from `start` to `end` that only ever takes legal cardinal moves over
+        open, unblocked cells: the supercover of the segment (every cell the line touches,
+        corners resolved vertically first)."""
+        (x, y), (x1, y1) = start, end
+        nx, ny = abs(x1 - x), abs(y1 - y)
+        sx, sy = (1 if x1 > x else -1), (1 if y1 > y else -1)
+        ix = iy = 0
+        while ix < nx or iy < ny:
+            if iy >= ny or (ix < nx and (1 + 2 * ix) * ny < (1 + 2 * iy) * nx):
+                direction, step = self._cardinal_toward(sx, 0), (sx, 0)
+                ix += 1
+            else:
+                direction, step = self._cardinal_toward(0, sy), (0, sy)
+                iy += 1
+            if not self._can_move(grid, blocked, x, y, direction):
+                return False
+            x, y = x + step[0], y + step[1]
+        return True
+
+    def _heading(self, here, field, grid, blocked):
+        """The next step of a straight-line walk (any angle, as straight as the grid allows):
+        aim at the farthest cell of the path ahead that a straight line reaches, then take the
+        one of eight steps that keeps closest to that line while getting nearer the goal.
+        Returns a runtime move name (cardinal or diagonal), or None when nothing gets nearer."""
+        d = field.get(here)
+        if d is None:
+            return None
+        path, cell = [], here                        # the path ahead, down the distance field
+        for _ in range(self.LOOKAHEAD):
+            nxt = None
+            for direction in DIRECTIONS:
+                dx, dy = DELTAS[direction]
+                n = (cell[0] + dx, cell[1] + dy)
+                if field.get(n, 1 << 30) < field.get(cell, 1 << 30) and self._can_move(grid, blocked, *cell, direction):
+                    nxt = n
+                    break
+            if nxt is None:
+                break
+            path.append(nxt)
+            cell = nxt
+        if not path:
+            return None
+        aim = next((p for p in reversed(path) if self._clear_line(grid, blocked, here, p)), path[0])
+        ax, ay = aim[0] - here[0], aim[1] - here[1]
+        best = None
+        for (mx, my), name in MOVES_8:
+            n = (here[0] + mx, here[1] + my)
+            if field.get(n, 1 << 30) >= d or mx * ax + my * ay <= 0:
+                continue
+            if mx and my:                            # a diagonal: both half-steps must be legal, both ways
+                h, v = self._cardinal_toward(mx, 0), self._cardinal_toward(0, my)
+                if not (self._can_move(grid, blocked, *here, h) and self._can_move(grid, blocked, *here, v)
+                        and self._can_move(grid, blocked, here[0] + mx, here[1], v)
+                        and self._can_move(grid, blocked, here[0], here[1] + my, h)):
+                    continue
+            elif not self._can_move(grid, blocked, *here, name):
+                continue
+            # distance of the landing cell from the aim line (scaled cross product), then from the aim
+            off = abs((n[0] - here[0]) * ay - (n[1] - here[1]) * ax)
+            rank = (off, (aim[0] - n[0]) ** 2 + (aim[1] - n[1]) ** 2, name)
+            if best is None or rank < best[0]:
+                best = (rank, name)
+        return None if best is None else best[1]
+
+
+MOVES_8 = (((0, -1), "north"), ((1, 0), "east"), ((0, 1), "south"), ((-1, 0), "west"),
+           ((1, -1), "northeast"), ((1, 1), "southeast"), ((-1, 1), "southwest"), ((-1, -1), "northwest"))

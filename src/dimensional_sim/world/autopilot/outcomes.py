@@ -165,6 +165,8 @@ class OutcomesMixin:
             target = self.game.targets.get(ident)
             if target is not None and target.hp > 0:
                 del self.game.targets[ident]
+            self.hunting.pop(ident, None)   # a hunt never outlives its enemy (a save would not load)
+            self.fight_paid.pop(ident, None)
         if self.task and self.task["type"] == "perform" and self.task["spot"] in gone:
             self.task = None
         if self.goal and self.goal.get("id") in gone:
@@ -172,17 +174,24 @@ class OutcomesMixin:
 
     def _reward(self, ident, entry):
         self.completed.add(ident)
-        dim = self._gain_xp(entry.attribute, entry.xp)
+        tier = self.tier_of(ident) if entry.category == "fight" else None
+        if tier:   # paid hit by hit as the blows landed (training._landed); the log shows the sum
+            xp, dim = self.fight_paid.pop(ident, (0, 0))
+        else:
+            xp, dim = entry.xp, self._gain_xp(entry.attribute, entry.xp)
         seed = derive_seed(self.game.world.world_seed, "loot", self.life, ident)
-        spot = self._spot_by_id(ident)
+        spot = self._spot_by_id(self.companion_of(ident) or ident)   # company belongs to its spot
         condition = self.site_condition(spot.chunk) if spot is not None and entry.placement == "site" else None
-        rolled = roll_loot(entry if condition is None or condition.drops else replace(entry, drops=None), seed)
+        looted = entry if condition is None or condition.drops else replace(entry, drops=None)
+        rolled = roll_loot(looted, seed)
+        for k in range(1, tier.loot_rolls if tier else 1):   # a starred enemy drops its loot again
+            rolled = [*rolled, *roll_loot(looted, derive_seed(seed, "tier-loot", k))]
         chop = effects.total(self.equipped, "wood_yield") if "wood" in entry.tags else 0
         if chop:   # an axe: more wood from every wood harvest
             rolled = [*rolled, (WOOD_YIELD_ITEM, chop)]   # once per harvest, however many rows rolled
         items = [(item, kept) for item, count in rolled if (kept := self._add_item(item, count))]
         if entry.heal:
-            self.health = min(VITAL_MAX, self.health + entry.heal * POINT)
+            self._heal(entry.heal)
         record_action(self.journal, entry.id)
         if spot is not None:
             self._deplete(entry, spot.chunk)
@@ -200,7 +209,7 @@ class OutcomesMixin:
         if entry.category == "pray":
             self.stats["prayers"] += 1
         self._entry("encounter", entry.log, encounter=entry.id, attribute=entry.attribute,
-                    xp=entry.xp, dim_xp=dim, items=items)
+                    xp=xp, dim_xp=dim, items=items)
 
     def _eat(self):
         """Eat the largest food that fits missing hunger, until no food fits."""
@@ -213,9 +222,9 @@ class OutcomesMixin:
                 return ate
             value, item = fitting[-1]
             self._remove_item(item, 1)
-            self.hunger += value * POINT
+            self._feed(value)   # it fits the room left, so nothing is lost
             heal = value // FOOD_HEALS_DIVISOR
-            self.health = min(VITAL_MAX, self.health + heal * POINT)
+            self._heal(heal)
             self.stats["eaten"] += 1
             self._entry("eat", f"Ate {ITEMS[item].name.lower()} (+{value} hunger, +{heal} health).",
                         items=[(item, -1)])

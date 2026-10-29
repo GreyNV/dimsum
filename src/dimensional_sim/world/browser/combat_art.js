@@ -61,7 +61,7 @@ export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying =
   if (ghost) {
     // X-ray pass for an enemy hidden behind the player: translucent, no shadow.
     paintSprite(ctx, sprite, left, top, {flash: hit < 110, alpha: .42, seed});
-    drawHealth(ctx, x, top - 7, target.hp, Math.max(maxHp, target.hp));
+    drawMarks(ctx, x, top, target, maxHp, clock);
     return {left, top, width, height};
   }
   if (reflection) { paintSprite(ctx, sprite, left, top, {seed}); return {left, top, width, height}; }
@@ -91,7 +91,7 @@ export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying =
     ctx.fillRect(left + 4 * 4 + 1, top + 7 + 3, 2, 2); ctx.fillRect(left + 6 * 4 + 1, top + 7 + 3, 2, 2);
     ctx.restore();
   }
-  drawHealth(ctx, x, top - 7, target.hp, Math.max(maxHp, target.hp));
+  drawMarks(ctx, x, top, target, maxHp, clock);
   return {left, top, width, height};
 }
 
@@ -107,7 +107,7 @@ function drawPaintedEnemy(ctx, target, painted, kind, x, y, {clock, hit, dying, 
   const flash = hit < 110 ? flashCanvas(painted, key) : painted;
   if (ghost) {
     drawPainted(ctx, flash, left, top, .42);
-    drawHealth(ctx, x, top - 7, target.hp, Math.max(maxHp, target.hp));
+    drawMarks(ctx, x, top, target, maxHp, clock);
     return {left, top, width, height};
   }
   if (reflection) { drawPainted(ctx, painted, left, top); return {left, top, width, height}; }
@@ -135,10 +135,37 @@ function drawPaintedEnemy(ctx, target, painted, kind, x, y, {clock, hit, dying, 
     }
     ctx.restore();
   }
-  drawHealth(ctx, x, top - 7, target.hp, Math.max(maxHp, target.hp));
+  drawMarks(ctx, x, top, target, maxHp, clock);
   return {left, top, width, height};
 }
 
+/** Health, star mark and the fight-pattern tell above an enemy (frame target.hunting). */
+function drawMarks(ctx, x, top, target, maxHp, clock) {
+  drawHealth(ctx, x, top - 7, target.hp, Math.max(maxHp, target.hp)); drawTier(ctx, x, top - 7, target.tier);
+  drawTell(ctx, x, top - (target.tier ? 17 : 10), target.hunting, clock);
+}
+
+/** The tell of a hunter's pattern (autopilot hunting modes): windup = a red "!" (it is about to
+ * strike: step aside), charge = a bright "!!", recover = a dim "~" (dazed: open to blows). */
+export function drawTell(ctx, cx, y, mode, clock = 0) {
+  const text = mode === 'windup' ? '!' : mode === 'charge' ? '!!' : mode === 'recover' ? '~' : '';
+  if (!text) return;
+  ctx.save(); ctx.font = `bold ${mode === 'recover' ? 11 : 10}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  const lift = mode === 'windup' ? Math.floor(clock / 120) % 2 : 0;
+  ctx.fillStyle = '#0a0806'; ctx.fillText(text, cx + .6, y - lift + .6);
+  ctx.fillStyle = mode === 'recover' ? '#c8ccd4' : mode === 'charge' ? '#ffd27a' : '#ff5a46';
+  ctx.fillText(text, cx, y - lift);
+  ctx.restore();
+}
+
+/** A starred enemy's mark above its health bar (catalog FightTier.mark: "" | "★" | "★★"). */
+export function drawTier(ctx, cx, y, mark) {
+  if (!mark) return;
+  ctx.save(); ctx.font = 'bold 7px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  ctx.fillStyle = '#0a0806'; ctx.fillText(mark, cx + .6, y - 1.4);
+  ctx.fillStyle = mark.length > 1 ? '#f0c060' : '#d8d8c8'; ctx.fillText(mark, cx, y - 2);
+  ctx.restore();
+}
 export function drawHealth(ctx, cx, y, hp, maxHp) {
   const seg = 7, gap = 1, w = maxHp * seg + (maxHp - 1) * gap, x = Math.round(cx - w / 2);
   ctx.fillStyle = OUTLINE; ctx.fillRect(x - 1, y - 1, w + 2, 5);
@@ -158,17 +185,10 @@ export function drawUnarmedReach(ctx, x, y, target = null, attacking = false, re
   ctx.strokeStyle = target ? '#f2cb79' : '#a8b88b';
   ctx.fillStyle = target ? '#d9a65325' : '#8caf6b12';
   ctx.globalAlpha = attacking ? .85 : target ? .68 : .42;
+  // the blow's circle: the weapon's reach plus half a cell, in every direction (runtime._strike)
   ctx.beginPath();
-  ctx.moveTo(x, foot - TILE_H);
-  ctx.lineTo(x + TILE_W, foot);
-  ctx.lineTo(x, foot + TILE_H);
-  ctx.lineTo(x - TILE_W, foot);
-  ctx.closePath();
+  ctx.ellipse(x, foot, (reach + .5) * TILE_W, (reach + .5) * TILE_H, 0, 0, Math.PI * 2);
   ctx.fill(); ctx.stroke();
-  for (let step = 2; step <= reach; step++) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-    ctx.fillStyle = target ? '#f2cb79' : '#a8b88b';
-    ctx.fillRect(Math.round(x + dx * step * TILE_W) - 2, Math.round(foot + dy * step * TILE_H) - 2, 4, 4);
-  }
   if (target) {
     const [tx, ty] = target;
     ctx.globalAlpha = 1;

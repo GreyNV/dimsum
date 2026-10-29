@@ -52,7 +52,7 @@ export function drawMinimap(map, state, chunks, dpr) {
   const pulse = 1.6 + (Math.floor(performance.now() / 250) % 2) * .6;
   for(const t of state.targets) {
     if (t.hp <= 0) continue;
-    if (t.hunting === 'hunt') {
+    if (t.hunting && t.hunting !== 'flee') {   // any fight-pattern mode
       mark(t.x,t.y,'#ff5a46',1.4);
       const mx=left+(t.x-minX*state.chunk_width+.5)*scale, my=top+(t.y-minY*state.chunk_height+.5)*scale;
       map.strokeStyle='#ff5a46'; map.lineWidth=.8; map.strokeRect(mx-pulse-1.4,my-pulse-1.4,(pulse+1.4)*2,(pulse+1.4)*2);

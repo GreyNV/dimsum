@@ -17,6 +17,7 @@ from .constants import (ANCHOR_COUNTDOWN_MS, CONTACT_COOLDOWN_MS, FOOD_COOLDOWN_
                         LOG_TYPES, MONSTER_STEP_MS, SCHEMA_VERSION, SELF_ACTIONS, STACK_LIMIT, STAT_KEYS,
                         TASK_TYPES, VITAL_MAX)
 from .ecology import valid_pressure, valid_shimmer
+from .training import WALK_KEYS, WALK_RATES
 
 V17_SAVE_FIELDS = ("schema_version", "encounters", "exploration", "life", "total_ms", "regular",
                "dimensional", "life_gain", "completed", "inventory", "hunger", "health",
@@ -42,7 +43,9 @@ V21_SAVE_FIELDS = tuple(f for f in V20_SAVE_FIELDS if f != "possess_ready_ms") +
 # Schema 22: encounter mastery and Journal favor/guarantee became location mastery and camp focus.
 V22_DROPPED = ("mastery", "journal_favor", "journal_guarantee", "journal_guarantee_region", "guarantee_used")
 V22_FIELDS = ("location_done", "location_focus", "camp")
-SAVE_FIELDS = tuple(f for f in V21_SAVE_FIELDS if f not in V22_DROPPED) + V22_FIELDS
+V22_SAVE_FIELDS = tuple(f for f in V21_SAVE_FIELDS if f not in V22_DROPPED) + V22_FIELDS
+V25_FIELDS = ("walk", "fight_paid")   # schema 25: walking XP remainders, XP paid per hit so far (training.py)
+SAVE_FIELDS = V22_SAVE_FIELDS + V25_FIELDS
 V7_FIELDS = ("journal",)                       # added by schema 7
 V8_FIELDS = ("equipped", "knowledge", "recipes", "journal_disabled", "journal_favor",
              "leads", "lead_history")         # added by schema 8
@@ -286,16 +289,31 @@ def _from_v21(data):
 
 def _from_v22(data):
     """New chunks use encounter v12; already rolled plans remain fixed through this life."""
-    fields(data, SAVE_FIELDS)
+    fields(data, V22_SAVE_FIELDS)
     if data["encounters"] not in ("encounters-v11", ENCOUNTER_VERSION):
         raise ValueError("unsupported expedition encounter version")
     return {**data, "schema_version": 23, "encounters": ENCOUNTER_VERSION}
 
 
+def _from_v23(data):
+    """Fight patterns: a hunt row also keeps its strike line and progress; old hunts start over
+    from closing in (a 'hunt' or 'flee' with nothing in flight)."""
+    hunting = data["hunting"]
+    if type(hunting) is dict:
+        hunting = {k: {**v, "ax": 0, "ay": 0, "ox": 0, "oy": 0, "left": 0} if type(v) is dict else v
+                   for k, v in hunting.items()}
+    return {**data, "schema_version": 24, "hunting": hunting}
+
+
+def _from_v24(data):
+    """Walking pays XP from schema 25: nothing walked is owed yet."""
+    return {**data, "schema_version": 25, "walk": {key: 0 for key in WALK_KEYS}, "fight_paid": {}}
+
+
 MIGRATIONS = {6: _from_v6, 7: _from_v7, 8: _from_v8, 9: _from_v9, 10: _from_v10, 11: _from_v11, 12: _from_v12,
               13: _from_v13, 14: _from_v14, 15: _from_v15, 16: _from_v16,
               17: _from_v17, 18: _from_v18, 19: _from_v19, 20: _from_v20, 21: _from_v21,
-              22: _from_v22}
+              22: _from_v22, 23: _from_v23, 24: _from_v24}
 
 
 def upgrade(data):
@@ -397,6 +415,7 @@ def _load_life(result, data):
                         for item, count in data["converted"].items()}
     _load_anchor_powers(result, data)
     _load_night(result, data)
+    _load_walk(result, data)
     if type(data["unlocked"]) is not list or any(u not in UNLOCKS for u in data["unlocked"]) \
             or len(set(data["unlocked"])) != len(data["unlocked"]):
         raise ValueError("invalid unlocks")
@@ -469,6 +488,10 @@ def _load_anchor_powers(result, data):
     result.opening = data["opening"]
 
 
+HUNT_FIELDS = ("mode", "since", "ax", "ay", "ox", "oy", "left")   # combat._row
+HUNT_MODES = ("hunt", "windup", "charge", "recover", "retreat", "flee")
+
+
 def _load_night(result, data):
     """The night clock and the enemies hunting the avatar."""
     result.night_tick = integer(data["night_tick"], "night tick", 0,
@@ -478,10 +501,25 @@ def _load_night(result, data):
         raise ValueError("invalid hunting enemies")
     result.hunting = {}
     for ident, row in hunting.items():
-        fields(row, ("mode", "since"))
-        if ident not in result.game.targets or row["mode"] not in ("hunt", "flee"):
+        fields(row, HUNT_FIELDS)
+        if ident not in result.game.targets or row["mode"] not in HUNT_MODES:
             raise ValueError("invalid hunting enemy")
-        result.hunting[ident] = {"mode": row["mode"], "since": integer(row["since"], "hunt start", 0, result.total_ms)}
+        result.hunting[ident] = {"mode": row["mode"], "since": integer(row["since"], "hunt start", 0, result.total_ms),
+                                 **{k: integer(row[k], f"hunt {k}") for k in HUNT_FIELDS[2:]}}
+
+
+def _load_walk(result, data):
+    """Walking XP remainders: below one XP's worth of tiles or cells each."""
+    fields(data["walk"], WALK_KEYS)
+    result.walk = {key: integer(data["walk"][key], f"walk {key}", 0, WALK_RATES[key] - 1) for key in WALK_KEYS}
+    paid = data["fight_paid"]
+    if type(paid) is not dict:
+        raise ValueError("invalid fight XP")
+    result.fight_paid = {}
+    for ident, row in paid.items():
+        if ident not in result.game.targets or type(row) is not list or len(row) != 2:
+            raise ValueError("invalid fight XP")
+        result.fight_paid[ident] = [integer(row[0], "fight XP", 0), integer(row[1], "fight XP", 0)]
 
 
 def _load_camp(result, data):
@@ -625,7 +663,7 @@ def _load_plan(result, data):
     goal = data["goal"]
     if goal is not None:
         fields(goal, ("kind", "id", "x", "y"))
-        if goal["kind"] not in ("spot", "target", "wander", "home"):
+        if goal["kind"] not in ("spot", "target", "wander", "home", "dodge"):
             raise ValueError("invalid goal")
         integer(goal["x"], "goal x")
         integer(goal["y"], "goal y")
@@ -664,6 +702,7 @@ class SavesMixin:
                 "possess_drain_duration_ms": self.possess_drain_duration_ms,
                 "opening": self.opening, "night_tick": self.night_tick,
                 "hunting": {k: dict(v) for k, v in sorted(self.hunting.items())},
+                "walk": dict(self.walk), "fight_paid": {k: list(v) for k, v in sorted(self.fight_paid.items())},
                 "monster_ms": self.monster_ms,
                 "budget": dict(self.budget), "spawned": dict(self.spawned),
                 "admitted": sorted([i, e] for i, e in self.admitted.items()), "screened_chunks": sorted(self.screened_chunks),

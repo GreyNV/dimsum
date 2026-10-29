@@ -13,7 +13,7 @@ from dimensional_sim.world import drops, effects
 from dimensional_sim.world.actions import Context, spot_shares, spot_tiers
 from dimensional_sim.world.encounters import roll_loot
 from dimensional_sim.world.autopilot import Expedition
-from dimensional_sim.world.catalog import (
+from dimensional_sim.world.catalog import (FIGHT_TIERS,
     ACTIONS, BIOMES, BY_ID, CATEGORY_STYLES, DROP_TABLES, ENEMIES, ITEMS, UNLOCKS, DropTable, Effect,
     EnemyDef, Pick, validate_catalog)
 from dimensional_sim.world.models import ChunkKey
@@ -98,7 +98,7 @@ class EnemyAndBiomeTests(unittest.TestCase):
         boar = ENEMIES["bramble_boar"]
         stronger = replace(boar, hit=boar.hit * 2)
         self.assertGreater(e.enemy_hit(key, stronger), e.enemy_hit(key, boar))
-        self.assertEqual(e.enemy_hp(BY_ID["bramble_boar"], key), BY_ID["bramble_boar"].hp + 2)
+        self.assertEqual(e.enemy_hp(BY_ID["bramble_boar"], key), BY_ID["bramble_boar"].hp)
 
     def test_a_new_enemy_on_the_fight_spot_changes_combat_and_frontier(self):
         e = expedition()
@@ -126,15 +126,30 @@ class EnemyAndBiomeTests(unittest.TestCase):
             self.assertEqual(e.target_action(target_id), fight)
             self.assertEqual(e.enemy_of(target), wolf)
 
-    def test_biome_danger_curve_is_data(self):
+    def test_enemy_numbers_are_fixed_in_a_land_and_rings_only_bring_stars_and_company(self):
         e = expedition()
         boar = ENEMIES["bramble_boar"]
         near, far = e.enemy_hit(ChunkKey("forest", 0, 0), boar), e.enemy_hit(ChunkKey("forest", 5, 0), boar)
-        self.assertGreater(far, near)
-        flat = replace(BIOMES["dark_forest"], danger_num=1, danger_den=1, hp_per_ring=0)
-        with patch.dict(BIOMES, dark_forest=flat):
-            self.assertEqual(e.enemy_hit(ChunkKey("forest", 5, 0), boar), near)
-            self.assertEqual(e.enemy_hp(BY_ID["bramble_boar"], ChunkKey("forest", 5, 0)), BY_ID["bramble_boar"].hp)
+        self.assertEqual(far, near, "a boar bites the same anywhere in the forest")
+        self.assertEqual(e.enemy_hp(BY_ID["bramble_boar"], ChunkKey("forest", 5, 0)), BY_ID["bramble_boar"].hp)
+        harder = replace(BIOMES["dark_forest"], hit_percent=200, hp_percent=150)
+        with patch.dict(BIOMES, dark_forest=harder):   # a later land: harder everywhere, not deeper
+            self.assertGreater(e.enemy_hit(ChunkKey("forest", 0, 0), boar), near)
+        star, elder = FIGHT_TIERS["star"], FIGHT_TIERS["elder"]
+        self.assertGreater(e.enemy_hit(ChunkKey("forest", 0, 0), boar, elder), e.enemy_hit(ChunkKey("forest", 0, 0), boar, star))
+        self.assertGreater(e.enemy_hp(BY_ID["bramble_boar"], ChunkKey("forest", 0, 0), star), BY_ID["bramble_boar"].hp)
+        # tiers and company are pure rolls by spot and ring: none near the anchor, more deeper in
+        counts = {ring: [0, 0] for ring in (1, 3, 6)}
+        for ring in counts:
+            for i in range(600):
+                ident = f"enc:forest:{ring}:0:{i}"
+                counts[ring][0] += e.tier_of(ident).id != "common"
+                counts[ring][1] += e.company(ident)
+            self.assertEqual(e.tier_of(f"enc:forest:{ring}:0:7"), e.tier_of(f"enc:forest:{ring}:0:7"))
+        self.assertEqual(counts[1], [0, 0])
+        self.assertLess(counts[3][0], counts[6][0])
+        self.assertLess(counts[3][1], counts[6][1])
+        self.assertEqual(e.tier_of("enc:forest:6:0:1.c1").id, "common", "company is always common")
 
     def test_frames_name_and_draw_enemies_from_the_catalog(self):
         from dimensional_sim.world.session import snapshot

@@ -211,7 +211,7 @@ class WorldRepository:
 
     def to_dict(self):
         data = {
-            "schema_version": {1: 1, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7, 7: 8}.get(self.generator_version, WORLD_SCHEMA_VERSION),
+            "schema_version": WORLD_SCHEMA_OF_GENERATOR[self.generator_version],
             "generator_version": self.generator_version,
             "world_seed": self.world_seed,
             "cache_limit": self.cache_limit,
@@ -245,22 +245,13 @@ class WorldRepository:
         if type(data) is not dict or type(data.get("schema_version")) is not int:
             raise ValueError("unsupported world schema")
         schema = data["schema_version"]
-        if schema not in (1, 2, 3, 4, 5, 6, 7, 8, WORLD_SCHEMA_VERSION):
+        if schema not in GENERATOR_OF_WORLD_SCHEMA:
             raise ValueError("unsupported world schema")
-        required = ("schema_version", "generator_version", "world_seed", "cache_limit",
-                    "dimensions", "catalog", "catalog_digest", "discovery")
-        if schema >= 2:
-            required += ("region_catalog", "region_catalog_digest")
-        if schema >= 3:
-            required += ("region_version",)
-        if schema >= 6:
-            required += ("site_catalog", "site_catalog_digest")
-        if schema >= 8:
-            required += ("land_catalog", "land_catalog_digest")
-        fields(data, required)
+        fields(data, _BASE_FIELDS + tuple(name for since, names in _ADDED_FIELDS if schema >= since
+                                          for name in names))
         if (type(data["generator_version"]) is not int or
                 data["generator_version"] not in SUPPORTED_GENERATOR_VERSIONS or
-                data["generator_version"] != {1: 1, 2: 2, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7, 9: 8}[schema]):
+                data["generator_version"] != GENERATOR_OF_WORLD_SCHEMA[schema]):
             raise ValueError("unsupported generator version")
         if any(type(data[name]) is not list for name in ("dimensions", "catalog", "discovery")):
             raise ValueError("world collections must be arrays")
@@ -273,56 +264,21 @@ class WorldRepository:
                 raise ValueError("dimension biomes must be an array")
             dimensions.append(DimensionSpec(**{**raw, "biomes": tuple(raw["biomes"])}))
         catalog = tuple(asset_from_dict(raw) for raw in data["catalog"])
-        region_catalog = None
-        if schema >= 2:
-            from .catalog import RegionDef
-            if type(data["region_catalog"]) is not list or not data["region_catalog"]:
-                raise ValueError("region catalog must be a nonempty array")
-            try:
-                regions = [RegionDef(**raw) for raw in data["region_catalog"]]
-            except (TypeError, ValueError) as exc:
-                raise ValueError("invalid pinned region catalog") from exc
-            region_catalog = {r.id: r for r in regions}
-            if len(region_catalog) != len(regions):
-                raise ValueError("duplicate pinned region")
-        site_catalog = None
-        if schema >= 6:
-            from .catalog import SiteDef
-            if type(data["site_catalog"]) is not list:
-                raise ValueError("site catalog must be an array")
-            try:
-                sites = [SiteDef(**{**raw, "spots": tuple(raw["spots"]), "size": tuple(raw["size"]),
-                                    "weights": dict(raw["weights"])}) for raw in data["site_catalog"]]
-            except (TypeError, ValueError, KeyError) as exc:
-                raise ValueError("invalid pinned site catalog") from exc
-            site_catalog = {s.id: s for s in sites}
-            if len(site_catalog) != len(sites):
-                raise ValueError("duplicate pinned site")
-        land_catalog = None
-        if schema >= 8:
-            from .catalog import LandDef
-            if type(data["land_catalog"]) is not list:
-                raise ValueError("land catalog must be an array")
-            try:
-                lands = [LandDef(**raw) for raw in data["land_catalog"]]
-            except (TypeError, ValueError) as exc:
-                raise ValueError("invalid pinned land catalog") from exc
-            land_catalog = {land.dimension: land for land in lands}
-            if len(land_catalog) != len(lands):
-                raise ValueError("duplicate pinned land")
+        pinned = {name: _pinned(data[f"{name}_catalog"], name, build, key_of, allow_empty=allow_empty,
+                                errors=errors) if schema >= since else None
+                  for name, since, build, key_of, allow_empty, errors in _pinned_catalogs()}
         result = cls(data["world_seed"], tuple(dimensions), catalog, data["cache_limit"],
-                     generator_version=data["generator_version"], region_catalog=region_catalog,
-                     site_catalog=site_catalog, land_catalog=land_catalog,
+                     generator_version=data["generator_version"], region_catalog=pinned["region"],
+                     site_catalog=pinned["site"], land_catalog=pinned["land"],
                      region_version=integer(data["region_version"], "region version", 2, 3)
                      if schema >= 3 else 1)
         if data["catalog_digest"] != result.catalog_digest:
             raise ValueError("world catalog digest mismatch")
-        if schema >= 2 and data["region_catalog_digest"] != result.region_catalog_digest:
-            raise ValueError("world region catalog digest mismatch")
-        if schema >= 6 and data["site_catalog_digest"] != result._generator.site_catalog_digest:
-            raise ValueError("world site catalog digest mismatch")
-        if schema >= 8 and data["land_catalog_digest"] != result._generator.land_catalog_digest:
-            raise ValueError("world land catalog digest mismatch")
+        digests = {"region": result.region_catalog_digest, "site": result._generator.site_catalog_digest,
+                   "land": result._generator.land_catalog_digest}
+        for name, since, *_ in _pinned_catalogs():
+            if schema >= since and data[f"{name}_catalog_digest"] != digests[name]:
+                raise ValueError(f"world {name} catalog digest mismatch")
         for raw in data["discovery"]:
             fields(raw, ("dimension", "x", "y", "status", "biome"))
             key = result._key(ChunkKey(raw["dimension"], raw["x"], raw["y"]))
@@ -332,3 +288,42 @@ class WorldRepository:
                 raise ValueError("discovery biome does not match pinned world")
             result._discovery[key] = (raw["status"], raw["biome"])
         return result
+
+
+# ----- world save schemas ---------------------------------------------------------
+# The generator each world schema was written by: a save is replayed by exactly that one.
+GENERATOR_OF_WORLD_SCHEMA = {1: 1, 2: 2, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7, 9: 8}
+# The schema a world is written in: the newest one its generator wrote (generator 2 wrote 2, then 3).
+WORLD_SCHEMA_OF_GENERATOR = {generator: max(s for s, g in GENERATOR_OF_WORLD_SCHEMA.items() if g == generator)
+                             for generator in set(GENERATOR_OF_WORLD_SCHEMA.values())}
+assert max(GENERATOR_OF_WORLD_SCHEMA) == WORLD_SCHEMA_VERSION, "a new world schema needs its generator here"
+_BASE_FIELDS = ("schema_version", "generator_version", "world_seed", "cache_limit",
+                "dimensions", "catalog", "catalog_digest", "discovery")
+_ADDED_FIELDS = ((2, ("region_catalog", "region_catalog_digest")), (3, ("region_version",)),
+                 (6, ("site_catalog", "site_catalog_digest")), (8, ("land_catalog", "land_catalog_digest")))
+
+
+def _pinned_catalogs():
+    """(name, first world schema, build one entry, its key, may be empty, build errors) per pinned catalog."""
+    from .catalog import LandDef, RegionDef, SiteDef
+
+    def site(raw):
+        return SiteDef(**{**raw, "spots": tuple(raw["spots"]), "size": tuple(raw["size"]),
+                          "weights": dict(raw["weights"])})
+    return (("region", 2, lambda raw: RegionDef(**raw), lambda r: r.id, False, (TypeError, ValueError)),
+            ("site", 6, site, lambda s: s.id, True, (TypeError, ValueError, KeyError)),
+            ("land", 8, lambda raw: LandDef(**raw), lambda land: land.dimension, True, (TypeError, ValueError)))
+
+
+def _pinned(raws, name, build, key_of, *, allow_empty, errors):
+    """One catalog pinned in a world save, keyed and checked for duplicates."""
+    if type(raws) is not list or (not allow_empty and not raws):
+        raise ValueError(f"{name} catalog must be {'an' if allow_empty else 'a nonempty'} array")
+    try:
+        entries = [build(raw) for raw in raws]
+    except errors as exc:
+        raise ValueError(f"invalid pinned {name} catalog") from exc
+    table = {key_of(entry): entry for entry in entries}
+    if len(table) != len(entries):
+        raise ValueError(f"duplicate pinned {name}")
+    return table

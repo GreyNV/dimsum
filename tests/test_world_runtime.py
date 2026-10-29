@@ -174,7 +174,7 @@ class RuntimeTests(unittest.TestCase):
         custom = exploration(animations=clips)
         custom.targets["far"] = Target("far", custom.player.chunk, 4, 1)
         custom.advance(70, InputCommand(attack=True))
-        self.assertEqual(custom.targets["far"].hp, 2)
+        self.assertEqual(custom.targets["far"].hp, 2, "the frame's hitbox metadata lengthens the blow")
 
     def test_enemy_hp_survives_eviction_and_reentry(self):
         game = exploration()
@@ -277,6 +277,11 @@ class RuntimeTests(unittest.TestCase):
         game.targets["far"] = Target("far", game.player.chunk, 4, 0)
         game.advance(130, InputCommand(attack=True))
         data = game.to_dict()
+        far = next(t for t in data["targets"] if t["id"] == "far")
+        asset = game.current_chunk().asset
+        far["x"], far["y"] = max(((x, y) for y in range(asset.height) for x in range(asset.width)
+                                  if not asset.collision[y][x]), key=lambda c: (c[0] - 4) ** 2 + (c[1] - 3) ** 2)
+        self.assertGreater((far["x"] - 4) ** 2 + (far["y"] - 3) ** 2, 12, "out of any weapon's circle")
         data["hit_targets"] = ["far"]
         with self.assertRaises(ValueError):
             Exploration.from_dict(data)

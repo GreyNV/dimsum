@@ -95,14 +95,18 @@ class PlanningMixin:
             return False
         if g["kind"] == "spot":
             return g["id"] not in self.completed and self._spot_by_id(g["id"]) is not None
-        if g["kind"] == "target":
+        if g["kind"] in ("target", "dodge"):
             t = self.game.targets.get(g["id"])
-            return t is not None and t.hp > 0 and self.game.world.peek(t.chunk) is not None
+            if t is None or t.hp <= 0 or self.game.world.peek(t.chunk) is None:
+                return False
+            if g["kind"] == "target":   # enemies move now (charge, retreat): follow where it is
+                g["x"], g["y"] = self._global(t.chunk, t.x, t.y)
+            return True
         return True
 
     def _goal_cells(self, goal):
         """Cells that count as arriving at the goal (home crosses chunks stepwise)."""
-        if goal["kind"] == "wander":
+        if goal["kind"] in ("wander", "dodge"):
             return {(goal["x"], goal["y"])}
         if goal["kind"] == "target":   # anywhere a blow reaches it from
             return self.strike_cells(goal["x"], goal["y"])

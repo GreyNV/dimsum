@@ -135,7 +135,7 @@ class NightSpawnTests(unittest.TestCase):
         self.assertNotIn(wolf["id"], e.game.targets)
         self.assertIn("slinks back", e.log[-1]["text"])
 
-    def test_wolf_bites_a_resting_avatar_inside_camp_and_scales_with_life_depth(self):
+    def test_wolf_bites_a_resting_avatar_inside_camp_and_never_grows_with_life_depth(self):
         e = started()
         e.depth = 3
         e.total_ms = NIGHTFALL
@@ -149,9 +149,9 @@ class NightSpawnTests(unittest.TestCase):
         lead = wolves(e)[0]
         e._settle()
         target = e.game.targets[lead["id"]]
-        shallow = e.enemy_hit(target.chunk, ENEMIES["wolf"])
+        deep = e.enemy_hit(target.chunk, ENEMIES["wolf"])
         e.depth = 0
-        self.assertGreater(shallow, e.enemy_hit(target.chunk, ENEMIES["wolf"]))
+        self.assertEqual(deep, e.enemy_hit(target.chunk, ENEMIES["wolf"]), "fixed numbers: depth never grows a bite")
         e.depth = 3
         px, py = e._player()
         target.chunk = e.game.player.chunk
@@ -160,8 +160,13 @@ class NightSpawnTests(unittest.TestCase):
         before = e.health
         e.monster_ms = 300
         e._pursue()
-        self.assertLess(e.health, before)
+        self.assertEqual(e.hunting[lead["id"]]["mode"], "windup", "the wolf's tell comes first")
         self.assertIsNone(e.task, "the raid interrupts rest")
+        for _ in range(4):   # the lunge lands after its wind-up unless the avatar steps away
+            e.total_ms += 300
+            e.monster_ms = 300
+            e._pursue()
+        self.assertLess(e.health, before)
 
     def test_cornered_at_the_camp_the_avatar_fights_back_and_never_heals_through_bites(self):
         """Regression: badly hurt at the camp, a wolf alongside, the auto-pilot kept "retreating"

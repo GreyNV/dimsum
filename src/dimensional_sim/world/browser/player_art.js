@@ -7,7 +7,8 @@
 import {TILE_W, TILE_H} from './view.js';
 import {setupText} from './art.js';
 import {ACTOR_FOOT, FACING_ANGLE, OUTLINE, ROLE, drawShadow} from './sprites.js';
-import {HERO, drawPainted, heroCanvas} from './painted.js';
+import {HERO, HERO_H, drawPainted} from './painted.js';
+import {travellerCanvas} from './traveller_art.js';
 
 /** Bare-handed punch from server metadata: active frame = strike; otherwise windup
  * until the active frame has been observed for this attack, then recover.
@@ -58,7 +59,7 @@ export function pixelPlayerPose(player, reducedMotion = false) {
   const frame = reducedMotion ? 0 : Math.floor(player.animation_ms / (player.animation === 'run' ? 90 : 130)) % 4;
   const stride = moving ? [0, 1, 0, -1][frame] : 0;
   const breathe = !moving && !reducedMotion && Math.floor(player.animation_ms / 450) % 4 === 2 ? 1 : 0;
-  return {facing, moving, stride, breathe};
+  return {facing, moving, stride, breathe, frame: moving ? frame : 0, run: player.animation === 'run'};
 }
 
 /** Pixel-player art unit: one logical art pixel is 2x2 world px. */
@@ -242,7 +243,7 @@ export function drawWeapon(ctx, weapon, pose) {
 
 /** (x, y) is the tile-center position of the player in world pixels. `activity` is
  * the server's current encounter activity (or null); `clock` animates its pose. */
-export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null, clock = 0, reducedMotion = false, weapon = null} = {}) {
+export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null, clock = 0, reducedMotion = false, weapon = null, worn = {}, running = false} = {}) {
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
   const pose = activity && player.animation !== 'attack' ? (activity.pose ?? POSE[activity.kind]) : null;
@@ -287,9 +288,10 @@ export function drawPlayer(ctx, player, x, y, phase = 'windup', {activity = null
   const hands = pose === 'crouch' ? workingHands(activity, player.facing, x, y, clock, reducedMotion) : null;
   if (hands?.behind) for (const arm of hands.arms) drawFist(ctx, ...arm);   // seen from behind
   const look = pixelPlayerPose(player, reducedMotion);
-  const painted = heroCanvas(look.facing, look.stride, look.breathe, compact);
+  if (running && look.moving) look.run = true;
+  const painted = travellerCanvas(look, {low: compact ? pose : null, worn});
   const stamp = painted ? null : pixelPlayerStamp(player, compact, reducedMotion);
-  if (painted) drawPainted(ctx, painted, left, top);
+  if (painted) drawPainted(ctx, painted, left, y + ACTOR_FOOT - HERO_H + bob + ly);   // the full frame, feet on the ground
   else if (stamp) { ctx.imageSmoothingEnabled = false; ctx.drawImage(stamp, left, top); }
   else paintPixelPlayer(ctx, player, left, top, {compact, reducedMotion});
   if (fist && !fistBehind) drawFist(ctx, ...fist);

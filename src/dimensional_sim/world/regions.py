@@ -72,23 +72,11 @@ def region_for(world_seed, biome, key, catalog=None, *, version=REGION_VERSION):
 # tile belongs to the nearest site after its coordinates are bent by two octaves of
 # integer value noise. Borders become curved and ragged, independent of chunk edges,
 # while the anchor stays on the Old Road. Pure integer math, cached, order-independent.
-from functools import lru_cache  # noqa: E402
+from .noise import bilinear as _noise  # noqa: E402
 
 WARP = ((24, 16), (7, 5))       # (lattice scale in tiles, max displacement in tiles)
 JITTER_PERCENT = (20, 80)       # site position range inside its cell, per axis
-
-
-@lru_cache(maxsize=65536)
-def _lattice(seed, label, x, y):
-    return derive_seed(seed, label, x, y) % 101
-
-
-def _noise(seed, x, y, scale, label):
-    qx, rx = divmod(x, scale)
-    qy, ry = divmod(y, scale)
-    a, b = _lattice(seed, label, qx, qy), _lattice(seed, label, qx + 1, qy)
-    c, d = _lattice(seed, label, qx, qy + 1), _lattice(seed, label, qx + 1, qy + 1)
-    return ((a * (scale - rx) + b * rx) * (scale - ry) + (c * (scale - rx) + d * rx) * ry) // (scale * scale)
+_WARP_LABELLED = tuple((scale, amp, f"warp-x-{scale}", f"warp-y-{scale}") for scale, amp in WARP)
 
 
 class RegionField:
@@ -124,9 +112,9 @@ class RegionField:
     def at(self, gx, gy):
         """RegionDef owning global tile (gx, gy)."""
         wx, wy = gx, gy
-        for scale, amp in WARP:
-            wx += (_noise(self.seed, gx, gy, scale, f"warp-x-{scale}") - 50) * amp // 50
-            wy += (_noise(self.seed, gx, gy, scale, f"warp-y-{scale}") - 50) * amp // 50
+        for scale, amp, label_x, label_y in _WARP_LABELLED:
+            wx += (_noise(self.seed, gx, gy, scale, label_x) - 50) * amp // 50
+            wy += (_noise(self.seed, gx, gy, scale, label_y) - 50) * amp // 50
         cx, cy = wx // self.cw, wy // self.ch
         best = None
         for ny in (cy - 1, cy, cy + 1):

@@ -9,28 +9,10 @@ retains the exact v1 decisions for worlds pinned to generator v1.
 """
 from collections import deque
 from dataclasses import replace
-from functools import lru_cache
 
 from .models import Cell, ChunkAsset, DELTAS, Exit, Spawn, validate_asset
+from .noise import bilinear as _noise, smooth as _smooth_noise
 from .seeds import derive_seed
-
-
-@lru_cache(maxsize=8192)
-def _lattice(seed, label, x, y):
-    # Bounded value memoization changes cost only, never generation output.
-    return derive_seed(seed, label, x, y) % 101
-
-
-def _noise(seed, x, y, scale, label):
-    """Bilinear integer lattice noise, including negative global coordinates."""
-    qx, rx = divmod(x, scale)
-    qy, ry = divmod(y, scale)
-    a = _lattice(seed, label, qx, qy)
-    b = _lattice(seed, label, qx + 1, qy)
-    c = _lattice(seed, label, qx, qy + 1)
-    d = _lattice(seed, label, qx + 1, qy + 1)
-    return ((a * (scale - rx) + b * rx) * (scale - ry) +
-            (c * (scale - rx) + d * rx) * ry) // (scale * scale)
 
 
 def boundary_exits(collision):
@@ -174,23 +156,6 @@ def compose_open(source, spec, key, seed, *, region=None, region_grid=None, wate
     return replace(source, environment=tuple(env), objects=tuple(objects),
                    collision=tuple(map(tuple, collision)), exits=boundary_exits(collision),
                    spawns=tuple(spawns))
-
-
-def _smooth_noise(seed, x, y, scale, label):
-    """Value noise with smoothstep blending (integer maths, so every platform agrees): round,
-    organic blobs instead of the diamond lattice bilinear blending shows at large scales."""
-    qx, rx = divmod(x, scale)
-    qy, ry = divmod(y, scale)
-    cube = scale ** 3
-    wx = rx * rx * (3 * scale - 2 * rx)          # smoothstep(rx / scale) * scale^3
-    wy = ry * ry * (3 * scale - 2 * ry)
-    a = _lattice(seed, label, qx, qy)
-    b = _lattice(seed, label, qx + 1, qy)
-    c = _lattice(seed, label, qx, qy + 1)
-    d = _lattice(seed, label, qx + 1, qy + 1)
-    top = a * (cube - wx) + b * wx
-    bottom = c * (cube - wx) + d * wx
-    return (top * (cube - wy) + bottom * wy) // (cube * cube)
 
 
 def _grove_block(seed, gx, gy, canopy):

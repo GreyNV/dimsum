@@ -71,7 +71,7 @@ ELDER_LINES = (
 LOG_TYPES = ("encounter", "eat", "rest", "life", "possess", "night", "lore", "trade", "ambush",
              "craft", "reflect", "purchase", "rebirth", "build", "stow", "story")
 TASK_TYPES = ("perform", "pause", "rest", *SELF_ACTIONS, *PROLOGUE_MS)
-SCHEMA_VERSION = 23                # 23: encounter v12; 22: location mastery and camps; 21: reusable possession charge
+SCHEMA_VERSION = 25                # 25: walking XP remainders; 24: fight patterns (hunt rows, dodge goals); 23: encounter v12; 22: location mastery and camps; 21: reusable possession charge
 
 
 def attribute_table():

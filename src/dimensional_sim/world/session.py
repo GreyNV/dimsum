@@ -104,9 +104,10 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual",
     if expedition is not None:
         kinds = expedition.target_kinds()
         for t in targets:   # how to draw and name each enemy (catalog EnemyDef)
-            enemy = ENEMIES[BY_ID[kinds[t["id"]]].enemy]
-            t["name"], t["sprite"], t["sound_profile"] = enemy.name, enemy.sprite, enemy.sound_profile
-            t["hunting"] = expedition.hunting.get(t["id"], {}).get("mode")   # "hunt" | "flee" | None
+            enemy, tier = ENEMIES[BY_ID[kinds[t["id"]]].enemy], expedition.tier_of(t["id"])
+            t["name"] = f"{tier.title} {enemy.name.lower()}" if tier.title else enemy.name
+            t["sprite"], t["tier"], t["sound_profile"] = enemy.sprite, tier.mark, enemy.sound_profile   # "" | "★" | "★★"
+            t["hunting"] = expedition.hunting.get(t["id"], {}).get("mode")   # a fight-pattern mode (hunt, windup, charge, recover, retreat), "flee" or None
         frame_extra = {"spots": [] if in_anchor else expedition.visible_spots(),
                        "target_kinds": {t["id"]: kinds[t["id"]] for t in targets},
                        "expedition": _expedition_view(expedition, control, debug=debug, detail=detail)}
@@ -173,6 +174,7 @@ def _expedition_view(e, control, *, debug, detail):
             "control": control, "possession": e.possession(), "clock": e.clock_view(),
             "attack_radius": e.attack().reach,
             "weapon": _weapon_view(e),
+            "worn": {slot: item for slot, item in sorted(e.equipped.items()) if slot != "weapon"},   # gear layers (traveller_art.js)
             "auto_target": unarmed_target[1] if unarmed_target else None,
             "skill_slots": _skill_slots(e, shop_open),
             "campfire": None if in_anchor or e.campfire is None or e.campfire["dimension"] != e.dimension

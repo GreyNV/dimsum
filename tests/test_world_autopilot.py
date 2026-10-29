@@ -9,7 +9,7 @@ from dimensional_sim.core import new_demo_game
 from dimensional_sim.world import autopilot as ap
 from dimensional_sim.world.autopilot import Expedition
 from dimensional_sim.world.browser_server import BrowserSession
-from dimensional_sim.world.catalog import BY_ID, ITEMS, ItemDef, Loot
+from dimensional_sim.world.catalog import FIGHT_TIERS, BY_ID, ITEMS, ItemDef, Loot
 from dimensional_sim.world.encounters import DARK_FOREST, chunk_spots, roll_loot, validate_pools
 from dimensional_sim.world.catalog import ENEMIES, REGIONS, UNLOCKS
 from dimensional_sim.world.models import DELTAS, DIRECTIONS, ChunkKey, DimensionSpec
@@ -68,7 +68,7 @@ class CatalogTests(unittest.TestCase):
         validate_pools()
         self.assertEqual({a.id for a in DARK_FOREST}, {a.id for a in BY_ID.values() if a.placement == "spot"})
         good = DARK_FOREST[0]
-        for change in ({"attribute": "charisma"}, {"category": "smithing"}, {"xp": -1}, {"weight": 0},
+        for change in ({"attribute": "charisma"}, {"category": "smithing"}, {"xp": -2}, {"weight": 0},
                        {"near": "?"}, {"hp": 3}, {"log": ""}, {"loot": [Loot("stick", 1, 1)]}, {"heal": 101}):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 replace(good, **change)
@@ -191,10 +191,12 @@ class SurvivalTests(unittest.TestCase):
         goal = e._best_candidate(e._field({e._player()}))
         self.assertTrue(goal is None or goal["kind"] != "target")
 
-    def test_danger_rises_with_depth(self):
+    def test_a_bite_is_the_same_everywhere_but_deeper_fights_cost_more(self):
         e = expedition()
         near, far = boar_hit(e, ChunkKey("forest", 0, 1)), boar_hit(e, ChunkKey("forest", 4, -2))
-        self.assertGreater(far, near * 3)  # x1.5 per ring: ring 4 vs ring 1
+        self.assertEqual(far, near)   # fixed numbers in a land
+        boar = BY_ID["bramble_boar"]
+        self.assertGreater(e.fight_damage(6, boar), e.fight_damage(1, boar), "stars and company deeper in")
 
 
 class LifeTests(unittest.TestCase):
@@ -529,25 +531,44 @@ class PursuitTests(unittest.TestCase):
         self.assertEqual(e.log[-1]["type"], "ambush")
         self.assertEqual(dump(Expedition.from_dict(json.loads(dump(e)))), dump(e))
 
-    def test_boar_in_aggro_range_charges_and_bites_first(self):
+    def test_a_boar_in_range_winds_up_then_charges_and_the_charge_lands_if_the_avatar_stays(self):
         e = skip_prologue(expedition())
         ident = self._boar_at(e, 3)
         e.task = {"type": "think", "spot": None, "elapsed_ms": 0, "duration_ms": 60_000}
-        before = e.health
-        steps = []
-        for _ in range(3):
+        before, modes = e.health, []
+        for _ in range(6):
             e.monster_ms = ap.MONSTER_STEP_MS
             e._settle()
-            t = e.game.targets[ident]
-            gx, gy = e._global(t.chunk, t.x, t.y)
-            px, py = e._player()
-            steps.append(abs(gx - px) + abs(gy - py))
-            if e.goal and e.goal.get("id") == ident:
+            modes.append(e.hunting[ident]["mode"])
+            if e.health < before:
                 break
-        self.assertEqual(steps[0], 2)
-        self.assertEqual(steps[-1], 1)
+            e.total_ms += ap.MONSTER_STEP_MS
+        self.assertEqual(modes[0], "windup", "in range with a clear run: the tell comes first")
+        self.assertEqual(e.goal["id"], ident, "the avatar turns to the threat")
         self.assertEqual(e.strikes[ident], 1)
         self.assertEqual(e.health, before - boar_hit(e, e.game.targets[ident].chunk))
+        self.assertEqual(e.hunting[ident]["mode"], "recover", "after a strike it is open to blows")
+
+    def test_a_strike_misses_an_avatar_that_stepped_out_of_it(self):
+        e = skip_prologue(expedition())
+        ident = self._boar_at(e, 3)
+        e.task = {"type": "think", "spot": None, "elapsed_ms": 0, "duration_ms": 60_000}
+        e.monster_ms = ap.MONSTER_STEP_MS
+        e._settle()
+        row = e.hunting[ident]
+        self.assertEqual(row["mode"], "windup")
+        p = e.game.player
+        line = set(e._dash_cells(row["ox"], row["oy"], row["ax"], row["ay"], 6))
+        px, py = e._player()
+        side = next((x, y) for x, y in ((px, py - 1), (px, py + 1), (px - 1, py), (px + 1, py))
+                    if (x, y) not in line and e._walkable(e._grid(), x, y))
+        p.x, p.y = side[0] - p.chunk.x * e._dims()[0], side[1] - p.chunk.y * e._dims()[1]   # the player sidesteps
+        before = e.health
+        for _ in range(6):
+            e.total_ms += ap.MONSTER_STEP_MS
+            e.monster_ms = ap.MONSTER_STEP_MS
+            e._settle()
+        self.assertEqual(e.health, before, "the charge ran past")
 
     def test_boars_ignore_the_avatar_beyond_range_and_at_camp(self):
         e = skip_prologue(expedition())
@@ -566,7 +587,8 @@ class PursuitTests(unittest.TestCase):
     def test_too_hurt_to_win_runs_for_the_camp(self):
         e = skip_prologue(expedition())
         self._boar_at(e, 1)
-        e.health = e.fight_damage(e.ring(e.game.player.chunk), BY_ID["bramble_boar"]) + boar_hit(e, e.game.player.chunk)
+        e.health = e.fight_damage(e.ring(e.game.player.chunk), BY_ID["bramble_boar"], FIGHT_TIERS["common"]) \
+            + ap.VITAL_MAX // 4 - 1   # not a quarter of full health to spare after the fight
         e.monster_ms = ap.MONSTER_STEP_MS
         e._settle()
         self.assertEqual(e.goal["kind"], "home")

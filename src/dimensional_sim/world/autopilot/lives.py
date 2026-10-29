@@ -103,6 +103,8 @@ class LivesMixin:
         self.anchor_ms = ANCHOR_COUNTDOWN_MS
         self.anchor_wait = self.life == 1  # the first anchor dialogue waits to be read
         self.leads = []
+        self.hunting = {}   # the old life's hunters are gone with its world (a save would not load)
+        self.fight_paid = {}   # likewise the XP paid against them
         self.task = None
         self.goal = None
         self._field_cache.clear()

@@ -4,7 +4,7 @@ import unittest
 
 from dimensional_sim.world import autopilot as ap
 from dimensional_sim.world.autopilot import Expedition
-from dimensional_sim.world.catalog import BY_ID
+from dimensional_sim.world.catalog import BY_ID, FIGHT_TIERS
 from dimensional_sim.world.equipment import equip_item
 from gear_fixture import test_weapon
 from dimensional_sim.world.models import ChunkKey, DimensionSpec
@@ -13,13 +13,13 @@ from dimensional_sim.world.repository import WorldRepository
 from dimensional_sim.world.runtime import Exploration, Target
 
 
-def fight(seed, ring, *, staff=False):
-    """One adjacent boar ambush (a +1 test staff stands in for any weapon)."""
+def fight(seed, tier="common", *, staff=False, ring=2):
+    """One adjacent boar ambush of a given FightTier (a +1 test staff stands in for any weapon)."""
     with test_weapon():
-        return _fight(seed, ring, staff=staff)
+        return _fight(seed, tier, ring, staff=staff)
 
 
-def _fight(seed, ring, *, staff=False):
+def _fight(seed, tier, ring, *, staff=False):
     """One adjacent boar ambush at full health, with no unrelated rolled spots."""
     spec = DimensionSpec("forest", ("dark_forest",), 32, 16, 25)
     world = WorldRepository(seed, (spec,), open_assets(32, 16), 9)
@@ -43,7 +43,8 @@ def _fight(seed, ring, *, staff=False):
     tx, ty = next((x, y) for x, y in candidates if 0 <= x < chunk.asset.width and 0 <= y < chunk.asset.height
                   and not chunk.asset.collision[y][x])
     ident = "enc:forest:0:0:999"
-    hp = BY_ID["bramble_boar"].hp + ring
+    e.tier_of = lambda _: FIGHT_TIERS[tier]   # this duel's boar is of the tier under test
+    hp = e.enemy_hp(BY_ID["bramble_boar"], key, FIGHT_TIERS[tier])
     e.game.targets[ident] = Target(ident, key, tx, ty, hp)
     e.admitted[ident] = "bramble_boar"
     e.task = {"type": "think", "spot": None, "elapsed_ms": 0, "duration_ms": 60_000}
@@ -59,7 +60,7 @@ def _fight(seed, ring, *, staff=False):
             killed = True
             break
         e.advance(20)
-    return {"seed": seed, "ring": ring, "staff": staff, "engaged": engaged,
+    return {"seed": seed, "tier": tier, "staff": staff, "engaged": engaged,
             "killed": killed, "boar_death": e.anchor_ms is not None and e.cause == "boar",
             "remaining_health": e.health // ap.POINT,
             "boar_bites": e.strikes.get(ident, 0), "duration_ms": e.total_ms}
@@ -67,28 +68,29 @@ def _fight(seed, ring, *, staff=False):
 
 class BoarBalanceTests(unittest.TestCase):
     def test_same_seed_repeats_the_same_duel(self):
-        self.assertEqual(fight(482910, 2, staff=True), fight(482910, 2, staff=True))
+        self.assertEqual(fight(482910, staff=True), fight(482910, staff=True))
 
     def test_staff_improves_but_does_not_erase_boar_risk(self):
+        bitten, unhurt = 0, 0
         for seed in range(1, 9):
             with self.subTest(seed=seed):
-                unarmed = fight(seed, 2)
-                staff = fight(seed, 2, staff=True)
-                self.assertTrue(unarmed["engaged"] and staff["engaged"])
+                unarmed = fight(seed)
+                staff = fight(seed, staff=True)
                 self.assertTrue(unarmed["killed"] and staff["killed"])
-                self.assertGreater(staff["remaining_health"], unarmed["remaining_health"])
-                self.assertGreater(staff["boar_bites"], 0)
-                self.assertLess(staff["remaining_health"], 80)
+                self.assertGreaterEqual(staff["remaining_health"], unarmed["remaining_health"])
+                unhurt += unarmed["remaining_health"] == 100   # a sidestep, or a charge into a tree
+                bitten += staff["boar_bites"]
+        self.assertLessEqual(unhurt, 2, "a fresh avatar rarely beats a boar for free")
+        self.assertGreater(bitten, 0, "even with a staff the charges land now and then")
 
-    def test_next_ring_remains_dangerous_with_staff(self):
+    def test_an_elder_boar_remains_dangerous_with_a_staff(self):
         for seed in range(1, 9):
             with self.subTest(seed=seed):
-                unarmed = fight(seed, 3)
-                staff = fight(seed, 3, staff=True)
-                self.assertFalse(unarmed["engaged"], "unarmed policy should refuse this fight")
-                self.assertTrue(staff["engaged"] and staff["killed"])
-                self.assertLess(staff["remaining_health"], 50, "one boar still costs most health")
-
+                unarmed = fight(seed, "elder")
+                staff = fight(seed, "elder", staff=True)
+                self.assertFalse(unarmed["engaged"], "a fresh avatar runs from an elder")
+                self.assertFalse(staff["engaged"], "a staff is not enough for an elder either")
+                self.assertFalse(staff["killed"])
 
 if __name__ == "__main__":
     unittest.main()

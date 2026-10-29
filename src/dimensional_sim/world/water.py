@@ -10,9 +10,9 @@ The whole field is translated by a seed-chosen offset that keeps the anchor chun
 dry (the caravan wrecks never sit in a river). Pure integer math, no shared state:
 partition- and access-order independent like the rest of generation.
 """
-from functools import lru_cache
 from math import isqrt
 
+from .noise import bilinear
 from .seeds import derive_seed
 
 LEVEL = 50_000            # contour of the 0..100_000 field that becomes a river
@@ -21,23 +21,12 @@ DETAIL = 37               # second octave: bends and meanders
 WARP = ((29, 11), (11, 2))  # (scale, amplitude in tiles) of the domain warp
 HALF_WIDTH = (11, 23)     # tenths of a tile either side of the contour: ~2-5 tiles wide
 DRY_MARGIN = 6            # tiles around the anchor chunk kept free of water
-
-
-@lru_cache(maxsize=16384)
-def _lattice(seed, label, x, y):
-    return derive_seed(seed, label, x, y) % 101
+_WARP_LABELLED = tuple((scale, amp, f"warp-x-{scale}", f"warp-y-{scale}") for scale, amp in WARP)
 
 
 def _fine(seed, x, y, scale, label):
     """Bilinear lattice noise in 0..100_000 (fixed point, keeps a usable gradient)."""
-    qx, rx = divmod(x, scale)
-    qy, ry = divmod(y, scale)
-    a = _lattice(seed, label, qx, qy)
-    b = _lattice(seed, label, qx + 1, qy)
-    c = _lattice(seed, label, qx, qy + 1)
-    d = _lattice(seed, label, qx + 1, qy + 1)
-    return ((a * (scale - rx) + b * rx) * (scale - ry) +
-            (c * (scale - rx) + d * rx) * ry) * 1000 // (scale * scale)
+    return bilinear(seed, x, y, scale, label, 1000)
 
 
 class WaterField:
@@ -51,9 +40,9 @@ class WaterField:
 
     def _value(self, x, y):
         s = self.seed
-        for scale, amplitude in WARP:
-            x, y = (x + (_fine(s, x, y, scale, f"warp-x-{scale}") - 50_000) * amplitude // 50_000,
-                    y + (_fine(s, x, y, scale, f"warp-y-{scale}") - 50_000) * amplitude // 50_000)
+        for scale, amplitude, label_x, label_y in _WARP_LABELLED:
+            x, y = (x + (_fine(s, x, y, scale, label_x) - 50_000) * amplitude // 50_000,
+                    y + (_fine(s, x, y, scale, label_y) - 50_000) * amplitude // 50_000)
         return (_fine(s, x, y, SCALE, "river") * 6 + _fine(s, x, y, DETAIL, "bend")) // 7
 
     def _raw(self, x0, y0, w, h):

@@ -355,8 +355,8 @@ export function trailFade(cover, ax, ay) {
 export function canopyFade(dx, dy) {
   if (dy < -1 || dy > 6) return 1;
   const ax = Math.abs(dx);
-  if (ax <= 1.5 && dy <= 5) return .28;
-  if (ax <= 3 && dy <= 6) return .55;
+  if (ax <= 1.5 && dy <= 5) return .7;    // the avatar shows through a dotted opening instead (app.js dotHole)
+  if (ax <= 3 && dy <= 6) return .85;
   return 1;
 }
 /** Banks, then trees, rocks and structures mirrored in the water south of them. */

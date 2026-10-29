@@ -22,6 +22,12 @@ DIAGONALS = {"northeast": ("north", "east"), "southeast": ("south", "east"),
              "southwest": ("south", "west"), "northwest": ("north", "west")}
 MOVE_DIRECTIONS = DIRECTIONS + tuple(DIAGONALS)
 DIAGONAL_PERCENT = 141
+MAX_ATTACK_REACH = 3   # the longest weapon reach a save may claim a hit with (attack_reach is not saved)
+
+
+def frame_reach(frame):
+    """How far a striking frame's hitbox metadata reaches (cells; 1 for the plain punch)."""
+    return max((max(abs(x), abs(y)) for x, y in frame.hitbox), default=1)
 MAX_LOAD_PERCENT = 400   # carry load may stretch the movement interval up to 4x (owners cap it lower)
 MIN_LOAD_PERCENT = 50    # a speed boost (possession) may shorten it to half
 REVEAL_RADIUS = 5
@@ -74,7 +80,10 @@ def _target_id(key, spawn_id):
 class Exploration:
     """Own all mutable actor/input clocks; repository owns immutable world chunks."""
 
-    attack_reach = 1   # cells along the facing (the weapon); the owner sets it each step, never saved
+    attack_reach = 1   # radius of a blow in cells (the weapon); the owner sets it each step, never saved
+    moved_tiles = 0     # tiles walked and cells newly seen since the owner last read them (never saved;
+    revealed_cells = 0  # the expedition turns them into walking XP after every advance)
+    _walking = False
 
     def __init__(self, world, dimension=None, *, movement_interval_ms=120,
                  animation_rate_percent=100, attack_rate_percent=100,
@@ -123,8 +132,9 @@ class Exploration:
                     rows_of[cell] = None if self.world.status(key) == "unknown" else \
                         self.seen.setdefault(key, [0] * height)
                 rows = rows_of[cell]
-                if rows is not None:
+                if rows is not None and not rows[y % height] >> (x % width) & 1:
                     rows[y % height] |= 1 << (x % width)
+                    self.revealed_cells += self._walking
 
     def reveal_area(self, radius):
         """Remember every cell within `radius` tiles (a map-reading reward). Generates the
@@ -231,19 +241,43 @@ class Exploration:
                     if target.chunk.dimension == self.player.chunk.dimension and target.hp > 0:
                         live.setdefault((target.chunk.x * asset.width + target.x,
                                          target.chunk.y * asset.height + target.y), target)
-                for dx, dy in (rotate(p, self.player.facing) for p in frame.hitbox):
-                    # The frame's hitbox cell starts the line; a weapon extends it along the
-                    # facing. The first enemy in the line takes the blow; a wall stops it.
-                    for step in range(1, self.attack_reach + 1):
-                        cell = (px + dx * step, py + dy * step)
-                        target = live.get(cell)
-                        if target is not None:
-                            if target.id not in self.hit_targets:
-                                target.hp = max(0, target.hp - self.attack_damage)
-                                self.hit_targets.add(target.id)
-                            break
-                        if self.wall_at(*cell):
-                            break
+                self._strike(px, py, live, self.attack_reach + frame_reach(frame) - 1)
+
+    def _strike(self, px, py, live, reach):
+        """A blow lands on the nearest live enemy within a circle round the avatar (radius: the
+        weapon's reach plus half a cell, so fists reach all eight neighbours), in any direction,
+        unless a wall stands on the straight line between them. The avatar turns to face it.
+        `reach`: the weapon's reach, lengthened by the striking frame's hitbox metadata."""
+        radius2 = (2 * reach + 1) ** 2                  # (reach + .5)^2, times 4
+        best = None
+        for (tx, ty), target in live.items():
+            dx, dy = tx - px, ty - py
+            d2 = 4 * (dx * dx + dy * dy)
+            if d2 > radius2 or target.id in self.hit_targets or not self._open_line(px, py, tx, ty):
+                continue
+            if best is None or (d2, target.id) < best[0]:
+                best = ((d2, target.id), target, dx, dy)
+        if best is None:
+            return
+        _, target, dx, dy = best
+        target.hp = max(0, target.hp - self.attack_damage)
+        self.hit_targets.add(target.id)
+        self.player.facing = (("east" if dx > 0 else "west") if abs(dx) >= abs(dy)
+                              else ("south" if dy > 0 else "north"))
+
+    def _open_line(self, x0, y0, x1, y1):
+        """No wall on the cells strictly between (x0, y0) and (x1, y1) (supercover)."""
+        nx, ny = abs(x1 - x0), abs(y1 - y0)
+        sx, sy = (1 if x1 > x0 else -1), (1 if y1 > y0 else -1)
+        x, y, ix, iy = x0, y0, 0, 0
+        while ix < nx or iy < ny:
+            if iy >= ny or (ix < nx and (1 + 2 * ix) * ny < (1 + 2 * iy) * nx):
+                x += sx; ix += 1
+            else:
+                y += sy; iy += 1
+            if (x, y) != (x1, y1) and self.wall_at(x, y):
+                return False
+        return True
 
     def wall_at(self, gx, gy):
         """A cell a blow cannot pass: a blocking object (tree, rock, structure) or an
@@ -305,6 +339,17 @@ class Exploration:
         return self.step_interval_ms
 
     def _move(self, direction):
+        """One movement step; counts tiles actually walked (moved_tiles, read by the owner)."""
+        before = (self.player.chunk, self.player.x, self.player.y)
+        self._walking = True   # only ground revealed by walking counts (not a respawn or a load)
+        try:
+            self._move_once(direction)
+        finally:
+            self._walking = False
+        if (self.player.chunk, self.player.x, self.player.y) != before:
+            self.moved_tiles += 1
+
+    def _move_once(self, direction):
         self.player.facing = self.facing_for(direction, self.player.facing)
         start = (self.player.chunk, self.player.x, self.player.y)
         if direction not in DIAGONALS:
@@ -461,113 +506,143 @@ class Exploration:
             result.step_on_press = False
             result._configure(**data["config"], animations=animations_from_dict(data["animations"]))
             result.world = WorldRepository.from_dict(data["world"])
-            fields(data["player"], ("chunk", "x", "y", "facing", "animation", "animation_elapsed_ms"))
-            p = data["player"]
-            result.player = Player(_key(p["chunk"]), p["x"], p["y"], p["facing"],
-                                   p["animation"], p["animation_elapsed_ms"])
-            if p["facing"] not in DIRECTIONS or p["animation"] not in ("idle", "walk", "attack"):
-                raise ValueError("invalid player facing/animation")
-            integer(p["animation_elapsed_ms"], "animation elapsed", 0)
-            integer(data["elapsed_ms"], "simulation elapsed", 0)
-            integer(data["move_elapsed_ms"], "movement elapsed", 0,
-                    result.movement_interval_ms * MAX_LOAD_PERCENT // 100 * DIAGONAL_PERCENT // 100 - 1)
-            if p["animation_elapsed_ms"] > data["elapsed_ms"]:
-                raise ValueError("animation clock exceeds simulation")
-            if p["animation"] == "attack" and p["animation_elapsed_ms"] * result.attack_rate_percent >= result.animations["attack"].duration_ms * 100:
-                raise ValueError("completed attack cannot remain active")
-            if type(data["initialized_chunks"]) is not list or type(data["targets"]) is not list or type(data["hit_targets"]) is not list:
-                raise ValueError("actor collections must be arrays")
-            keys = [_key(k) for k in data["initialized_chunks"]]
-            if len(keys) != len(set(keys)) or result.player.chunk not in keys:
-                raise ValueError("invalid initialized chunk set")
-            result.initialized_chunks = set(keys)
-            if any(result.world.status(key) != "visited" for key in keys):
-                raise ValueError("actors require visited chunks")
-            result.targets = {}
-            for raw in data["targets"]:
-                fields(raw, ("id", "chunk", "x", "y", "hp"))
-                identifier(raw["id"], "target ID")
-                integer(raw["hp"], "target HP", 0, 1000000)
-                target = Target(raw["id"], _key(raw["chunk"]), raw["x"], raw["y"], raw["hp"])
-                if target.id in result.targets or target.chunk not in result.initialized_chunks:
-                    raise ValueError("duplicate target or unvisited target chunk")
-                result.targets[target.id] = target
-            generated_targets = set()
-            for key in keys:
-                for spawn in result.world.get(key).asset.spawns:
-                    if spawn.kind != "enemy":
-                        continue
-                    target_id = _target_id(key, spawn.id)
-                    generated_targets.add(target_id)
-                    target = result.targets.get(target_id)
-                    if target is None or (target.chunk, target.x, target.y) != (key, spawn.x, spawn.y) or target.hp > 3:
-                        raise ValueError("missing or modified generated target identity")
-            if any(t.id.startswith("spawn:") and t.id not in generated_targets for t in result.targets.values()):
-                raise ValueError("invented generated target")
-            for actor in [result.player, *result.targets.values()]:
-                asset = result.world.get(actor.chunk).asset
-                integer(actor.x, "actor x", 0, asset.width - 1)
-                integer(actor.y, "actor y", 0, asset.height - 1)
-                if asset.collision[actor.y][actor.x]:
-                    raise ValueError("actor inside blocking cell")
-            InputCommand(data["last_move"], data["attack_held"])
-            result.last_move, result.attack_held = data["last_move"], data["attack_held"]
-            result.elapsed_ms, result.move_elapsed_ms = data["elapsed_ms"], data["move_elapsed_ms"]
-            hits = data["hit_targets"]
-            if any(not isinstance(h, str) for h in hits) or len(hits) != len(set(hits)) or not set(hits) <= result.targets.keys():
-                raise ValueError("invalid hit target set")
-            if p["animation"] != "attack" and hits:
-                raise ValueError("inactive attack has hit targets")
-            if (result.last_move is None or p["animation"] == "attack") and result.move_elapsed_ms:
-                raise ValueError("inactive movement has partial clock")
-            elapsed_attack = p["animation_elapsed_ms"] * result.attack_rate_percent
-            active_positions = set()
-            for start, _, frame in result.animations["attack"].active_intervals():
-                if elapsed_attack >= start * 100:
-                    asset = result.world.get(result.player.chunk).asset
-                    active_positions.update((result.player.chunk.x * asset.width + result.player.x + dx,
-                                             result.player.chunk.y * asset.height + result.player.y + dy)
-                        for dx, dy in (rotate(point, p["facing"]) for point in frame.hitbox))
-            for target_id in hits:
-                target = result.targets[target_id]
-                asset = result.world.get(result.player.chunk).asset
-                position = (target.chunk.x * asset.width + target.x, target.chunk.y * asset.height + target.y)
-                if (target.chunk.dimension != result.player.chunk.dimension or position not in active_positions
-                        or (target_id in generated_targets and target.hp >= 3)):
-                    raise ValueError("impossible already-hit target")
-            result.hit_targets = set(hits)
+            _load_player(result, data)
+            keys = _load_actors(result, data)
+            generated_targets = _check_generated_targets(result, keys)
+            _check_actor_cells(result)
+            _load_attack(result, data, generated_targets)
             result.world.stream(result.player.chunk)
             result.world.get(result.player.chunk)
-            result.seen = {}
-            result.reveal_radius = REVEAL_RADIUS  # derived again by the expedition on its next step
-            if version == 1:
-                # Old saves revealed every visited chunk. Keep that progress on upgrade.
-                specs = {spec.id: spec for spec in result.world.dimensions}
-                for raw in data["world"]["discovery"]:
-                    if raw["status"] == "visited":
-                        key = ChunkKey(raw["dimension"], raw["x"], raw["y"])
-                        spec = specs[key.dimension]
-                        result.seen[key] = [(1 << spec.width) - 1] * spec.height
-            else:
-                if type(data["seen"]) is not list:
-                    raise ValueError("seen must be an array")
-                specs = {spec.id: spec for spec in result.world.dimensions}
-                for raw in data["seen"]:
-                    fields(raw, ("dimension", "x", "y", "rows"))
-                    key = ChunkKey(raw["dimension"], raw["x"], raw["y"])
-                    if key in result.seen or key.dimension not in specs or result.world.status(key) == "unknown":
-                        raise ValueError("invalid seen chunk")
-                    spec = specs[key.dimension]
-                    rows = raw["rows"]
-                    if type(rows) is not list or len(rows) != spec.height or any(
-                            type(row) is not str or len(row) != spec.width or set(row) - {"0", "1"}
-                            for row in rows):
-                        raise ValueError("invalid seen rows")
-                    result.seen[key] = [sum(1 << x for x, bit in enumerate(row) if bit == "1") for row in rows]
-                rows = result.seen.get(result.player.chunk)
-                if rows is None or not rows[result.player.y] & (1 << result.player.x):
-                    raise ValueError("player cell must be seen")
+            _load_seen(result, data, version)
+            result.moved_tiles = result.revealed_cells = 0   # building it walked and saw nothing
             return result
         except (KeyError, TypeError, AttributeError, StopIteration) as exc:
             raise ValueError("malformed exploration save") from exc
 
+
+def _load_player(result, data):
+    """The player and the clocks that run under it."""
+    fields(data["player"], ("chunk", "x", "y", "facing", "animation", "animation_elapsed_ms"))
+    p = data["player"]
+    result.player = Player(_key(p["chunk"]), p["x"], p["y"], p["facing"],
+                           p["animation"], p["animation_elapsed_ms"])
+    if p["facing"] not in DIRECTIONS or p["animation"] not in ("idle", "walk", "attack"):
+        raise ValueError("invalid player facing/animation")
+    integer(p["animation_elapsed_ms"], "animation elapsed", 0)
+    integer(data["elapsed_ms"], "simulation elapsed", 0)
+    integer(data["move_elapsed_ms"], "movement elapsed", 0,
+            result.movement_interval_ms * MAX_LOAD_PERCENT // 100 * DIAGONAL_PERCENT // 100 - 1)
+    if p["animation_elapsed_ms"] > data["elapsed_ms"]:
+        raise ValueError("animation clock exceeds simulation")
+    if p["animation"] == "attack" and p["animation_elapsed_ms"] * result.attack_rate_percent >= result.animations["attack"].duration_ms * 100:
+        raise ValueError("completed attack cannot remain active")
+
+
+def _load_actors(result, data):
+    """Initialized chunks and the targets standing in them; returns the chunk keys."""
+    if type(data["initialized_chunks"]) is not list or type(data["targets"]) is not list or type(data["hit_targets"]) is not list:
+        raise ValueError("actor collections must be arrays")
+    keys = [_key(k) for k in data["initialized_chunks"]]
+    if len(keys) != len(set(keys)) or result.player.chunk not in keys:
+        raise ValueError("invalid initialized chunk set")
+    result.initialized_chunks = set(keys)
+    if any(result.world.status(key) != "visited" for key in keys):
+        raise ValueError("actors require visited chunks")
+    result.targets = {}
+    for raw in data["targets"]:
+        fields(raw, ("id", "chunk", "x", "y", "hp"))
+        identifier(raw["id"], "target ID")
+        integer(raw["hp"], "target HP", 0, 1000000)
+        target = Target(raw["id"], _key(raw["chunk"]), raw["x"], raw["y"], raw["hp"])
+        if target.id in result.targets or target.chunk not in result.initialized_chunks:
+            raise ValueError("duplicate target or unvisited target chunk")
+        result.targets[target.id] = target
+    return keys
+
+
+def _check_generated_targets(result, keys):
+    """Every enemy spawn of an initialized chunk has its target, unmoved before it is hit; returns their ids."""
+    generated_targets = set()
+    for key in keys:
+        for spawn in result.world.get(key).asset.spawns:
+            if spawn.kind != "enemy":
+                continue
+            target_id = _target_id(key, spawn.id)
+            generated_targets.add(target_id)
+            target = result.targets.get(target_id)
+            if target is None or (target.chunk, target.x, target.y) != (key, spawn.x, spawn.y) or target.hp > 3:
+                raise ValueError("missing or modified generated target identity")
+    if any(t.id.startswith("spawn:") and t.id not in generated_targets for t in result.targets.values()):
+        raise ValueError("invented generated target")
+    return generated_targets
+
+
+def _check_actor_cells(result):
+    """Every actor stands inside its chunk on an open cell."""
+    for actor in [result.player, *result.targets.values()]:
+        asset = result.world.get(actor.chunk).asset
+        integer(actor.x, "actor x", 0, asset.width - 1)
+        integer(actor.y, "actor y", 0, asset.height - 1)
+        if asset.collision[actor.y][actor.x]:
+            raise ValueError("actor inside blocking cell")
+
+
+def _load_attack(result, data, generated_targets):
+    """Movement and attack clocks, and the targets the running attack already hit."""
+    p = data["player"]
+    InputCommand(data["last_move"], data["attack_held"])
+    result.last_move, result.attack_held = data["last_move"], data["attack_held"]
+    result.elapsed_ms, result.move_elapsed_ms = data["elapsed_ms"], data["move_elapsed_ms"]
+    hits = data["hit_targets"]
+    if any(not isinstance(h, str) for h in hits) or len(hits) != len(set(hits)) or not set(hits) <= result.targets.keys():
+        raise ValueError("invalid hit target set")
+    if p["animation"] != "attack" and hits:
+        raise ValueError("inactive attack has hit targets")
+    if (result.last_move is None or p["animation"] == "attack") and result.move_elapsed_ms:
+        raise ValueError("inactive movement has partial clock")
+    elapsed_attack = p["animation_elapsed_ms"] * result.attack_rate_percent
+    struck = [frame for start, _, frame in result.animations["attack"].active_intervals() if elapsed_attack >= start * 100]
+    asset = result.world.get(result.player.chunk).asset
+    px, py = result.player.chunk.x * asset.width + result.player.x, result.player.chunk.y * asset.height + result.player.y
+    reach = MAX_ATTACK_REACH + max((frame_reach(f) for f in struck), default=0) - 1   # attack_reach is not saved
+    for target_id in hits:
+        target = result.targets[target_id]
+        tx, ty = target.chunk.x * asset.width + target.x, target.chunk.y * asset.height + target.y
+        if not struck or target.chunk.dimension != result.player.chunk.dimension \
+                or 4 * ((tx - px) ** 2 + (ty - py) ** 2) > (2 * reach + 1) ** 2 \
+                or (target_id in generated_targets and target.hp >= 3):
+            raise ValueError("impossible already-hit target")
+    result.hit_targets = set(hits)
+
+
+def _load_seen(result, data, version):
+    """Remembered cells (schema 1 revealed every visited chunk)."""
+    result.seen = {}
+    result.reveal_radius = REVEAL_RADIUS  # derived again by the expedition on its next step
+    if version == 1:
+        # Old saves revealed every visited chunk. Keep that progress on upgrade.
+        specs = {spec.id: spec for spec in result.world.dimensions}
+        for raw in data["world"]["discovery"]:
+            if raw["status"] == "visited":
+                key = ChunkKey(raw["dimension"], raw["x"], raw["y"])
+                spec = specs[key.dimension]
+                result.seen[key] = [(1 << spec.width) - 1] * spec.height
+    else:
+        if type(data["seen"]) is not list:
+            raise ValueError("seen must be an array")
+        specs = {spec.id: spec for spec in result.world.dimensions}
+        for raw in data["seen"]:
+            fields(raw, ("dimension", "x", "y", "rows"))
+            key = ChunkKey(raw["dimension"], raw["x"], raw["y"])
+            if key in result.seen or key.dimension not in specs or result.world.status(key) == "unknown":
+                raise ValueError("invalid seen chunk")
+            spec = specs[key.dimension]
+            rows = raw["rows"]
+            if type(rows) is not list or len(rows) != spec.height or any(
+                    type(row) is not str or len(row) != spec.width or set(row) - {"0", "1"}
+                    for row in rows):
+                raise ValueError("invalid seen rows")
+            result.seen[key] = [sum(1 << x for x, bit in enumerate(row) if bit == "1") for row in rows]
+        rows = result.seen.get(result.player.chunk)
+        if rows is None or not rows[result.player.y] & (1 << result.player.x):
+            raise ValueError("player cell must be seen")

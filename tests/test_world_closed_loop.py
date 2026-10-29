@@ -176,9 +176,12 @@ class PlayableWorldTests(unittest.TestCase):
     def test_new_run_reaches_eating_and_the_anchor_under_risk(self):
         e = fresh(2)
         self.assertFalse(e.recipes, "crafting is discovered, not a starting capability")
-        while e.anchor_ms is None and e.total_ms < 60 * 60_000:
+        # Fixed enemy numbers (docs/design/STATS_AND_ENEMIES_AUDIT.md) made first lives longer:
+        # the cohort mean is about 36 min, and some strong first lives run past an hour (this
+        # seed's first life ends by starving at about 91 min since fights became patterns).
+        while e.anchor_ms is None and e.total_ms < 120 * 60_000:
             e.advance(2000)
-        self.assertIsNotNone(e.anchor_ms, "a life ends within 60 minutes")
+        self.assertIsNotNone(e.anchor_ms, "a life ends within two hours")
         self.assertGreater(e.stats["completed"], 3)
         self.assertGreater(e.stats["eaten"], 0)
         # Crafting progression is tested separately; a risky first life may end before the recipe.

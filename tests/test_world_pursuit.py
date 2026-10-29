@@ -14,6 +14,8 @@ from dimensional_sim.world.runtime import Exploration, Target
 from dimensional_sim.world.seeds import canonical_json
 from dimensional_sim.world.web import new_world
 
+HUNTING = ("hunt", "windup", "charge", "recover", "retreat")   # every mode of a fight pattern but flight
+
 
 def boar_beside(seed=482910, gap=4, camp_far=True):
     """A started avatar on an open row with a boar `gap` steps east, the camp far away."""
@@ -50,7 +52,7 @@ class HuntTests(unittest.TestCase):
     def test_a_noticed_enemy_hunts_far_past_its_aggro_radius(self):
         e, boar = boar_beside()
         tick(e)
-        self.assertEqual(e.hunting[boar.id]["mode"], "hunt")
+        self.assertIn(e.hunting[boar.id]["mode"], HUNTING)
         # the avatar is carried far off (beyond aggro) but stays in the loaded area: still hunted
         e.game.player.x = max(1, e.game.player.x - 9)
         start = e._steps_to(boar, *e._player())
@@ -140,7 +142,7 @@ class HuntTests(unittest.TestCase):
         frame = snapshot(e.game, expedition=e)
         self.assertEqual({(m["x"], m["y"]) for m in frame["minimap"]},
                          {(c.key.x, c.key.y) for c in e._resident()}, "what the minimap shows is what is loaded")
-        self.assertEqual(next(t for t in frame["targets"] if t["id"] == boar.id)["hunting"], "hunt")
+        self.assertIn(next(t for t in frame["targets"] if t["id"] == boar.id)["hunting"], HUNTING)
 
     def test_schema_nineteen_saves_start_with_nobody_hunting(self):
         e, _ = boar_beside()

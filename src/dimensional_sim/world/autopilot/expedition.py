@@ -7,7 +7,7 @@ impact), so any slicing of the same total time gives the same state.
 """
 from ..catalog import BUILDINGS, BY_ID
 from ..journal import new_journal
-from ..models import DELTAS, DIRECTIONS, integer
+from ..models import DELTAS, integer
 from ..progression import possession_duration_ms, scaled_ms, sight_radius, speed_permille
 from ..runtime import InputCommand, Target
 from ..tuning import PITY_CHUNKS
@@ -27,6 +27,7 @@ from .presentation import PresentationMixin
 from .saves import SavesMixin
 from .spawning import SpawningMixin
 from .story import StoryMixin
+from .training import WALK_KEYS, TrainingMixin
 from .places import PlacesMixin
 from .vitals import VitalsMixin
 
@@ -35,7 +36,7 @@ FIRE_ACTION = next(a for a in BY_ID.values() if a.places == "campfire")   # maki
 
 class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, OutcomesMixin, VitalsMixin,
                  LivesMixin, LocationsMixin, SavesMixin, PresentationMixin, CampMixin, EcologyMixin, NightMixin,
-                 StoryMixin, PlacesMixin):
+                 StoryMixin, PlacesMixin, TrainingMixin):
     def __init__(self, game, *, fresh=True, opening=False):
         """fresh=True starts a new expedition (prologue first); loaders pass False.
         opening=True (new games in the browser) starts at the anchor: the player meets
@@ -119,6 +120,8 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.shimmer = set()   # "dimension:cx:cy" region cells where rare spots roll more often this life
         self.life_recipes = set()   # recipes found this life: kept with ash at the anchor, or lost
         self.campfire = None   # {"dimension", "x", "y", "fire_x", "fire_y"}: this life's campfire (global cells)
+        self.walk = {key: 0 for key in WALK_KEYS}   # walking XP remainders (training.py)
+        self.fight_paid = {}   # target id -> [xp, dim xp] paid hit by hit so far (summed on the kill's log line)
         self.hunting = {}      # target id -> {"mode": "hunt" | "flee", "since": ms}: enemies after the avatar (combat._pursue)
         if not any(BUILDINGS[b].function == "storage" for b in self.bound_buildings):
             self.chest = {}   # an unbound chest does not outlast its life
@@ -256,9 +259,12 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
                 continue
             for spot in self._live(chunk):
                 entry = BY_ID[spot.encounter]
-                if entry.category == "fight" and spot.id not in self.game.targets and spot.id not in self.completed:
-                    hp = self.enemy_hp(entry, spot.chunk)
+                if entry.category != "fight":
+                    continue
+                if spot.id not in self.game.targets and spot.id not in self.completed:
+                    hp = self.enemy_hp(entry, spot.chunk, self.tier_of(spot.id))
                     self.game.targets[spot.id] = Target(spot.id, spot.chunk, spot.x, spot.y, hp)
+                self._place_company(spot, entry)
         kinds = None
         for t in sorted(self.game.targets.values(), key=lambda t: t.id):
             if t.hp == 0 and t.id not in self.completed and t.id in self.admitted:
@@ -277,8 +283,9 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
     def _run(self, ms, command):
         self.game.load_percent = self.load_percent()
         self._arm()
-        self.game.advance(ms, command)
+        earned = self._advance_game(ms, command, pay=False)
         self._apply_vitals(ms)
+        self._pay_training(earned)
         self.monster_ms += ms
 
     def _step_cap(self, remaining):
@@ -324,7 +331,7 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
             self._abandon_for(command)
             self._arm()
             # no steps while working (a held key that carried the player onto a spot keeps it)
-            self.game.advance(0, InputCommand() if self.task else self._manual_combat_command(command, auto_attack))
+            self._advance_game(0, InputCommand() if self.task else self._manual_combat_command(command, auto_attack))
             if not self.task:
                 self._step_onto(command)
             return
@@ -455,8 +462,7 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
                 break
         step = max(1, min(cap, left))
         self._run(step, InputCommand(attack=True))
-        if game.player.animation != "attack":
-            self._enemy_strikes_back()
+        if game.player.animation != "attack":   # enemies strike on their own patterns, not in turn
             self._start_task("pause", scaled_ms(PAUSE_BETWEEN_PUNCHES_MS, self.speed("strength")))
         return step
 
@@ -504,21 +510,15 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
             return 0
         field = self._field(goals, until=here)
         grid, blocked = self._grid(), self._blocked()
-        best = None
-        for direction in DIRECTIONS:
-            dx, dy = DELTAS[direction]
-            nxt = (here[0] + dx, here[1] + dy)
-            if nxt in field and self._can_move(grid, blocked, *here, direction):
-                if best is None or field[nxt] < best[0]:
-                    best = (field[nxt], direction)
-        if best is None or best[0] >= field.get(here, 1 << 30):
+        direction = self._heading(here, field, grid, blocked)   # any angle: straight lines, not staircases
+        if direction is None:
             self.goal = None  # unreachable now: wait one interval, then replan
             step = min(cap, game.step_interval_ms)
             self._run(step, InputCommand())
             return step
-        direction = best[1]
-        left = (max(1, game.step_interval_ms - game.move_elapsed_ms)   # a lighter load may shorten it
-                if game.last_move == direction else game.step_interval_ms)
+        interval = game.interval_for(direction)
+        left = (max(1, interval - game.move_elapsed_ms)   # a lighter load may shorten it
+                if game.last_move == direction else interval)
         step = min(cap, left)
         self._run(step, InputCommand(direction))
         return step
@@ -526,6 +526,10 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
     def _arrive(self, goal):
         if goal["kind"] == "wander":
             self.goal = None
+        elif goal["kind"] == "dodge":   # out of the strike: turn on the enemy while it recovers
+            t = self.game.targets.get(goal["id"])
+            tx, ty = self._global(t.chunk, t.x, t.y)
+            self.goal = {"kind": "target", "id": t.id, "x": tx, "y": ty}
         elif goal["kind"] == "home":
             self._stow()
             self._start_task("rest", REST_MS)
@@ -535,4 +539,4 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         else:
             self._face(goal["x"], goal["y"])
             self._arm()
-            self.game.advance(0, InputCommand(attack=True))  # rising edge: punch
+            self._advance_game(0, InputCommand(attack=True))  # rising edge: punch
