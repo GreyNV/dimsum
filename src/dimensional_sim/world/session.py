@@ -126,7 +126,7 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual",
             fog[f"{key.x}:{key.y}"] = rows
     return {**frame_extra, "world_seed": str(game.world.world_seed), "clock_ms": game.elapsed_ms,
         "movement_interval_ms": game.step_interval_ms,
-        "player": {"x": px, "y": py, "facing": p.facing, "animation": p.animation,
+        "player": {"x": px, "y": py, "ox": p.ox, "oy": p.oy, "facing": p.facing, "animation": p.animation,
                    "animation_ms": p.animation_elapsed_ms * rate // 100, "active": frame.active},
         "targets": targets,
         "effects": effects, "chunks": chunks, "resident": resident,

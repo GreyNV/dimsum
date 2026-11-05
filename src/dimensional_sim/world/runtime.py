@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 
 from .animation import (animations_from_dict, animations_to_dict, default_animations,
                         rotate, validate_animations)
+from .body import MAX_OFFSET, SUB, body_target, ease
 from .models import Cell, ChunkKey, DELTAS, DIRECTIONS, fields, identifier, integer
 
 # Manual movement also accepts the four diagonals. A diagonal is two cardinal half-steps taken
@@ -57,6 +58,12 @@ class Player:
     facing: str = "north"
     animation: str = "idle"
     animation_elapsed_ms: int = 0
+    ox: int = 0          # the round body's offset from the cell centre, 1/SUB tile (body.py)
+    oy: int = 0
+    body_ms: int = 0     # time toward the body's next sub-unit
+    lean: str | None = None   # the direction it presses against a wall, or None
+    tx: int = 0          # the last step taken (-1..1 each): walking, the body runs half a step behind
+    ty: int = 0
 
 
 @dataclass
@@ -314,6 +321,17 @@ class Exploration:
 
     def _place(self, key, x, y):
         entered = key != self.player.chunk
+        p = self.player
+        if p.chunk.dimension == key.dimension:   # the body stays where it was: the cell moved under it
+            w, h = self._chunk_size()
+            dx = (key.x - p.chunk.x) * w + x - p.x
+            dy = (key.y - p.chunk.y) * h + y - p.y
+            p.ox, p.oy = p.ox - dx * SUB, p.oy - dy * SUB
+            p.tx, p.ty = (dx > 0) - (dx < 0), (dy > 0) - (dy < 0)
+            if max(abs(p.ox), abs(p.oy)) > MAX_OFFSET:
+                p.ox = p.oy = p.tx = p.ty = 0
+        else:
+            p.ox = p.oy = p.tx = p.ty = 0
         self.player.chunk, self.player.x, self.player.y = key, x, y
         if entered:
             self._enter(key)
@@ -348,6 +366,52 @@ class Exploration:
             self._walking = False
         if (self.player.chunk, self.player.x, self.player.y) != before:
             self.moved_tiles += 1
+            self.player.lean = None
+        else:
+            self.player.lean = direction   # pressing on a wall: the body leans on it
+
+    # ----- the round body (body.py): presentation of where the avatar is, never a rule -----
+    def _chunk_size(self):
+        spec = next(s for s in self.world.dimensions if s.id == self.player.chunk.dimension)
+        return spec.width, spec.height
+
+    def _walls(self):
+        """(dx, dy) of the blocked tiles around the avatar's cell, as movement sees them."""
+        start = (self.player.chunk, self.player.x, self.player.y)
+        if getattr(self, "_walls_at", None) == start:
+            return self._walls_cache
+        walls = set()
+        for name, (dx, dy) in DELTAS.items():
+            if self._step_target(*start, name, peek=True) is None:
+                walls.add((dx, dy))
+        for vertical, horizontal in DIAGONALS.values():
+            (_, vy), (hx, _) = DELTAS[vertical], DELTAS[horizontal]
+            via_h = self._step_target(*start, horizontal, peek=True)
+            via_v = self._step_target(*start, vertical, peek=True)
+            corner = via_h and self._step_target(*via_h, vertical, peek=True) \
+                or via_v and self._step_target(*via_v, horizontal, peek=True)
+            if corner is None:
+                walls.add((hx, vy))
+        self._walls_at, self._walls_cache = start, frozenset(walls)
+        return self._walls_cache
+
+    def _ease_body(self, ms, moving):
+        p = self.player
+        if not moving:
+            p.lean = None
+        lean = None
+        if p.lean is not None:
+            if p.lean in DIAGONALS:
+                v, h = DIAGONALS[p.lean]
+                lean = (DELTAS[h][0], DELTAS[v][1])
+            else:
+                lean = DELTAS[p.lean]
+        walls = self._walls()
+        trail = (p.tx, p.ty) if moving and lean is None else None
+        target = body_target(lean, walls, trail)
+        if (p.ox, p.oy) == target and not p.body_ms:
+            return
+        p.ox, p.oy, p.body_ms = ease(p.ox, p.oy, p.body_ms, ms, target, walls)
 
     def _move_once(self, direction):
         self.player.facing = self.facing_for(direction, self.player.facing)
@@ -454,6 +518,7 @@ class Exploration:
                 step = min(remaining, until_done)
                 self.player.animation_elapsed_ms += step
                 self._damage(before, self.player.animation_elapsed_ms * self.attack_rate_percent)
+                self._ease_body(step, False)   # striking: the body settles where it stands
                 if step == until_done:
                     self._set_animation("walk" if command.move else "idle")
                     self.hit_targets.clear()
@@ -463,11 +528,12 @@ class Exploration:
                 # max(0, ...): a lighter load can shorten the interval below the time already walked
                 step = min(remaining, max(0, interval - self.move_elapsed_ms)) if command.move else remaining
                 self.player.animation_elapsed_ms += step
+                self._ease_body(step, bool(command.move))   # the body travels during the slice...
                 if command.move:
                     self.move_elapsed_ms += step
                     if self.move_elapsed_ms >= interval:
                         self.move_elapsed_ms = 0
-                        self._move(command.move)
+                        self._move(command.move)   # ...and the cell moves on at its end
             remaining -= step
             self.elapsed_ms += step
         if self.player.animation != "attack":
@@ -522,10 +588,23 @@ class Exploration:
 
 def _load_player(result, data):
     """The player and the clocks that run under it."""
-    fields(data["player"], ("chunk", "x", "y", "facing", "animation", "animation_elapsed_ms"))
+    base = ("chunk", "x", "y", "facing", "animation", "animation_elapsed_ms")
+    body = ("ox", "oy", "body_ms", "lean", "tx", "ty")
     p = data["player"]
+    fields(p, base + body if "ox" in p else base)   # saves before the round body: at the centre
     result.player = Player(_key(p["chunk"]), p["x"], p["y"], p["facing"],
                            p["animation"], p["animation_elapsed_ms"])
+    if "ox" in p:
+        for name in ("ox", "oy"):
+            integer(p[name], f"body {name}", -MAX_OFFSET, MAX_OFFSET)
+        integer(p["body_ms"], "body clock", 0, 1000)
+        if p["lean"] is not None and p["lean"] not in MOVE_DIRECTIONS:
+            raise ValueError("invalid body lean")
+        for name in ("tx", "ty"):
+            integer(p[name], f"body {name}", -1, 1)
+        result.player.ox, result.player.oy, result.player.body_ms, result.player.lean = \
+            p["ox"], p["oy"], p["body_ms"], p["lean"]
+        result.player.tx, result.player.ty = p["tx"], p["ty"]
     if p["facing"] not in DIRECTIONS or p["animation"] not in ("idle", "walk", "attack"):
         raise ValueError("invalid player facing/animation")
     integer(p["animation_elapsed_ms"], "animation elapsed", 0)

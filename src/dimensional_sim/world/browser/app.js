@@ -20,6 +20,10 @@ import {createAtlas} from './atlas_ui.js';
 import {iconMaster, itemArt, setItemInfo} from './item_art.js';
 import {SOUND_KEY, SoundEngine, VOLUMES, loadSettings, soundEvents, surfaceOf} from './sound.js';
 
+/** Where the avatar's round body is drawn: its cell's centre plus the server's sub-tile offset
+ * (world/body.py: 16 units a tile). The glide only smooths between polls. */
+const BODY_SUB = 16;
+const bodyAt = p => ({x: (p.x + .5 + (p.ox || 0) / BODY_SUB) * TILE_W, y: (p.y + .5 + (p.oy || 0) / BODY_SUB) * TILE_H});
 const storyCard = new StoryCard();
 const canvas = $('scene'), ctx = canvas.getContext('2d'), mini = $('minimap'), map = mini.getContext('2d');
 /* The full map: open from the minimap (or N); while open each poll asks for the atlas. */
@@ -211,7 +215,7 @@ function adopt(next, sentControl = null) {
   renderLocationContext(next.expedition?.location_context, contextOpen);
   if (next.expedition?.detail) lastDetail = next.expedition.detail;
   if (page !== 'world') renderPage();
-  const position = {x:(next.player.x + .5) * TILE_W, y:(next.player.y + .5) * TILE_H};
+  const position = bodyAt(next.player);
   if (!actor || Math.abs(actor.x - position.x) + Math.abs(actor.y - position.y) > TILE_W * 5) {
     actor = {...position}; camera = {...position};
   }
@@ -447,7 +451,7 @@ function render(now) {
     return;
   }
   if (state && actor && camera) {
-    const tx=(state.player.x+.5)*TILE_W, ty=(state.player.y+.5)*TILE_H;
+    const {x: tx, y: ty} = bodyAt(state.player);
     if (reducedMotion) { actor.x=tx; actor.y=ty; }
     else Object.assign(actor, glide(actor, {x:tx, y:ty}, dt, state.movement_interval_ms));
     camera.x=reducedMotion ? actor.x : follow(camera.x,actor.x,dt,140);
