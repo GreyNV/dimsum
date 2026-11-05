@@ -167,6 +167,15 @@ const cache = new Map();
 /** A fresh 32x32 canvas showing the item's icon, or null for an unknown art key (the caller shows
  * the glyph). A canvas, not an <img>: the local server's CSP has no data: images. */
 export function itemIcon(art, color, doc = globalThis.document) {
+  const master = iconMaster(art, color, doc);
+  if (!master) return null;
+  const copy = doc.createElement('canvas'); copy.width = copy.height = 32;
+  copy.getContext('2d').drawImage(master, 0, 0);
+  return copy;
+}
+
+/** The shared 32x32 picture (for drawing onto another canvas), or null. */
+export function iconMaster(art, color, doc = globalThis.document) {
   const paint = ITEM_ART[art];
   if (!paint || !doc?.createElement) return null;
   const key = `${art}|${color}`;
@@ -178,7 +187,22 @@ export function itemIcon(art, color, doc = globalThis.document) {
     paint(g, /^#[0-9a-f]{6}$/i.test(color || '') ? color : '#c8b8a0');
     cache.set(key, master);
   }
-  const copy = doc.createElement('canvas'); copy.width = copy.height = 32;
-  copy.getContext('2d').drawImage(master, 0, 0);
-  return copy;
+  return master;
+}
+
+/** The frame's item table ({id: [art key, kind]}, session ITEM_ART) and colours, set by app.js. */
+const INFO = {art: {}, colors: {}};
+export function setItemInfo(art, colors) { if (art) INFO.art = art; if (colors) INFO.colors = colors; }
+export function itemArt(id) { return INFO.art[id]?.[0]; }
+
+/** An inline item: its icon on its kind's shade, then `text` (the name, a count...). Text alone
+ * when the item is unknown or the document cannot draw (tests). */
+export function itemChip(doc, id, text) {
+  const chip = doc.createElement('span');
+  const [art, kind] = INFO.art[id] || [];
+  chip.className = `item-chip ${kind || ''}`.trim();
+  const icon = art && itemIcon(art, INFO.colors[id], doc);
+  if (icon) { icon.className = 'item-chip-icon'; icon.setAttribute('aria-hidden', 'true'); chip.append(icon); }
+  chip.append(doc.createTextNode(text));
+  return chip;
 }

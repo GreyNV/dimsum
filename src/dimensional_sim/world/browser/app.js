@@ -17,6 +17,7 @@ import {drawMotes, drawReflection, drawWaterGlints, isWater} from './nature_art.
 import {drawBlownLeaves, swayKind, windShear} from './wind.js';
 import {ACTOR_FOOT} from './sprites.js';
 import {createAtlas} from './atlas_ui.js';
+import {iconMaster, itemArt, setItemInfo} from './item_art.js';
 import {SOUND_KEY, SoundEngine, VOLUMES, loadSettings, soundEvents, surfaceOf} from './sound.js';
 
 const storyCard = new StoryCard();
@@ -149,6 +150,7 @@ function changeZoom(delta) {
 function adopt(next, sentControl = null) {
   const firstSnapshot = state === null;
   if (next.atlas && atlas.isOpen()) atlas.update(next.atlas, next.world_seed);
+  setItemInfo(next.expedition?.item_art, next.expedition?.item_colors);
   for (const chunk of next.chunks) {
     chunks.set(chunk.id, chunk);
     pictures.delete(chunk.id);   // painted lazily: visible now, others one per frame
@@ -665,7 +667,8 @@ function render(now) {
       if (age < 0) continue;
       if (rewards[i].glint) drawReveal(ctx, actor.x, actor.y - 30, rewards[i].glint, age, reducedMotion);
       drawFloat(ctx, actor.x, actor.y - 62 - (i % 4) * 11, rewards[i].text, reducedMotion ? 0 : age,
-        {color: rewards[i].color, duration: 1600, size: rewards[i].glint ? 11 : 9});
+        {color: rewards[i].color, duration: 1600, size: rewards[i].glint ? 11 : 9,
+          icon: rewards[i].item ? iconMaster(itemArt(rewards[i].item), rewards[i].color) : null});
     }
     // Ash on the air and mist along the ground (world px, so they stay put as the view moves).
     if (!state.expedition?.anchor_space && !prologue) {

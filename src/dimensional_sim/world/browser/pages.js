@@ -78,13 +78,13 @@ function character(d) {
     {title: 'Anchor camp', kind: 'rows', rows: [
       ...(camp.buildings.length ? camp.buildings.map(b => [b.name, b.bound ? 'bound - stands in every life' : 'this life only',
         b.bound ? '' : 'bind it with ash at the anchor to keep it']) : [['Buildings', 'none yet', 'build a crafting station at the camp (primitive crafting)']]),
-      ...(camp.chest.length ? [['Chest contents', camp.chest.map(i => `${i.name} x${i.count}`).join(', ')]] : []),
+      ...(camp.chest.length ? [['Chest contents', camp.chest.map(i => ({item: i.item, text: `${i.name} ×${i.count}`}))]] : []),
       ...(load ? [['Carry load', load.percent > 100 ? `walking +${load.percent - 100}% slower` : 'no penalty',
         `${load.carried} items carried; the first ${load.free} are free, then +${load.per_item}% each (max +${load.max}%), eased by Endurance and Strength (x${(load.relief_permille / 1000).toFixed(2)})`]] : []),
     ], note: 'Every craft needs a crafting station at the camp. Buildings fall when the life ends unless bound.'},
-    {title: 'Gear', kind: 'rows', rows: [
-      ['Gear', c.gear.length ? c.gear.join(', ') : 'none'],
-    ]},
+    {title: 'Gear', kind: 'rows', rows: c.worn?.length
+      ? c.worn.map(w => [title(w.slot), {item: w.item, text: w.name}, w.about])
+      : [['Gear', c.gear.length ? c.gear.join(', ') : 'none']]},
     {title: 'Journey', kind: 'rows', rows: [
       ['Life', String(c.life)], ['Ring now', String(c.depth)], ['Frontier (safe push)', `ring ${c.frontier}`],
       ['Inventory', `${c.inventory_slots[0]} / ${c.inventory_slots[1]} slots`],
@@ -116,7 +116,8 @@ function statistics(d) {
       empty: 'Nothing completed yet.'},
     {title: 'Actions', kind: 'table', head: ['Action', 'Type', 'Done'],
       rows: j.actions.map(([name, category, n]) => [name, title(category), n]), empty: 'Nothing completed yet.'},
-    {title: 'Items gathered', kind: 'table', head: ['Item', 'Total'], rows: j.items, empty: 'Nothing gathered yet.'},
+    {title: 'Items gathered', kind: 'table', head: ['Item', 'Total'],
+      rows: j.items.map(([name, n, id]) => [id ? {item: id, text: name} : name, n]), empty: 'Nothing gathered yet.'},
   ];
 }
 
@@ -154,7 +155,7 @@ export function encounterTree(j) {
 function encounters(d) {
   const j = d.journal, r = d.rolls || {};
   const bonus = (r.loot || []).flatMap(a => a.drops.filter(drop => drop.roll !== 'fixed')
-    .map((drop, i) => [i ? '' : a.name, drop.item, drop.roll, `${drop.chance}%`]));
+    .map((drop, i) => [i ? '' : a.name, drop.id ? {item: drop.id, text: drop.item} : drop.item, drop.roll, `${drop.chance}%`]));
   const m = d.multipliers;
   return [
     {title: 'Encounter rarity here', kind: 'rows', rows: (r.tiers || []).map(t =>

@@ -23,6 +23,7 @@ LOG_ENTRIES = 6
 # simulated, so a hunter that leaves the minimap is unloaded (combat._unload_far_enemies).
 MINIMAP_RADIUS = 1
 ITEM_COLORS = {item.id: item.color for item in ITEMS.values()}   # reward popups and HUD text
+ITEM_ART = {item.id: [item.art, item.kind] for item in ITEMS.values()}   # icons: art key and kind shade
 ITEM_GLINTS = {item.id: glint for item in ITEMS.values() if (glint := rarity_glint(item.rarity))}  # reveal burst
 
 
@@ -196,7 +197,7 @@ def _expedition_view(e, control, *, debug, detail):
             "opponent": e.opponent(), "item_colors": ITEM_COLORS,
             "load": {"percent": e.load_percent(), "carried": e.carried_units()},
             "camp": e.camp_view(),
-            "item_glints": ITEM_GLINTS}
+            "item_glints": ITEM_GLINTS, "item_art": ITEM_ART}
 
 
 def _skill_slots(e, in_anchor):

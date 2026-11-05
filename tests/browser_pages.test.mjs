@@ -94,7 +94,7 @@ test('pages: every tab and subtab has a model, world has none, detail pages wait
 test('stats: the camp section lists buildings, the chest and carry load; unused disciplines are hidden', () => {
   const camp = pageModel('stats', state).sections.find(x => x.title === 'Anchor camp').rows;
   assert.deepEqual(camp[0].slice(0, 2), ['Crafting station', 'bound - stands in every life']);
-  assert.deepEqual(camp[1], ['Chest contents', 'Stick x7']);
+  assert.deepEqual(camp[1], ['Chest contents', [{item: 'stick', text: 'Stick ×7'}]]);
   assert.deepEqual(camp[2].slice(0, 2), ['Carry load', 'walking +18% slower']);
   const hidden = {...detail, stats: detail.stats.map((r, i) => ({...r, used: i === 0}))};
   assert.equal(pageModel('stats', {expedition: {detail: hidden}}).sections[0].items.length, 1);

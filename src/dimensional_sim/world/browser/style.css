@@ -338,3 +338,9 @@ body.context-open.active-control:not(.page-open):not(.anchor-active) .touch-cont
 .slots li small{text-shadow:0 1px 0 #000,0 0 3px #000}
 .item-tip{position:fixed;z-index:40;padding:8px 10px;background:#0f140d;border:1px solid #9f8050;box-shadow:0 8px 30px #000c;font:11px/1.45 ui-monospace,Consolas,monospace;color:#d9cfae;display:flex;flex-direction:column;gap:3px}
 .item-tip b{color:#f1dfb0;font-weight:700}
+.item-chip{display:inline-flex;align-items:center;gap:5px;vertical-align:middle}
+.item-chip-icon{width:20px;height:20px;flex:none;border-radius:3px;border:1px solid rgba(110,96,64,.6);padding:1px;background:rgba(0,0,0,.3)}
+.item-chip.food .item-chip-icon{background:linear-gradient(160deg,rgba(96,120,48,.7),rgba(40,52,22,.85));border-color:rgba(150,180,90,.75)}
+.item-chip.material .item-chip-icon{background:linear-gradient(160deg,rgba(120,86,52,.7),rgba(52,36,22,.85));border-color:rgba(176,132,84,.7)}
+.item-chip.gear .item-chip-icon{background:linear-gradient(160deg,rgba(66,92,124,.75),rgba(26,36,52,.9));border-color:rgba(120,156,200,.75)}
+.item-chip.treasure .item-chip-icon{background:linear-gradient(160deg,rgba(120,72,130,.7),rgba(48,28,56,.9));border-color:rgba(200,150,220,.7)}

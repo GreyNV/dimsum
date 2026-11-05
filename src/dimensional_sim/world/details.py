@@ -8,6 +8,7 @@ TESTS: tests/test_world_pages.py.
 """
 from .actions import Context, describe_bucket, known, spot_tiers
 from .autopilot import INVENTORY_SLOTS, POINT, REGEN, REST_REGEN
+from .autopilot.presentation import item_about
 from . import effects
 from .catalog import (ACTIONS, BY_ID, ENEMIES, ITEMS, JOURNAL_GROUPS, LOCATION_OF_REGION, LOCATION_OF_SITE, LOCATIONS,
                       HAULS, RARITY, REGIONS, SITES, UNLOCKS)
@@ -32,10 +33,12 @@ def _known_context(e):
 def character(e):
     frontier = e.frontier()
     gear = [ITEMS[i].name for i in e.equipped.values()]
+    worn = [{"item": i, "name": ITEMS[i].name, "slot": slot, "about": item_about(ITEMS[i], True)}
+            for slot, i in e.equipped.items()]
     return {
         "life": e.life, "depth": e.depth, "best_depth": e.best_depth, "frontier": frontier,
         "health": _pts(e.health), "health_max": _pts(e.max_health()), "hunger": _pts(e.hunger),
-        "punch_damage": e.punch_damage(), "gear": gear,
+        "punch_damage": e.punch_damage(), "gear": gear, "worn": worn,
         "threats": [{"id": a.id, "name": ENEMIES[a.enemy].name,
                      "hp": e.enemy_hp(a, ChunkKey(e.dimension, frontier, 0)),
                      "hit_at_frontier": _pts(e.enemy_hit(ChunkKey(e.dimension, frontier, 0), ENEMIES[a.enemy])),
@@ -108,11 +111,11 @@ def rolls(e):
             varies = not steady(a)   # hauls: poor .. rich scale every amount (docs/design/HAULS.md)
             low_pct = min(h.percent for h in HAULS) if varies else 100
             high_pct = max(h.percent for h in HAULS) if varies else 100
-            drops = [{"item": ITEMS[l.item].name, "min": max(1, (l.low * low_pct + 50) // 100),
+            drops = [{"item": ITEMS[l.item].name, "id": l.item, "min": max(1, (l.low * low_pct + 50) // 100),
                       "max": max(1, (l.high * high_pct + 50) // 100), "chance": l.chance,
                       "roll": "fixed"} for l in a.loot]
             bonus = table_chances(a.drops) if a.drops else {}
-            drops += [{"item": ITEMS[item].name, "min": low, "max": high, "chance": bp / 100,
+            drops += [{"item": ITEMS[item].name, "id": item, "min": low, "max": high, "chance": bp / 100,
                        "roll": RARITY[ITEMS[item].rarity].name, "color": ITEMS[item].color}
                       for item, (low, high, bp) in sorted(bonus.items(), key=lambda kv: -kv[1][2])]
             loot.append({"id": a.id, "name": a.name, "drops": drops})
@@ -191,7 +194,7 @@ def journal(e):
                            "locations": locations})
     return {"actions": sorted(([BY_ID[a].name, BY_ID[a].category, n] for a, n in j["actions"].items()),
                               key=lambda r: (-r[2], r[0])),
-            "items": sorted(([ITEMS[i].name, n] for i, n in j["items"].items()), key=lambda r: (-r[1], r[0])),
+            "items": sorted(([ITEMS[i].name, n, i] for i, n in j["items"].items()), key=lambda r: (-r[1], r[0])),
             "deaths": dict(j["deaths"]), "best_life_min": round(j["best_life_ms"] / 60000, 1),
             "lives": e.life, "best_depth": e.best_depth,
             "achievements": achievements(e),

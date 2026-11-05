@@ -247,13 +247,17 @@ export function drawEffect(ctx, x, y, age = 0) {
 }
 
 /** Floating combat/reward text above a point; age 0..duration ms. */
-export function drawFloat(ctx, x, y, text, age, {color = '#ffd36a', duration = 600, size = 10} = {}) {
+export function drawFloat(ctx, x, y, text, age, {color = '#ffd36a', duration = 600, size = 10, icon = null} = {}) {
   if (age >= duration) return;
   ctx.save();
   ctx.font = `bold ${size}px Consolas, "Liberation Mono", monospace`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.globalAlpha = Math.max(0, 1 - Math.max(0, age - duration / 2) / (duration / 2));
   const ty = Math.round(y - age / 30);
+  if (icon) {   // an item's picture before its text (item_art.iconMaster)
+    const s = size + 6, w = ctx.measureText(text).width;
+    ctx.drawImage(icon, Math.round(x - w / 2 - s - 2), Math.round(ty - s / 2), s, s);
+  }
   ctx.lineWidth = 3; ctx.strokeStyle = OUTLINE; ctx.strokeText(text, x, ty);
   ctx.fillStyle = color; ctx.fillText(text, x, ty);
   ctx.restore();

@@ -54,7 +54,7 @@ export function rewardTexts(entry, colors = {}, glints = {}) {
   if (entry.type === 'encounter' && entry.xp) texts.push({text: `+${entry.xp} ${LABEL[entry.attribute]}`, color: '#bfe39a'});
   if (entry.type === 'possess') texts.push({text: 'Possessed', color: '#ffe3a0'});
   for (const [item, count] of entry.items || []) {
-    if (count > 0) texts.push({text: `+${count} ${item.replaceAll('_', ' ')}`, color: colors[item] || ITEM_COLOR_DEFAULT,
+    if (count > 0) texts.push({text: `+${count} ${item.replaceAll('_', ' ')}`, color: colors[item] || ITEM_COLOR_DEFAULT, item,
       ...(glints[item] ? {glint: glints[item]} : {})});
   }
   if (entry.type === 'eat') texts.push({text: entry.text.replace(/^Ate /, '').replace(/\.$/, ''), color: '#f0c56a'});

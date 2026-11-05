@@ -2,6 +2,7 @@
  * when the player contacts it (the world waits). Renders server rows only; purchases are
  * validated by the simulation. Journal controls live on the Journal page. */
 import {$, el} from './dom.js';
+import {itemChip} from './item_art.js';
 import {shopSections} from './hud.js';
 
 /** Words for each way of arriving at the anchor. */
@@ -116,7 +117,8 @@ export function renderAnchor(ex) {
     offerings.append(el('summary', '', `Offer resources now · ${ex.anchor_offerings.length} stacks`));
     for (const row of ex.anchor_offerings) {
       const line = el('div', 'anchor-offer');
-      line.append(el('span', '', `${row.name} ×${row.count} · ${row.ash} ash`));
+      const label = el('span'); label.append(itemChip(document, row.id, `${row.name} ×${row.count}`), ` · ${row.ash} ash`);
+      line.append(label);
       for (const [label, count] of [['Offer one', 1], ['Offer all', row.count]]) {
         if (count === 1 && row.count === 1 && label === 'Offer one') continue;
         const button = el('button', '', label);

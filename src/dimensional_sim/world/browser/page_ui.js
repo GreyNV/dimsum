@@ -1,6 +1,20 @@
 /** DOM rendering for the page overlay (tabs and page sections). Page content comes
  * from pages.js models; this module only turns a model into elements. */
 import {$, el} from './dom.js';
+import {itemChip} from './item_art.js';
+
+/** A page cell: text, or {item, text} for an item shown with its icon. */
+function cell(tag, value) {
+  if (value && typeof value === 'object' && value.item) {
+    const node = el(tag); node.append(itemChip(document, value.item, value.text)); return node;
+  }
+  if (Array.isArray(value)) {   // a list of cells side by side (the chest's contents)
+    const node = el(tag);
+    value.forEach((v, i) => { if (i) node.append(' '); node.append(typeof v === 'object' ? itemChip(document, v.item, v.text) : v); });
+    return node;
+  }
+  return el(tag, '', value);
+}
 
 /** One button per page, labelled with its icon, name and number key. */
 export function buildTabs(pages) {
@@ -91,7 +105,7 @@ function treeNode(item, depth) {
 function rows(section) {
   const list = el('dl', 'rows');
   for (const [name, value, note] of section.rows) {
-    const dd = el('dd', '', value);
+    const dd = cell('dd', value);
     if (note) dd.append(el('small', '', note));
     list.append(el('dt', '', name), dd);
   }
@@ -102,7 +116,7 @@ function table(section) {
   if (!section.rows.length) return el('p', 'note', section.empty || 'Nothing yet.');
   const result = el('table'), head = el('tr'), body = el('tbody');
   for (const name of section.head) head.append(el('th', '', name));
-  for (const row of section.rows) { const tr = el('tr'); for (const cell of row) tr.append(el('td', '', cell)); body.append(tr); }
+  for (const row of section.rows) { const tr = el('tr'); for (const value of row) tr.append(cell('td', value)); body.append(tr); }
   const thead = el('thead'); thead.append(head); result.append(thead, body);
   return result;
 }

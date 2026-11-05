@@ -82,7 +82,7 @@ class DetailTests(unittest.TestCase):
         d = detail(played(30_000))
         self.assertEqual(set(d["character"]), {
             "life", "depth", "best_depth", "frontier", "health", "health_max", "hunger", "punch_damage", "gear",
-            "threats", "hunger_per_minute", "regen_per_minute",
+            "threats", "hunger_per_minute", "regen_per_minute", "worn",
             "rest_regen_per_minute", "inventory_slots", "currencies", "unlocked", "camp", "load", "openings",
             "sight_radius", "possession_seconds"})
         self.assertEqual(set(d["multipliers"]), {"actions", "hunger_drain", "max_health", "punch_damage", "punch_parts"})
@@ -189,3 +189,18 @@ class UpgradeAndRebuildTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ItemArtInPagesTests(unittest.TestCase):
+    def test_pages_carry_item_ids_so_the_client_can_draw_their_icons(self):
+        from dimensional_sim.world.catalog import ITEMS
+        from dimensional_sim.world.session import ITEM_ART
+        e = played(120_000)
+        d = detail(e)
+        self.assertTrue(all(len(row) == 3 and row[2] in ITEMS for row in d["journal"]["items"]))
+        self.assertEqual(set(ITEM_ART), set(ITEMS))
+        e.inventory["walking_staff"] = 1
+        e.equipped["weapon"] = "walking_staff"
+        worn = detail(e)["character"]["worn"]
+        self.assertEqual([(w["item"], w["slot"]) for w in worn], [("walking_staff", "weapon")])
+        self.assertIn("damage per blow", worn[0]["about"])
