@@ -38,12 +38,14 @@ export const WOLF = Object.freeze({paint: [
   '/~;;;;;;;;;; ',
   "  ;';;;;;';  ",
   '  | |   | |  ']});
-export const ENEMY_SPRITES = Object.freeze({boar: ENEMY, lurker: LURKER, skeleton: SKELETON, wisp: WISP, wolf: WOLF});
+export const ENEMY_SPRITES = Object.freeze({boar: ENEMY, lurker: LURKER, skeleton: SKELETON, wisp: WISP, wolf: WOLF,
+  rat: LURKER, bandit: SKELETON});   // cell-sprite fallbacks without a DOM; the painted art is in painted.js
 
 /** Enemy at tile center (x, y). `hit` = ms since last HP loss; `dying` = 0..1 progress. */
 export function drawEnemy(ctx, target, x, y, {clock = 0, hit = Infinity, dying = null, maxHp = 3, reducedMotion = false, ghost = false, reflection = false, west = false} = {}) {
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
+  if (target.hidden && dying === null) return drawHidden(ctx, x, y, clock, reducedMotion);
   const sprite = ENEMY_SPRITES[target.sprite] || ENEMY;
   const {width, height} = spriteSize(sprite);
   const seed = visualHash(target.x, target.y, 77);
@@ -137,6 +139,19 @@ function drawPaintedEnemy(ctx, target, painted, kind, x, y, {clock, hit, dying, 
   }
   drawMarks(ctx, x, top, target, maxHp, clock);
   return {left, top, width, height};
+}
+
+/** An enemy lying unseen (a hidden pattern, before it notices you): only a slow ring on the
+ * surface and two dim eyes give it away - a careful look, not a marker. */
+function drawHidden(ctx, x, y, clock, reducedMotion) {
+  const t = reducedMotion ? 0 : (clock % 2400) / 2400, cy = y + ACTOR_FOOT - 4;
+  ctx.save();
+  ctx.strokeStyle = `rgba(170, 196, 204, ${.28 * (1 - t)})`; ctx.lineWidth = .8;
+  ctx.beginPath(); ctx.ellipse(x, cy, 5 + t * 9, 2 + t * 3, 0, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = 'rgba(200, 190, 110, .45)';
+  for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(x + s * 2.2, cy - 1, .7, 0, Math.PI * 2); ctx.fill(); }
+  ctx.restore();
+  return {left: x - 8, top: cy - 4, width: 16, height: 8};
 }
 
 /** Health, star mark and the fight-pattern tell above an enemy (frame target.hunting). */

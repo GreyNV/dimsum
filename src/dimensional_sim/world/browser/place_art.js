@@ -150,6 +150,16 @@ export const FLAMES = Object.freeze([
   {paint: ['  y    ', '  ryy  ', '  rdr  '], glyph: ['  ^    ', '  *^^  ', '  ***  ']},
   {paint: ['    y  ', '  yyr  ', '  rdr  '], glyph: ['    ^  ', '  ^^*  ', '  ***  ']},
 ]);
+/** A rented bed (a village inn): a straw pallet and a rolled blanket on the ground. */
+export function drawBedroll(ctx, x, y) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(4, 6, 8, .5)'; ctx.beginPath(); ctx.ellipse(x, y + 7, 10, 3, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#6e6450'; ctx.fillRect(x - 9, y + 1, 18, 6);          // the straw pallet
+  ctx.fillStyle = '#4a4f58'; ctx.fillRect(x - 3, y, 12, 6);              // the blanket
+  ctx.fillStyle = '#8d8f8c'; ctx.fillRect(x - 9, y + 1, 5, 4);           // the pillow
+  ctx.strokeStyle = '#070a06'; ctx.lineWidth = .6; ctx.strokeRect(x - 9, y + 1, 18, 6);
+  ctx.restore();
+}
 export function drawCampfire(ctx, x, y, {clock = 0, reducedMotion = false} = {}) {
   setupText(ctx);
   x = Math.round(x); y = Math.round(y);
@@ -433,6 +443,10 @@ export const BUILDING_PARTS = Object.freeze({
     glyph: [".@.", "(@)"]},
   sack: {paint: [" c ", "ccc", "ccc"],
     glyph: [" ^ ", "(:)", "(_)"]},
+  fence: {paint: ["d d d d", "ttttttt", "d d d d"],
+    glyph: ["| | | |", "=+=+=+=", "| | | |"]},
+  crops: {paint: [" y y y ", "ccccccc", " y y y ", "ccccccc"],
+    glyph: [" v v v ", "~~~~~~~", " v v v ", "~~~~~~~"]},
 });
 /** Per building: where it stands (tile offset from the anchor stone) and its parts, back to
  * front, as [part, dx px, dy px] with dy measured up from the ground line. */
@@ -440,6 +454,7 @@ export const BUILDING_ART = Object.freeze({
   crafting_station: {slot: [-3, 2], parts: [['rack', -34, 6], ['grind', -44, 0], ['bench', -20, 0],
     ['stump', 22, 0]]},
   storage_chest: {slot: [3, 2], parts: [['barrel', -32, 0], ['chest', -16, 0], ['sack', 22, 0], ['rope', 21, -2]]},
+  farm: {slot: [0, 3], parts: [['crops', -22, 2], ['fence', -24, 0], ['sack', 24, 0]]},
 });
 
 /** Draw `buildings` ({id, bound}) around the anchor stone at (x, y); bound ones carry a soul glint. */

@@ -12,7 +12,7 @@ from ..models import ChunkKey, chunk_ident
 from ..progression import dimensional_level
 from ..seeds import derive_seed
 from ..sites import condition_for
-from ..tuning import PITY_CHUNKS
+from ..tuning import DANGER_RINGS_PER_ROUND, PITY_CHUNKS
 from .constants import POINT, ROLL_LOG_LIMIT, SCREEN_LOG_LIMIT
 
 
@@ -89,7 +89,8 @@ class SpawningMixin:
         region = self.region(key)
         return Context(biome=chunk.asset.biome if chunk is not None else self.game.world.biome_for(key),
                        region=region.id if region else None, placement="spot", region_def=region,
-                       ring=self.ring(key), pressure=self.pressure_percents(key), rarity_percent=self.rarity_percent(key),
+                       ring=self.ring(key) + DANGER_RINGS_PER_ROUND * self.explored_rounds(key),
+                       danger=self.explored_rounds(key), pressure=self.pressure_percents(key), rarity_percent=self.rarity_percent(key),
                        gear=frozenset(i for i in self.inventory if ITEMS[i].kind == "gear"),
                        features=features(chunk.asset) if chunk is not None else frozenset(),
                        journal_disabled=frozenset(self.journal_disabled),
@@ -114,7 +115,8 @@ class SpawningMixin:
                        gear=frozenset(i for i in self.inventory if ITEMS[i].kind == "gear"),
                        hunger=self.hunger // POINT, food_carried=self._has_food(),
                        trigger=trigger, visible=visible,
-                       flags=frozenset({"camp_wanted"} if self._hurt_far() or self._wants_camp() else ()),
+                       flags=frozenset(({"camp_wanted"} if self._hurt_far() or self._wants_camp() else set())
+                                       | ({"farm_ripe"} if self.farm_ripe() else set())),
                        **self._progress_fields())
 
     def _spots(self, chunk):
@@ -205,6 +207,22 @@ class SpawningMixin:
         self._note(chunk_id, spot.id, action.id, f"pity {category} after {self.drought[category]} empty chunks")
         return self._admit(spot.id, action.id, chunk_id)
 
+    def _den(self, chunk, chunk_id, taken):
+        """Worked ground grows dangerous: an animal den, one fight there for sure (explored.py)."""
+        if chunk.key == self._camp_chunk():
+            return
+        encounter = self.den_encounter(chunk)
+        if encounter is None:
+            return
+        index = len(self.forced.get(chunk_id, ()))
+        spot = forced_spot(chunk, encounter, index, taken=taken)
+        if spot is None:
+            self._note(chunk_id, None, encounter, "den: no free cell")
+            return
+        self.forced.setdefault(chunk_id, []).append(encounter)
+        self.admitted[spot.id] = encounter
+        self._note(chunk_id, spot.id, encounter, "den: worked ground")
+
     def _screen(self):
         """Roll when the player enters a chunk, then apply windows and pity.
         Asset-spawned boars are always removed: enemies come only from fight spots."""
@@ -213,8 +231,8 @@ class SpawningMixin:
             ident = chunk_ident(chunk.key)
             if ident in self.screened_chunks:
                 continue
-            roll_seed = derive_seed(self.game.world.world_seed, "runtime-opportunity-v1",
-                                    self.life, len(self.spot_plans), ident)
+            roll_seed = self.reroll_seed(derive_seed(self.game.world.world_seed, "runtime-opportunity-v1",
+                                                     self.life, len(self.spot_plans), ident), chunk.key)
             context = self.spot_context(chunk.key)
             site = self.game.world.site_for(chunk.key)
             rolled = chunk_spots(chunk, life=self.life, context=context, roll_seed=roll_seed, site=site,
@@ -238,6 +256,9 @@ class SpawningMixin:
                 if self._admit(spot.id, spot.encounter, ident):
                     admitted.add(BY_ID[spot.encounter].spawn_category)
             taken = [(s.x, s.y) for s in spots]
+            if self.has_den(chunk.key):
+                self._den(chunk, ident, taken)
+                taken = [(s.x, s.y) for s in self._spots(chunk)]
             for category in PITY_CHUNKS:
                 if category in admitted:
                     self.drought[category] = 0

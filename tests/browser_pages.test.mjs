@@ -6,7 +6,7 @@ import {PAGES, PAGE_IDS, needsDetail, pageModel, subtabsOf, nextMode, PANELS, CO
 const stat = name => ({name, level: 2, xp: 250, into: 40, next: 130, dim_level: 1, dim_xp: 110, dim_into: 10, dim_next: 135,
   speed: 1210, speed_regular_only: 1200, speed_dimensional_only: 1010, life_gain: 50});
 const detail = {
-  character: {life: 3, depth: 2, best_depth: 5, frontier: 3, health: 80.5, hunger: 41, punch_damage: 2, gear: ['Walking staff'],
+  character: {life: 3, depth: 2, best_depth: 5, frontier: 3, health: 80.5, health_max: 110, hunger: 41, punch_damage: 2, gear: ['Walking staff'],
     threats: [{id: 'bramble_boar', name: 'Bramble boar', hp: 6, hit_at_frontier: 20.1, fight_cost_at_frontier: 40.2}], hunger_per_minute: 30,
     regen_per_minute: 12, rest_regen_per_minute: 60, inventory_slots: [3, 12], currencies: {ash: 2}, unlocked: ['Climbing'],
     openings: [{name: 'Snare lines', description: 'Hunter cabins.', attribute: 'perception', level: 3, have: 2, open: false}],
@@ -15,7 +15,7 @@ const detail = {
     sight_radius: 6, possession_seconds: 38},
   stats: ['strength', 'endurance', 'agility', 'intelligence', 'perception', 'willpower'].map(stat),
   multipliers: {actions: [{id: 'bramble_berries', name: 'Bramble berries', attribute: 'perception', speed: 1410, base_ms: 2400, effective_ms: 1703}],
-    hunger_drain: 0.909, enemy_hit: [['Endurance', 0.909], ['Hide wrap', 0.7]], punch_damage: 2, punch_parts: [['Base', 1], ['Strength levels', 1]]},
+    hunger_drain: 0.909, max_health: [['Base', 100], ['Hide wrap', 10]], punch_damage: 2, punch_parts: [['Base', 1], ['Strength levels', 1]]},
   rolls: {life: 3, windows: [
     {id: 'bramble_berries', name: 'Bramble berries', rolled: 2, min: 1, max: 2, active: 1, spawned: 4, mastery: 0, known: true},
     {id: 'gnarled_tree', name: 'Gnarled tree', rolled: 1, min: 1, max: 1, active: 0, spawned: 0, mastery: 0, known: false}],
@@ -107,7 +107,7 @@ test('stats: character is the main view with multipliers; statistics holds every
   assert.equal(exploration[0][1], '6 cells');
   assert.equal(exploration[1][1], '38 seconds');
   const combat = pageModel('stats', state).sections.find(x => x.title === 'Combat').rows;
-  assert.ok(combat.some(([k, v]) => k === 'Damage taken' && v === '×0.636'));
+  assert.ok(combat.some(([k, v]) => k === 'Max health · Hide wrap' && v === '+10'));
   const stats = pageModel('stats', state, null, 'statistics').sections;
   assert.deepEqual(stats.find(x => x.title === 'Actions by type').rows, [['Forage', 12], ['Gather', 3]]);
   assert.ok(stats.some(x => x.title === 'Items gathered'));

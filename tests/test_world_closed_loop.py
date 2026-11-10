@@ -190,10 +190,11 @@ class PlayableWorldTests(unittest.TestCase):
 
 
 class CraftingTests(unittest.TestCase):
-    def test_jerkin_softens_hits_and_studding_upgrades_the_worn_wrap(self):
+    def test_jerkin_adds_health_and_studding_upgrades_the_worn_wrap(self):
         e = past_prologue(fresh())
         frontier = e.frontier()
         hit = boar_hit(e, ChunkKey("forest", 2, 0))
+        full = e.max_health()
         to_camp(e)
         e.inventory = {"cloth_scrap": 3, "rope": 1}
         e.knowledge.add("primitive_crafting")
@@ -202,7 +203,8 @@ class CraftingTests(unittest.TestCase):
         e.advance(e.task["duration_ms"])
         self.assertEqual(e.inventory, {"padded_jerkin": 1})
         self.assertEqual(e.equipped, {"body": "padded_jerkin"})
-        self.assertEqual(boar_hit(e, ChunkKey("forest", 2, 0)), hit * 80 // 100)
+        self.assertEqual(boar_hit(e, ChunkKey("forest", 2, 0)), hit, "gear never softens a bite")
+        self.assertEqual(e.max_health(), full + 8 * ap.POINT)
         self.assertGreaterEqual(e.frontier(), frontier)
         e.inventory = {"hide_wrap": 1, "iron_nails": 3}
         e.equipped = equip_item({}, e.inventory, "hide_wrap")
@@ -210,7 +212,7 @@ class CraftingTests(unittest.TestCase):
         e._start_self(BY_ID["craft_studded"])
         e.advance(e.task["duration_ms"])
         self.assertEqual((e.inventory, e.equipped), ({"studded_wrap": 1}, {"body": "studded_wrap"}))
-        self.assertEqual(boar_hit(e, ChunkKey("forest", 2, 0)), hit * 55 // 100)
+        self.assertEqual(e.max_health(), full + 16 * ap.POINT)
 
     def test_snare_turns_materials_into_food_only_when_needed(self):
         e = past_prologue(fresh())

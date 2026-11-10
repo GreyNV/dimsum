@@ -21,11 +21,13 @@ from .catalog import SITE_CELL, SITE_CONDITIONS, SITES
 from .seeds import derive_seed
 
 SITE_VERSION = "sites-v1"
+LIVED_IN = ("village", "bandits")   # places people live in: no site condition (condition_for)
 TENT, MASONRY, SCORCH, RUBBLE = "A", "M", ":", "x"   # object glyphs block; ground glyphs do not
 LOGS, STUMP, HUT, RACK, PILLAR, ALTAR, MOUND, STONE = "L", "S", "U", "R", "P", "Q", "B", "I"
 FLAGSTONE = "F"
 STRUCTURE_GLYPHS = {"camp": (TENT,), "tower": (MASONRY,), "lumber": (LOGS, STUMP), "lodge": (HUT, RACK),
-                    "shrine": (PILLAR, ALTAR), "barrow": (MOUND, STONE)}
+                    "shrine": (PILLAR, ALTAR), "barrow": (MOUND, STONE),
+                    "village": (HUT, RACK, LOGS), "bandits": (TENT, LOGS)}
 
 
 @dataclass(frozen=True)
@@ -85,19 +87,20 @@ def bounded_site_plan(world_seed, dimension, land, sites, region_for, biome_for,
     may use another region or replace a duplicate site. The plan is pure and
     independent of visit/generation order.
     """
+    from .catalog import ROAD_SITE_IDS
     from .edges import chunk_open
     from .models import ChunkKey
 
     keys = [ChunkKey(dimension.id, x, y)
             for y in range(-land.lobe_ring, land.lobe_ring + 1)
             for x in range(-land.lobe_ring, land.lobe_ring + 1)
-            if chunk_open(world_seed, ChunkKey(dimension.id, x, y), {dimension.id: land})]
+            if chunk_open(world_seed, ChunkKey(dimension.id, x, y), {dimension.id: land}, road=False)]
     regions = {key: region_for(key) for key in keys}
     all_fits = {site.id: [key for key in keys
                           if biome_for(key) == site.biome and max(abs(key.x), abs(key.y)) >= site.min_ring
                           and regions[key] is not None
                           and place_site(world_seed, key, site, width, height) is not None]
-                for site in sites.values() if site.biome in dimension.biomes}
+                for site in sites.values() if site.biome in dimension.biomes and site.id not in ROAD_SITE_IDS}
     fits = {ident: [key for key in candidates if regions[key].id in sites[ident].weights]
             for ident, candidates in all_fits.items()}
     plan = {}
@@ -136,6 +139,17 @@ def bounded_site_plan(world_seed, dimension, land, sites, region_for, biome_for,
         counts[ident] += 1
         present.add(ident)
         used_cells.add((key.x // SITE_CELL, key.y // SITE_CELL))
+    # The road out (LandDef.road_out): its own sites stand on it, placed after the land's plan so a
+    # road added to an older world never moves a landmark. The village is at the far end.
+    from .catalog import ROAD_OUT_SITES, VILLAGE_SITE
+    from .edges import road_out_chunks
+    road = road_out_chunks(land, dimension.id)
+    if road:
+        wanted = [(road[-1], VILLAGE_SITE)] + [(key, ident) for key, ident in zip(road[1:-1], ROAD_OUT_SITES)]
+        for key, ident in wanted:
+            if ident in sites:   # centred on the road, clear of the thicket walling it in
+                rx, ry = sites[ident].size
+                plan[key] = SitePlacement(sites[ident], key, width // 2, height // 2, rx, ry)
     return plan
 
 
@@ -188,6 +202,24 @@ def layout(placement, seed):
         for dx, dy in ((-3, -1), (3, -1), (-4, 1), (4, 1), (0, 2)):
             objects[(cx + dx, cy + dy)] = STONE
         _scatter(p, seed, ground, RUBBLE, "site-bones", 6)
+    elif p.site.structure == "village":   # houses round a flagstone square, market stalls, woodpiles
+        for dx, dy in ((-5, -1), (5, -1), (-5, 1), (5, 1), (0, -3), (-2, -2), (2, -2), (-6, 3), (6, -3)):
+            objects[(cx + dx, cy + dy)] = HUT
+        for dx, dy in ((-2, 2), (2, 2)):
+            objects[(cx + dx, cy + dy)] = RACK
+        for dx, dy in ((-7, 0 + 1), (7, 1)):
+            objects[(cx + dx, cy + dy)] = LOGS
+        for y in range(cy - 1, cy + 2):
+            for x in range(cx - 3, cx + 4):
+                ground[(x, y)] = FLAGSTONE
+    elif p.site.structure == "bandits":   # tents round a fire, a barricade of logs across the road
+        for dx, dy in ((-3, -1), (3, -1), (0, -2), (-4, 1)):
+            objects[(cx + dx, cy + dy)] = TENT
+        for dx, dy in ((5, 1), (4, 2)):
+            objects[(cx + dx, cy + dy)] = LOGS
+        for dx in (-1, 0, 1):
+            ground[(cx + dx, cy)] = SCORCH
+        _scatter(p, seed, ground, RUBBLE, "site-bandit-litter", 7)
     inner = lambda x, y: all(p.contains(x + dx, y + dy) for dx, dy in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)))
     return ({k: v for k, v in objects.items() if inner(*k) and k[1] != cy},
             {k: v for k, v in ground.items() if p.contains(*k)})
@@ -205,6 +237,8 @@ def condition_for(world_seed, placement, life, catalog=None):
     """This life's SiteConditionDef for a placed site: a weighted pick among the conditions
     that fit its structure, fixed by world seed, life and the site's chunk (pure)."""
     conditions = SITE_CONDITIONS if catalog is None else catalog
+    if placement.site.structure in LIVED_IN:
+        return None   # a village (or a camp of living men) is as it is: no ruin's condition
     fits = [c for c in sorted(conditions.values(), key=lambda c: c.id)
             if c.structures is None or placement.site.structure in c.structures]
     key = placement.key

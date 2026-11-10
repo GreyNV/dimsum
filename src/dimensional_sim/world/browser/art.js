@@ -10,9 +10,9 @@ import {structureCanvas} from './painted_props.js';
 import {DECOR_H, DECOR_W, SPILLS, drawDecor, raggedBand, undergrowth} from './natural_ground.js';
 import {SHALLOW_BG, WATER_BG, blooms, drawBlooms, drawFlagstones, drawPath, drawPlanks, drawRubble, drawScorch, drawBlades, drawReflection, drawShores, isWater, drawLitRock, drawRipples, grassBlades, ripples, TREE_ART, withDetail} from './nature_art.js';
 export const PALETTE = Object.freeze({
-  void: '#11180f', floor: '#172011', path: '#242418',
-  grass: ['#334824', '#405930', '#59713b', '#748648'],
-  leaves: ['#314822', '#44602b', '#5c7935', '#839545', '#abb65a'],
+  void: '#0a0e0d', floor: '#111814', path: '#1e1f1c',   // cold and dim (docs/design/ATMOSPHERE.md)
+  grass: ['#26352b', '#30402f', '#3f5140', '#516451'],
+  leaves: ['#24362b', '#2e4335', '#3b5243', '#4f6656', '#6e8577'],
   bark: ['#645033', '#9b7944', '#b59050'], stone: ['#536057', '#788278', '#a3a490'],
   pathInk: ['#695b36', '#8e7445', '#b19459'],
   ash: ['#4d4940', '#696055', '#867264'], debris: ['#775538', '#a07548', '#c09660'],
@@ -148,8 +148,8 @@ onStyleChange(() => stamps.clear());
 export function stampCount() { return stamps.size; }
 /* Ground in text too: blades become strokes, earth and stone sparse dots, over a near-black base,
  * with light read on one fixed scale so neighbouring tiles match. Cells divide the 24 x 28 tile. */
-const GROUND_ASCII = {cell: [1.5, 28 / 11], ground: false, absolute: [.04, .3], base: '#0b1009',
-  style: {backing: 'none', lift: 1.45, whiten: 0}, glyphs: " .'`,:;-!|/\\"};
+const GROUND_ASCII = {cell: [1.5, 28 / 11], ground: false, absolute: [.04, .3], base: '#080c0c',
+  style: {backing: 'none', lift: 1.3, whiten: 0}, glyphs: " .'`,:;-!|/\\"};
 function tileStamp(glyph, variant, createCanvas) {
   const terrain = '=;o~x:w%H*F'.includes(glyph) ? glyph : '.';
   return stamp(`tile:${terrain}:${variant}`, TILE_W, TILE_H, ctx => {
@@ -380,12 +380,13 @@ function reflect(g, chunk, createCanvas) {
   }
 }
 export function terrainColor(glyph) {
-  return glyph === '=' ? '#b29a5b' : glyph === 'T' ? '#718347' : glyph === '^' ? '#959582'
-    : glyph === 'x' ? '#a07548' : glyph === ':' ? '#696055' : glyph === '~' ? '#5a8d85'
-    : glyph === 'o' ? '#789658' : glyph === 'w' ? '#3f7fa6' : glyph === '%' ? '#6f9fb3'
-    : glyph === 'H' ? '#9b7944' : glyph === '*' ? '#55703a'
+  // the minimap in the cold palette too (paths and structures stay warm enough to find)
+  return glyph === '=' ? '#9a8c66' : glyph === 'T' ? '#4c6052' : glyph === '^' ? '#7c8584'
+    : glyph === 'x' ? '#857058' : glyph === ':' ? '#5a5a58' : glyph === '~' ? '#4e7472'
+    : glyph === 'o' ? '#5d7362' : glyph === 'w' ? '#3c6a86' : glyph === '%' ? '#5f8796'
+    : glyph === 'H' ? '#86704e' : glyph === '*' ? '#465a48'
     : glyph === 'A' ? '#c8b080' : glyph === 'M' ? '#a3a490' : glyph === 'F' ? '#7d8576'
     : glyph === 'L' || glyph === 'S' || glyph === 'U' ? '#9b7944' : glyph === 'R' ? '#a6845d'
     : glyph === 'P' || glyph === 'Q' || glyph === 'I' ? '#a3a490' : glyph === 'B' ? '#59713b'
-    : glyph === 'K' ? '#6e4f2e' : glyph === 'Y' ? '#c0503a' : '#3d512b';   // edge: deadfall, broken bridge
+    : glyph === 'K' ? '#6e4f2e' : glyph === 'Y' ? '#c0503a' : '#34443a';   // edge: deadfall, broken bridge
 }

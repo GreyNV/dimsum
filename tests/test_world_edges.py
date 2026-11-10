@@ -6,7 +6,7 @@ from collections import deque
 from dataclasses import replace
 from unittest.mock import patch
 
-from dimensional_sim.world.catalog import LANDS
+from dimensional_sim.world.catalog import LANDS, ROAD_SITE_IDS, SITES
 from dimensional_sim.world.edges import chunk_open, sealed_sides
 from dimensional_sim.world.models import ChunkKey
 from dimensional_sim.world.open_terrain import BROKEN_BRIDGE, DEADFALL
@@ -44,7 +44,8 @@ class EdgeTests(unittest.TestCase):
     def test_the_area_is_ragged_and_bounded(self):
         seed = 482910
         ring = lambda x, y: max(abs(x), abs(y))
-        opens = {(x, y) for x in range(-9, 10) for y in range(-9, 10) if chunk_open(seed, ChunkKey("forest", x, y))}
+        opens = {(x, y) for x in range(-9, 10) for y in range(-9, 10)
+                 if chunk_open(seed, ChunkKey("forest", x, y), road=False)}   # the land itself, without its road out
         self.assertTrue(all(ring(x, y) <= LAND.lobe_ring for x, y in opens))
         self.assertTrue(all((x, y) in opens for x in range(-LAND.edge_ring, LAND.edge_ring + 1)
                             for y in range(-LAND.edge_ring, LAND.edge_ring + 1)))
@@ -83,6 +84,19 @@ class EdgeTests(unittest.TestCase):
             restored = WorldRepository.from_dict(saved)
             self.assertTrue(restored.chunk_open(ChunkKey("forest", LAND.edge_ring, 0)),
                             "a catalog edit never moves an existing world's edge")
+
+    def test_schema_nine_road_upgrade_checks_original_pinned_catalogs(self):
+        old_land = replace(LAND, road_out=None)
+        old_sites = {ident: site for ident, site in SITES.items() if ident not in ROAD_SITE_IDS}
+        saved = WorldRepository(land_catalog={"forest": old_land}, site_catalog=old_sites).to_dict()
+        saved["schema_version"] = 9
+        restored = WorldRepository.from_dict(saved)
+        self.assertIsNotNone(restored._generator.land_catalog["forest"].road_out)
+        for name in ("site", "land"):
+            damaged = json.loads(canonical_json(saved))
+            damaged[f"{name}_catalog"][0]["name"] = "damaged"
+            with self.assertRaisesRegex(ValueError, f"{name} catalog digest mismatch"):
+                WorldRepository.from_dict(damaged)
 
 
 if __name__ == "__main__":

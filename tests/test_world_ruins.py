@@ -44,7 +44,7 @@ class RuinGuardTests(unittest.TestCase):
 
     def test_only_the_ruins_have_guards(self):
         guarded = {a.site for a in BY_ID.values() if a.placement == "site" and a.category == "fight"}
-        self.assertEqual(guarded, {"old_barrow", "fallen_watchtower", "ruined_shrine"})
+        self.assertEqual(guarded, {"old_barrow", "fallen_watchtower", "ruined_shrine", "bandit_camp"})   # and the bandits on the road out
         for a in BY_ID.values():
             if a.enemy == "restless_bones":
                 self.assertEqual(a.placement, "site", "bones never roam the wild forest")

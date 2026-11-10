@@ -1,7 +1,7 @@
 /** Browser adapter: snapshots in, character art out. Python owns all game rules. */
 import {TILE_W, TILE_H, ZOOM, clamp, residentBounds, cameraView, follow, glide, retainResident, tileAt, visualHash, stickDirection, Controls} from './view.js';
 import {PALETTE, OBJECT_PAD, paintChunk, treeAt, treeKind, drawObjects, canopyFade, pathCover, trailFade, put, putSwayed, setResolution} from './art.js';
-import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawUnarmedReach, drawDamage, drawFloat, drawReveal, drawSpot, drawSpotCompletion, drawCamp, drawBuildings, drawCampfire, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
+import {drawPlayer, drawEnemy, drawEffect, drawPunchLines, drawUnarmedReach, drawDamage, drawFloat, drawReveal, drawSpot, drawSpotCompletion, drawCamp, drawBuildings, drawCampfire, drawBedroll, drawAmbushSite, drawElder, occludingTreeTiles, hiddenBehind, TORSO_LIFT} from './actors.js';
 import {PAGES, needsDetail, pageModel, PANELS, COLLAPSE_KEY, loadCollapsed, toggleCollapsed, defaultCollapsed, subtabsOf} from './pages.js';
 import {debugText, ExpeditionHud, activityLabel, activityText, newRewards, prologueView, rewardTexts, reportIsFresh, reportStorageKey} from './hud.js';
 import {clockText, regionCue, skillSlots, worldMode} from './world_ui.js';
@@ -12,14 +12,20 @@ import {drawMinimap, visibleAt} from './minimap.js';
 import {anchorAction, openingReveal, renderAnchor} from './anchor_ui.js';
 import {StoryCard, drawOpeningDark, renderStory} from './story_ui.js';
 import {buildTabs, journalAction, renderSection, renderSubtabs} from './page_ui.js';
-import {dayGrade, drawDayGrade, drawNight, nightAlpha, drawEdgeMarker, drawEyelids, drawPossessionAura, drawPossessionGround, drawPossessionTint, drawVignette, edgePoint, possessionGlow, tintPicture} from './scene_fx.js';
+import {dayGrade, drawAmbience, drawDayGrade, drawNight, nightAlpha, drawEdgeMarker, drawEyelids, drawPossessionAura, drawPossessionGround, drawPossessionTint, drawVignette, edgePoint, possessionGlow, tintPicture} from './scene_fx.js';
 import {drawMotes, drawReflection, drawWaterGlints, isWater} from './nature_art.js';
 import {drawBlownLeaves, swayKind, windShear} from './wind.js';
 import {ACTOR_FOOT} from './sprites.js';
+import {createAtlas} from './atlas_ui.js';
 import {SOUND_KEY, SoundEngine, VOLUMES, loadSettings, soundEvents, surfaceOf} from './sound.js';
 
 const storyCard = new StoryCard();
 const canvas = $('scene'), ctx = canvas.getContext('2d'), mini = $('minimap'), map = mini.getContext('2d');
+/* The full map: open from the minimap (or N); while open each poll asks for the atlas. */
+const atlas = createAtlas({onToggle: open => { if (!open) canvas.focus(); }, getState: () => state});
+let lastAtlasAt = 0;
+mini.addEventListener('click', () => { lastAtlasAt = 0; atlas.open(); });
+mini.addEventListener('keydown', e => { if (e.code === 'Enter' || e.code === 'Space') { e.preventDefault(); atlas.open(); } });
 const chunks = new Map(), pictures = new Map(), controls = new Controls();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 /* Design debug overlay: ?debug in the URL or the backquote key. Asks the server for its
@@ -131,7 +137,7 @@ function closeContext() {
 function updateActivity() {
   if (!state) return;
   const tile = tileAt([...chunks.values()], state.player.x, state.player.y);
-  const near = state.targets.find(t => t.hp > 0 && Math.abs(t.x - state.player.x) + Math.abs(t.y - state.player.y) <= 2);
+  const near = state.targets.find(t => t.hp > 0 && !t.hidden && Math.abs(t.x - state.player.x) + Math.abs(t.y - state.player.y) <= 2);
   const surface = near ? `${near.name || 'Something'}${near.tier ? ' ' + near.tier : ''} nearby - ${near.hp} HP` : tile?.glyph === '%' ? 'Fording the river' : tile?.glyph === 'H' ? 'On an old bridge' : tile?.blocked ? 'Obstructed ground' : tile?.glyph === '=' ? 'On the old forest trail' : 'Among the trees';
   const auto = activityText(state, paused);
   const text = auto ?? (paused ? 'Paused - the forest can wait' : state.player.animation === 'attack' ? (state.expedition?.weapon?.item ? 'Weapon up' : 'Fists up') : surface);
@@ -142,6 +148,7 @@ function changeZoom(delta) {
 }
 function adopt(next, sentControl = null) {
   const firstSnapshot = state === null;
+  if (next.atlas && atlas.isOpen()) atlas.update(next.atlas, next.world_seed);
   for (const chunk of next.chunks) {
     chunks.set(chunk.id, chunk);
     pictures.delete(chunk.id);   // painted lazily: visible now, others one per frame
@@ -353,11 +360,13 @@ function dotHole(g, m, X0, Y0, {x, y, rx, ry, density}) {
     for (let xx = Math.floor((cx - RX) / dot) * dot; xx < cx + RX; xx += dot) {
       const d = Math.hypot((xx - cx) / RX, (yy - cy) / RY);
       if (d >= 1) continue;
-      if ((BAYER[(yy / dot) & 3][(xx / dot) & 3] + .5) / 16 < Math.min(1, (1 - d) * 1.9) * density) g.fillRect(xx, yy, dot, dot);
+      // open in the middle, thinning through the outer third to nothing at the circle's edge
+      if ((BAYER[(yy / dot) & 3][(xx / dot) & 3] + .5) / 16 < Math.min(1, (1 - d) * 2.8) * density) g.fillRect(xx, yy, dot, dot);
     }
   }
   g.restore();
 }
+const REVEAL_R = 30;        // world px: the dot reveal's circle round the avatar (it stands about 40 px tall)
 let coveredSince = null;   // when leaves last closed over the avatar (the dots creep in from then)
 /** Exactly one request in flight. Server fixed ticks and input lease own timing. */
 async function poll() {
@@ -369,6 +378,7 @@ async function poll() {
     if (pendingInteract) body.interact = true;
     if (pendingAction) body.action = pendingAction;
     if (debugOn) body.debug = true;
+    if (atlas.isOpen() && started - lastAtlasAt > 1000) { body.atlas = atlas.request(); lastAtlasAt = started; }
     if (needsDetail(page) && (!lastDetail || started - lastDetailAt > 500)) { body.detail = true; lastDetailAt = started; }
     const attackRevision = controls.attackRevision;
     const next = await request('/api/input', body);
@@ -529,12 +539,15 @@ function render(now) {
     // Trees, rocks and structures rooted in explored tiles draw whole - a tall canopy reaches
     // over the dark beyond instead of being cut off at the fog line.
     ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='low';   // trees and actors: resampled smoothly
+    const inFront = new Set(occludingTreeTiles(state.player.x, state.player.y).map(t => `${t.x},${t.y}`));
     for(const chunk of revealed) {
       const rows=fog[`${chunk.x}:${chunk.y}`];
       const ax=actor.x/TILE_W-.5, ay=actor.y/TILE_H-.5;
       drawObjects(ctx,pictures.get(chunk.id),chunk.x*chunk.width*TILE_W,chunk.y*chunk.height*TILE_H,(tx,ty)=>rows?.[ty]?.[tx]==='1',
-        (tx,ty,item)=>chunk.tiles[ty][tx]==='T' && !state.expedition?.anchor_space
-          ? Math.min(canopyFade(chunk.x*chunk.width+tx-ax, chunk.y*chunk.height+ty-ay), trailFade(item.cover, ax, ay)) : 1,
+        (tx,ty,item)=>chunk.tiles[ty][tx]!=='T' || state.expedition?.anchor_space ? 1
+          // trees in front of the avatar wait for its own pass, where the dot reveal opens them
+          : inFront.has(`${chunk.x*chunk.width+tx},${chunk.y*chunk.height+ty}`) ? 0
+          : Math.min(canopyFade(chunk.x*chunk.width+tx-ax, chunk.y*chunk.height+ty-ay), trailFade(item.cover, ax, ay)),
         reducedMotion ? null : (tx,ty,item)=>windShear(chunk.x*chunk.width+tx, chunk.y*chunk.height+ty, now, swayKind(item, chunk.tiles[ty][tx])));
     }
     const anchor = state.expedition?.anchor;
@@ -548,7 +561,8 @@ function render(now) {
     }
     const fire = state.expedition?.campfire;
     if (fire && inSight(fire.x, fire.y))
-      drawCampfire(ctx, (fire.x+.5)*TILE_W, (fire.y+.5)*TILE_H, {clock: state.clock_ms, reducedMotion});
+      if (fire.bed) drawBedroll(ctx, (fire.x+.5)*TILE_W, (fire.y+.5)*TILE_H);   // a rented bed at the inn: no fire
+      else drawCampfire(ctx, (fire.x+.5)*TILE_W, (fire.y+.5)*TILE_H, {clock: state.clock_ms, reducedMotion});
     if (fire && inSight(fire.x, fire.y)) repaintCanopies(fire.x, fire.y, revealed, 1);
     const goal = state.expedition?.goal;
     // Spots sit on the ground: canopies south of them cover them too, see-through so they still read.
@@ -598,8 +612,11 @@ function render(now) {
         // Leaves in front close over the avatar again, opened by the dot reveal round its body.
         if (!state.expedition?.anchor_space) {
           const density = reducedMotion ? 1 : coveredSince === null ? .35 : Math.min(1, .35 + (now - coveredSince) / 900);
-          const covered = repaintCanopies(item.tx, item.ty, revealed, 1, null,
-            {x: actor.x, y: actor.y - TORSO_LIFT, rx: 20, ry: 30, density});
+          const cx = actor.x, cy = actor.y - TORSO_LIFT;   // a circle round the whole figure and the ground it stands on
+          // the whole of each tree in front (the ground pass left them out), opened in a circle
+          const covered = repaintCanopies(item.tx, item.ty, revealed, 1,
+            [cx - 6 * TILE_W, cy - 10 * TILE_H, cx + 6 * TILE_W, cy + 6 * TILE_H],
+            {x: cx, y: cy, rx: REVEAL_R, ry: REVEAL_R, density});
           if (!covered) coveredSince = null; else coveredSince ??= now;
         }
       }
@@ -614,7 +631,7 @@ function render(now) {
       // the avatar's own trees are already thinned (canopyFade); others' leaves are see-through
       if(item.kind!=='player') repaintCanopies(item.tx,item.ty,revealed,.6);   // leaves over actors are see-through
     }
-    for(const t of state.targets) if(inSight(t.x,t.y) && hiddenBehind(t,state.player)) {
+    for(const t of state.targets) if(inSight(t.x,t.y) && !t.hidden && hiddenBehind(t,state.player)) {
       const hit=hits.get(t.id);
       const at=enemyXY(t,now);
       drawEnemy(ctx,t,at.x,at.y,{clock:state.clock_ms,reducedMotion,west:actor.x<at.x,ghost:true,hit:hit?now-hit.at:Infinity});
@@ -650,8 +667,14 @@ function render(now) {
       drawFloat(ctx, actor.x, actor.y - 62 - (i % 4) * 11, rewards[i].text, reducedMotion ? 0 : age,
         {color: rewards[i].color, duration: 1600, size: rewards[i].glint ? 11 : 9});
     }
+    // Ash on the air and mist along the ground (world px, so they stay put as the view moves).
+    if (!state.expedition?.anchor_space && !prologue) {
+      const hw = width / 2 / view.scale, hh = height / 2 / view.scale;
+      drawAmbience(ctx, [view.x - hw, view.y - hh, view.x + hw, view.y + hh], now,
+        {night: nightAlpha(state.expedition?.clock), reducedMotion});
+    }
     ctx.setTransform(dpr,0,0,dpr,0,0);
-    // The colour of the day: rose dawn warming into daylight, golden afternoon, red sunset, violet dusk.
+    // The colour of the day: an ashen dawn paling to grey daylight, a dull ember sunset, slate dusk.
     if (!state.expedition?.anchor_space && !prologue) drawDayGrade(ctx, width, height, dayGrade(state.expedition?.clock));
     // Night: darkness with holes of light around the avatar, the anchor camp and a campfire.
     const dark = nightAlpha(state.expedition?.clock);
@@ -663,7 +686,7 @@ function render(now) {
       drawNight(ctx, width, height, dark, [
         {...me, r: (possessed ? 120 : 84) * view.scale, warm: false},
         tileLight(state.expedition.anchor, 150, true),
-        tileLight(state.expedition.campfire, 110, true),
+        tileLight(state.expedition.campfire, 110, !state.expedition.campfire?.bed),
       ].filter(Boolean), {clock: now, reducedMotion});
     }
     // Off-screen guides: the anchor camp (always) and this life's campfire, at the screen edge.
@@ -685,7 +708,7 @@ function render(now) {
       possessedSince === null ? Infinity : now - possessedSince));
     $('zoom').textContent=Math.round(view.scale*100)+'%';
     $('zoom-out').disabled=zoom<=ZOOM.min; $('zoom-in').disabled=zoom>=ZOOM.max;
-    if(mapDirty && state) { drawMinimap(map, state, chunks, dpr); mapDirty = false; }
+    if(mapDirty && state) { drawMinimap(map, state, chunks, dpr); if (atlas.isOpen()) atlas.redraw(); mapDirty = false; }
   }
   if(state) sound.update({now, paused, work: state.expedition?.activity?.kind ?? null, ...soundScene,
     outdoors: !state.expedition?.anchor_space && !state.expedition?.prologue});
@@ -707,6 +730,7 @@ addEventListener('keydown', event=>{
     setSound({...sound.settings, volume: sound.settings.volume ? 0 : lastVolume});
     toast(sound.settings.volume ? `Sound ${sound.label.toLowerCase()}` : 'Sound off');
   }
+  else if(event.code==='KeyN' && !event.repeat) { event.preventDefault(); lastAtlasAt = 0; atlas.toggle(); }
   else if(event.code==='Escape' && page !== 'world') { event.preventDefault(); openPage('world'); }
   else if(/^Digit[1-9]$/.test(event.code) && !event.repeat) {
     const selected = PAGES[Number(event.code.slice(5)) - 1];

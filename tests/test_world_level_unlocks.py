@@ -58,13 +58,14 @@ class LevelUnlockTests(unittest.TestCase):
         from dimensional_sim.world.journal import record_action
         record_action(e.journal, "lodge_snares")
         e._apply_outcomes(BY_ID["lodge_snares"], "self:test")
-        self.assertEqual(e.life_recipes, {"snare"})
+        self.assertEqual(e.life_recipes, {"snare", "hide_boots"})
         self.assertIn("snare", e.spot_context(e.game.player.chunk).recipes)
         self.assertTrue(any("anchor" in row["text"] for row in e.log), "the log says how to keep it")
         e.health, e.cause = 0, "starvation"
         e.advance(0)
         rows = [r for r in e.anchor_offers() if r["kind"] == "keep"]
-        self.assertEqual([(r["id"], r["cost"]) for r in rows], [("snare", RECIPE_KEEP_COST["snare"])])
+        self.assertEqual([(r["id"], r["cost"]) for r in rows],
+                         [(k, RECIPE_KEEP_COST[k]) for k in ("snare", "hide_boots")])   # the snare line teaches both
         e.anchor_action({"type": "begin_life"})
         self.assertEqual((e.recipes, e.life_recipes), (set(), set()), "not kept: forgotten")
 

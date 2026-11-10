@@ -136,6 +136,12 @@ const BODY_LOOKS = Object.freeze({
     bands(c, torso, 5, -.1, '#2b2924', .95, .4, .4);
     grain(c, torso, '#b9b4a2', 22, {len: .6, angle: Math.PI / 2, spread: .2, width: .18, seed: 13, alpha: .6});
   },
+  leather_jerkin: (c, torso) => {        // three hides sewn together: dark, stiff, with pale seams
+    paint(c, torso, '#5a4330', {shade: .65, key: .32, light: [.18, .15], rim: .4});
+    grain(c, torso, HIDE.dark, 40, {len: 1.2, angle: .2, spread: .6, width: .2, seed: 17, alpha: .65});
+    bands(c, torso, 2, 1.2, '#c9b48e', .9, .3, 0);
+    bands(c, torso, 2, -.4, '#c9b48e', .8, .26, .3);
+  },
   studded_wrap: (c, torso, j) => {       // the hide wrap set with iron studs
     BODY_LOOKS.hide_wrap(c, torso, j);
     const [x, y, w, h] = torso.box;
@@ -147,13 +153,42 @@ const BODY_LOOKS = Object.freeze({
 });
 /** Head slot: painted last, over the head anchor. */
 const HEAD_LOOKS = Object.freeze({
-  hood: (c, j, back) => hood(c, j, back),
+  hood: (c, j, back) => hood(c, j, back, CLOTH.base),          // the art lab's cloth hood
+  leather_hood: (c, j, back) => hood(c, j, back, '#5f4a36'),
 });
-export const GEAR_LOOK_IDS = Object.freeze([...Object.keys(BODY_LOOKS), ...Object.keys(HEAD_LOOKS)]);
+/** Hands, feet and back: a palette each; the shapes follow the pose's joints. */
+const HAND_LOOKS = Object.freeze({leather_gloves: {base: '#5a4330', seam: '#c9b48e'}});
+const FEET_LOOKS = Object.freeze({hide_boots: {base: '#4a3626', seam: '#8f7656'}});
+const BACK_LOOKS = Object.freeze({leather_pack: {base: '#5c452f', frame: '#7a5f40', strap: ROPE}});
+export const GEAR_LOOK_IDS = Object.freeze([BODY_LOOKS, HEAD_LOOKS, HAND_LOOKS, FEET_LOOKS, BACK_LOOKS].flatMap(Object.keys));
+
+function hand(c, wrist, look, dim, key) {
+  const [hx, hy] = [wrist[0] + .05, wrist[1] + 1.25];
+  if (!look) return false;
+  paint(c, E(hx, hy, 1.05, 1.3), look.base, {shade: dim, key, light: [.2, .2]});
+  stroke(c, [[hx - .9, hy - .6], [hx + .9, hy - .7]], look.seam, .3, .9);   // the cuff
+  return true;
+}
+function boot(c, j, s, look, dim, key) {
+  const [kx, ky] = j['knee' + s], [ax, ay] = j['ankle' + s];
+  const mid = [(kx + ax) / 2, (ky + ay) / 2];
+  paint(c, T(...mid, 1.35, ax, ay, 1.3), look.base, {shade: dim, key});
+  stroke(c, [[mid[0] - 1.2, mid[1]], [mid[0] + 1.2, mid[1]]], look.seam, .3, .9);
+  const [fx, fy] = j['foot' + s];
+  paint(c, P([[fx - 1.8, fy - 1.3], [fx + .7, fy - 1.4], [fx + 2.6, fy - .3], [fx + 2.7, fy + .8], [fx - 1.9, fy + .9]], true), look.base, {shade: dim, key});
+}
+function pack(c, j, look, back) {
+  const [sx, sy] = j.shoulderF, [nx, ny] = j.shoulderN;
+  const x = back ? (sx + nx) / 2 - 3.4 : sx - 4.2, y = Math.min(sy, ny) + .2;
+  paint(c, R(x, y, 6.2, 8.6, 1.2), look.base, {shade: .75, key: .25, light: [.2, .15], rim: .35});
+  bands(c, R(x, y, 6.2, 8.6, 1.2), 2, 0, HIDE.dark, .8, .3);
+  stroke(c, [[x - .2, y - .6], [x - .2, y + 9.4]], look.frame, .45, .95);   // the stick frame
+  stroke(c, [[x + 6.4, y - .6], [x + 6.4, y + 9.4]], look.frame, .45, .95);
+}
 
 // ---- the figure --------------------------------------------------------------------------------
-/** Paint the traveller at joints `j`. `back`: seen from behind (facing north). `worn`: {body, head}
- * catalog item ids (or missing). */
+/** Paint the traveller at joints `j`. `back`: seen from behind (facing north). `worn`: {body, head,
+ * hands, feet, back} catalog item ids (or missing; ring and amulet draw nothing yet). */
 export function paintTraveller(c, j, {back = false, worn = {}} = {}) {
   const sw = j.sway * .5;
   const [sx, sy] = j.shoulderF, st = Math.max(0, -j.sway - 1.5);   // st: how far the cloak streams out
@@ -163,10 +198,13 @@ export function paintTraveller(c, j, {back = false, worn = {}} = {}) {
     paint(c, cloak, CLOTH.dark, {shade: .8, light: [.1, .1], rim: .35});
     bands(c, cloak, 5, 1.45, CLOTH.deep, .5, .22);
   }
+  const packLook = BACK_LOOKS[worn.back];
+  if (packLook && !back) pack(c, j, packLook, false);   // behind the body, peeking past the near shoulder
   // the far arm (body's right), behind the torso, in shadow
   paint(c, T(...j.shoulderN, 1.3, ...j.elbowN, 1.02), CLOTH.dark, {shade: .9, key: .05});
   paint(c, T(...j.elbowN, 1.02, ...j.wristN, .84), HIDE.dark, {shade: .9, key: .05});
-  paint(c, E(j.wristN[0] + .05, j.wristN[1] + 1.2, .82, 1.02), SKIN.dark, {shade: .85, key: .05});
+  if (!hand(c, j.wristN, HAND_LOOKS[worn.hands], .85, .05))
+    paint(c, E(j.wristN[0] + .05, j.wristN[1] + 1.2, .82, 1.02), SKIN.dark, {shade: .85, key: .05});
   // legs: the far leg in shadow, then the near leg, lit
   for (const [s, dim, key] of [['N', .88, .06], ['F', .45, .24]]) {
     const thigh = T(...j['hip' + s], 2.2, ...j['knee' + s], 1.65), shin = T(...j['knee' + s], 1.65, ...j['ankle' + s], 1.1);
@@ -174,7 +212,8 @@ export function paintTraveller(c, j, {back = false, worn = {}} = {}) {
     paint(c, shin, HIDE.base, {shade: dim, key});
     bands(c, shin, 7, s === 'F' ? .5 : -.5, HIDE.dark, .85, .24);
     const [fx, fy] = j['foot' + s];
-    paint(c, P([[fx - 1.6, fy - 1], [fx + .6, fy - 1.2], [fx + 2.4, fy - .2], [fx + 2.5, fy + .6], [fx - 1.7, fy + .7]], true), HIDE.dark, {shade: dim, key});
+    if (FEET_LOOKS[worn.feet]) boot(c, j, s, FEET_LOOKS[worn.feet], dim, key);
+    else paint(c, P([[fx - 1.6, fy - 1], [fx + .6, fy - 1.2], [fx + 2.4, fy - .2], [fx + 2.5, fy + .6], [fx - 1.7, fy + .7]], true), HIDE.dark, {shade: dim, key});
   }
   occlude(c, 16.7, 23.5 + j.br, 2.6, 4, .7);
   const hipY = (j.hipF[1] + j.hipN[1]) / 2;
@@ -194,14 +233,19 @@ export function paintTraveller(c, j, {back = false, worn = {}} = {}) {
   if (back) {   // seen from behind the cloak covers the back
     paint(c, cloak, CLOTH.dark, {shade: .75, light: [.3, .1], rim: .35});
     bands(c, cloak, 5, 1.45, CLOTH.deep, .5, .22);
+    if (packLook) pack(c, j, packLook, true);
+  } else if (packLook) {   // a strap over the near shoulder
+    stroke(c, [[j.shoulderF[0] + .6, j.shoulderF[1] - .6], [j.shoulderF[0] + 2.2, hipY - 4]], packLook.strap, .55, .95);
   }
   // the near arm (body's left): a wrapped forearm and a bare, bony hand
   paint(c, T(...j.shoulderF, 1.45, ...j.elbowF, 1.12), CLOTH.base, {shade: .7, light: [.2, .2], rim: .3});
   const fore = T(...j.elbowF, 1.12, ...j.wristF, .9);
   paint(c, fore, HIDE.base, {shade: .65}); bands(c, fore, 6, .7, HIDE.dark, .85, .22);
-  const [hx, hy] = [j.wristF[0] + .05, j.wristF[1] + 1.3];
-  paint(c, E(hx, hy, .9, 1.15), SKIN.base, {shade: .65, light: [.2, .2]});
-  for (let f = 0; f < 4; f++) stroke(c, [[hx - .55 + f * .37, hy + .5], [hx - .5 + f * .37, hy + 1.45]], SKIN.deep, .17, .85);
+  if (!hand(c, j.wristF, HAND_LOOKS[worn.hands], .6, .25)) {
+    const [hx, hy] = [j.wristF[0] + .05, j.wristF[1] + 1.3];
+    paint(c, E(hx, hy, .9, 1.15), SKIN.base, {shade: .65, light: [.2, .2]});
+    for (let f = 0; f < 4; f++) stroke(c, [[hx - .55 + f * .37, hy + .5], [hx - .5 + f * .37, hy + 1.45]], SKIN.deep, .17, .85);
+  }
   head(c, j.head, back);
   HEAD_LOOKS[worn.head]?.(c, j, back);
 }
@@ -231,17 +275,17 @@ function head(c, [cx, cy], back) {
   paint(c, hair, HAIR, {shade: .6, key: .18, rim: .3});
   grain(c, hair, '#3a3029', 16, {len: 1.2, angle: Math.PI / 2 + .4, spread: .9, width: .15, seed: 21, alpha: .7});
 }
-function hood(c, j, back) {
+function hood(c, j, back, base) {
   const [cx, cy] = j.head;
   const shell = back
     ? P([[cx - 3.6, cy + 3.6], [cx - 3.9, cy - .8], [cx - 2.4, cy - 3.9], [cx + .4, cy - 4.6], [cx + 2.8, cy - 3.6], [cx + 3.6, cy - .8], [cx + 3.4, cy + 3.6]], true)
     : P([[cx - 3.7, cy + 3.4], [cx - 4, cy - .6], [cx - 2.5, cy - 3.8], [cx + .4, cy - 4.6], [cx + 2.9, cy - 3.5], [cx + 3.4, cy - 1.2],
       [cx + 2.2, cy - 2.4], [cx + .6, cy - 2.6], [cx - .7, cy - 1.4], [cx - 1, cy + 1.6], [cx - .4, cy + 3.8], [cx - 2, cy + 4.6]], true);
-  paint(c, shell, CLOTH.base, {shade: .8, light: [.15, .1], rim: .45});
+  paint(c, shell, base, {shade: .8, light: [.15, .1], rim: .45});
   bands(c, shell, 4, .3, CLOTH.deep, .45, .2, -1);
   if (!back) occlude(c, cx + .9, cy - 1, 2.6, 1.6, .85);   // its brim throws the brow into shadow
   const drape = P([[cx - 3.4, cy + 3], [cx + 3.6, cy + 3.4], [cx + 4, cy + 6.4], [cx, cy + 7.4], [cx - 4, cy + 6.2]], true);
-  paint(c, drape, CLOTH.base, {shade: .75, light: [.15, .1], rim: .4});
+  paint(c, drape, base, {shade: .75, light: [.15, .1], rim: .4});
   bands(c, drape, 3, .1, CLOTH.deep, .5, .22, 1);
 }
 
@@ -254,7 +298,7 @@ export function travellerCanvas(look, {low = null, worn = {}} = {}) {
   const facing = look.facing, back = facing === 'north', west = facing === 'west';
   const phase = look.moving ? (look.frame % WALK_FRAMES) / WALK_FRAMES : null;
   const lowKind = low === 'sit' ? 'sit' : low ? 'crouch' : null;
-  const key = `traveller|${back ? 'n' : west ? 'w' : 'e'}|${lowKind || (phase === null ? `b${look.breathe}` : `${look.run ? 'r' : 'w'}${phase}`)}|${worn.body || ''}|${worn.head || ''}`;
+  const key = `traveller|${back ? 'n' : west ? 'w' : 'e'}|${lowKind || (phase === null ? `b${look.breathe}` : `${look.run ? 'r' : 'w'}${phase}`)}|${['body', 'head', 'hands', 'feet', 'back'].map(k => worn[k] || '').join(',')}`;
   return paintedCanvas(key, HERO_W, HERO_H, c => {
     const joints = lowKind ? travellerLowPose(lowKind)
       : phase === null ? travellerPose({breath: look.breathe ? .25 : 0})
@@ -264,5 +308,5 @@ export function travellerCanvas(look, {low = null, worn = {}} = {}) {
     c.translate(-1.5, 0);   // the figure's centre of mass over the tile's centre
     paintTraveller(c, joints, {back, worn});
     c.restore();
-  });
+  }, {cold: .25});   // already painted in the cold kit
 }

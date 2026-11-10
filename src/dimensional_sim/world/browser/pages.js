@@ -40,7 +40,6 @@ export const toggleCollapsed = (state, id) => PANELS.includes(id) ? {...state, [
 
 /* ---------- page models ---------- */
 const pct = permille => `${(permille / 10).toFixed(1)}%`;
-const product = parts => parts.reduce((a, [, v]) => a * v, 1);
 const JOURNAL_MODES = ['normal', 'favor', 'suppress'];
 export const nextMode = mode => JOURNAL_MODES[(JOURNAL_MODES.indexOf(mode) + 1) % JOURNAL_MODES.length];
 
@@ -55,15 +54,14 @@ function character(d) {
         text: `${r.dim_into} / ${r.dim_next} xp`, dim: true},
     ]}))},
     {title: 'Vitals', kind: 'rows', rows: [
-      ['Health', `${c.health} / 100`], ['Hunger', `${c.hunger} / 100`],
+      ['Health', `${c.health} / ${c.health_max ?? 100}`], ['Hunger', `${c.hunger} / 100`],
       ['Hunger drain', `${c.hunger_per_minute} per min`, `×${m.hunger_drain} from endurance`],
       ['Regeneration', `${c.regen_per_minute} per min`, `${c.rest_regen_per_minute} per min resting at camp`],
     ]},
     {title: 'Combat', kind: 'rows', rows: [
       ...m.punch_parts.filter(([, v]) => v).map(([name, v]) => [`Punch · ${name}`, `+${v}`]),
       ['Punch damage', String(m.punch_damage)],
-      ...m.enemy_hit.map(([name, v]) => [`Damage taken · ${name}`, `×${v}`]),
-      ['Damage taken', `×${product(m.enemy_hit).toFixed(3)}`],
+      ...(m.max_health || []).map(([name, v]) => [`Max health · ${name}`, `+${v}`]),
       ...c.threats.flatMap(t => [
         [`${t.name} at the frontier`, `${t.hit_at_frontier} health per bite`, `${t.hp} HP in ring ${c.frontier}`],
         [`Full fight with a ${t.name.toLowerCase()}`, `${t.fight_cost_at_frontier} health`, 'expected cost of one fight'],

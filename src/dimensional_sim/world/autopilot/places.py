@@ -6,10 +6,12 @@ lives: every past life shapes the next). At CAMP_GRADE a camp - the campfire - c
 there, by the avatar on its own or by the player while possessing it. While a camp stands,
 the avatar keeps to that place: it only goes after what lies in the camp's area and fits the
 place's focus (LOCATION_FOCUS, chosen on the Journal's Places page), and spot rolls there lean
-towards the focus. When the area has nothing left to give for CAMP_IDLE_MS, it breaks camp.
+towards the focus. When the area has nothing left to give for CAMP_IDLE_MS, it is rolled again,
+more explored and more dangerous each round (explored.py), until the avatar sets out.
 """
 from ..tuning import CAMPFIRE_AWAY
 from .constants import EAT_AT, POINT
+from .explored import explored_name
 
 CAMP_ROAM_HUNGER = EAT_AT + 25 * POINT   # below this, with no food carried, the camp lets the avatar roam
 from ..catalog import (BY_ID, CAMP_GRADE, CAMP_IDLE_MS, LOCATION_DEEP_RARITY_PERCENT, LOCATION_FOCUS,
@@ -68,10 +70,11 @@ class PlacesMixin:
         return LOCATION_DEEP_RARITY_PERCENT if deep else 100
 
     # ----- the camp ----------------------------------------------------------------------
-    def _pitch_camp(self):
-        """A campfire was just made: it holds the avatar to the place it stands in."""
+    def _pitch_camp(self, force=False):
+        """A campfire was just made (or a bed rented: `force`, no mastery needed): it holds the
+        avatar to the place it stands in."""
         location = self.location_here()
-        if location is None or self.grade_of(location) < CAMP_GRADE:
+        if location is None or (self.grade_of(location) < CAMP_GRADE and not force):
             self.camp = None
             return
         key = self.game.player.chunk
@@ -131,7 +134,7 @@ class PlacesMixin:
             self.camp_focus() == "searching"
 
     def _camp_idle(self, found_work):
-        """Track how long the camp's area has had nothing to give; break camp after CAMP_IDLE_MS."""
+        """Track how long the camp's area has had nothing to give; work it again after CAMP_IDLE_MS."""
         if not self.camping():
             return
         if found_work:
@@ -140,8 +143,7 @@ class PlacesMixin:
         if self.camp["idle_since"] is None:
             self.camp["idle_since"] = self.total_ms
         elif self.total_ms - self.camp["idle_since"] >= CAMP_IDLE_MS:
-            self._entry("rest", f"Nothing more around the camp at {LOCATIONS[self.camp['location']].name}. Moving on.")
-            self.camp["left"] = True
+            self._work_camp_area()   # roll the area again, or set out once it grew too dangerous
 
     def set_location_focus(self, location, mode):
         if location not in LOCATIONS or mode not in LOCATION_FOCUS and mode != "none":
@@ -175,7 +177,8 @@ class PlacesMixin:
                 + [{"id": k, "name": v[0]} for k, v in LOCATION_FOCUS.items()],
                 "here": here, "camp": None if not self.camping() else {
                     "location": self.camp["location"], "name": LOCATIONS[self.camp["location"]].name,
-                    "focus": self.camp_focus_name()}}
+                    "focus": self.camp_focus_name(), "rounds": self.camp_rounds(),
+                    "ground": explored_name(self.camp_rounds())}}
 
 
 def home_location(action_id):

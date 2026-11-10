@@ -6,7 +6,7 @@ it. Older saves are migrated one schema at a time by MIGRATIONS; schemas 1-5
 (before the hosted build) are no longer supported and are rejected.
 """
 from ..catalog import RECIPE_KEEP_COST, DEATH_CAUSES, UNLOCKS
-from ..catalog import ATTRIBUTES, BUILDINGS, BY_ID, ITEMS, LOCATION_FOCUS, LOCATIONS
+from ..catalog import ATTRIBUTES, BUILDINGS, FARM_GROW_MS, BY_ID, ITEMS, LOCATION_FOCUS, LOCATIONS
 from ..encounters import ENCOUNTER_VERSION
 from ..equipment import validate_equipped
 from ..journal import new_journal, validate_journal
@@ -16,7 +16,8 @@ from ..tuning import CHEST_SLOTS, DAY_START_MS, NIGHT_SPAWN_EVERY_MS, PITY_CHUNK
 from .constants import (ANCHOR_COUNTDOWN_MS, CONTACT_COOLDOWN_MS, FOOD_COOLDOWN_MS, POSSESS_COOLDOWN_MS, INVENTORY_SLOTS, LEGACY_MONSTER_MAX_MS, LOG_LIMIT,
                         LOG_TYPES, MONSTER_STEP_MS, SCHEMA_VERSION, SELF_ACTIONS, STACK_LIMIT, STAT_KEYS,
                         TASK_TYPES, VITAL_MAX)
-from .ecology import valid_pressure, valid_shimmer
+from .ecology import valid_pressure, valid_pressure_at, valid_shimmer
+from .explored import valid_explored
 from .training import WALK_KEYS, WALK_RATES
 
 V17_SAVE_FIELDS = ("schema_version", "encounters", "exploration", "life", "total_ms", "regular",
@@ -45,7 +46,9 @@ V22_DROPPED = ("mastery", "journal_favor", "journal_guarantee", "journal_guarant
 V22_FIELDS = ("location_done", "location_focus", "camp")
 V22_SAVE_FIELDS = tuple(f for f in V21_SAVE_FIELDS if f not in V22_DROPPED) + V22_FIELDS
 V25_FIELDS = ("walk", "fight_paid")   # schema 25: walking XP remainders, XP paid per hit so far (training.py)
-SAVE_FIELDS = V22_SAVE_FIELDS + V25_FIELDS
+V26_FIELDS = ("farm_harvest_ms",)   # schema 26: when the camp's farm was last harvested
+V27_FIELDS = ("pressure_at", "explored", "rolled")   # schema 27: recovering ground, worked ground around camps
+SAVE_FIELDS = V22_SAVE_FIELDS + V25_FIELDS + V26_FIELDS + V27_FIELDS
 V7_FIELDS = ("journal",)                       # added by schema 7
 V8_FIELDS = ("equipped", "knowledge", "recipes", "journal_disabled", "journal_favor",
              "leads", "lead_history")         # added by schema 8
@@ -300,20 +303,36 @@ def _from_v23(data):
     from closing in (a 'hunt' or 'flee' with nothing in flight)."""
     hunting = data["hunting"]
     if type(hunting) is dict:
-        hunting = {k: {**v, "ax": 0, "ay": 0, "ox": 0, "oy": 0, "left": 0} if type(v) is dict else v
+        hunting = {k: {**v, "ax": 0, "ay": 0, "ox": 0, "oy": 0, "left": 0, "n": 0} if type(v) is dict else v
                    for k, v in hunting.items()}
     return {**data, "schema_version": 24, "hunting": hunting}
 
 
 def _from_v24(data):
     """Walking pays XP from schema 25: nothing walked is owed yet."""
-    return {**data, "schema_version": 25, "walk": {key: 0 for key in WALK_KEYS}, "fight_paid": {}}
+    hunting = data["hunting"]   # strikes in a row (starred patterns) count from schema 25
+    if type(hunting) is dict:
+        hunting = {k: {**v, "n": v.get("n", 0)} if type(v) is dict else v for k, v in hunting.items()}
+    return {**data, "schema_version": 25, "walk": {key: 0 for key in WALK_KEYS}, "fight_paid": {},
+            "hunting": hunting}
+
+
+def _from_v25(data):
+    """The farm (schema 26): nothing harvested yet, so a farm built later is ripe at once."""
+    return {**data, "schema_version": 26, "farm_harvest_ms": -FARM_GROW_MS}
+
+
+def _from_v26(data):
+    """Recovering and worked ground (schema 27): what was harvested counts as harvested now."""
+    pressure = data["pressure"]
+    at = {k: data["total_ms"] for k in pressure} if type(pressure) is dict else {}
+    return {**data, "schema_version": 27, "pressure_at": at, "explored": {}, "rolled": {}}
 
 
 MIGRATIONS = {6: _from_v6, 7: _from_v7, 8: _from_v8, 9: _from_v9, 10: _from_v10, 11: _from_v11, 12: _from_v12,
               13: _from_v13, 14: _from_v14, 15: _from_v15, 16: _from_v16,
               17: _from_v17, 18: _from_v18, 19: _from_v19, 20: _from_v20, 21: _from_v21,
-              22: _from_v22, 23: _from_v23, 24: _from_v24}
+              22: _from_v22, 23: _from_v23, 24: _from_v24, 25: _from_v25, 26: _from_v26}
 
 
 def upgrade(data):
@@ -409,6 +428,9 @@ def _load_life(result, data):
     _load_anchor_camp(result, data)
     result.pressure = valid_pressure(data["pressure"], result.dimension)
     result.shimmer = valid_shimmer(data["shimmer"], result.dimension)
+    result.pressure_at = valid_pressure_at(data["pressure_at"], result.pressure, result.total_ms)
+    result.explored = valid_explored(data["explored"], result.dimension, result.total_ms)
+    result.rolled = valid_explored(data["rolled"], result.dimension, result.total_ms, "rolled")
     if type(data["converted"]) is not dict or any(item not in ITEMS for item in data["converted"]):
         raise ValueError("invalid converted resources")
     result.converted = {item: integer(count, "converted resources", 1)
@@ -429,7 +451,7 @@ def _load_life(result, data):
 def _load_vitals(result, data):
     """Hunger, health, death cause, depth and ash."""
     result.hunger = integer(data["hunger"], "hunger", 0, VITAL_MAX)
-    result.health = integer(data["health"], "health", 0, VITAL_MAX)
+    result.health = integer(data["health"], "health", 0, result.max_health())   # gear raises the maximum
     result.food_cooldown_ms = integer(data["food_cooldown_ms"], "food cooldown", 0, FOOD_COOLDOWN_MS)
     if data["cause"] is not None and data["cause"] not in DEATH_CAUSES:
         raise ValueError("invalid death cause")
@@ -456,9 +478,9 @@ def _load_anchor_camp(result, data):
     result.chest = {item: integer(count, "chest count", 1, STACK_LIMIT) for item, count in chest.items()}
     fire = data["campfire"]
     if fire is not None:
-        if type(fire) is not dict or set(fire) != {"dimension", "x", "y", "fire_x", "fire_y"} \
-                or fire["dimension"] != result.dimension:
-            raise ValueError("invalid campfire")
+        if type(fire) is not dict or set(fire) - {"bed"} != {"dimension", "x", "y", "fire_x", "fire_y"} \
+                or fire["dimension"] != result.dimension or fire.get("bed", True) is not True:
+            raise ValueError("invalid campfire")   # a rented bed is a rest place too ("bed": true)
         for name in ("x", "y", "fire_x", "fire_y"):
             integer(fire[name], f"campfire {name}")
         if abs(fire["x"] - fire["fire_x"]) + abs(fire["y"] - fire["fire_y"]) > 1:
@@ -488,8 +510,8 @@ def _load_anchor_powers(result, data):
     result.opening = data["opening"]
 
 
-HUNT_FIELDS = ("mode", "since", "ax", "ay", "ox", "oy", "left")   # combat._row
-HUNT_MODES = ("hunt", "windup", "charge", "recover", "retreat", "flee")
+HUNT_FIELDS = ("mode", "since", "ax", "ay", "ox", "oy", "left", "n")   # combat._row
+HUNT_MODES = ("hunt", "circle", "windup", "charge", "recover", "retreat", "flee")
 
 
 def _load_night(result, data):
@@ -509,7 +531,8 @@ def _load_night(result, data):
 
 
 def _load_walk(result, data):
-    """Walking XP remainders: below one XP's worth of tiles or cells each."""
+    """Walking XP remainders (below one XP's worth of tiles or cells each) and the farm's clock."""
+    result.farm_harvest_ms = integer(data["farm_harvest_ms"], "farm harvest", -FARM_GROW_MS, result.total_ms)
     fields(data["walk"], WALK_KEYS)
     result.walk = {key: integer(data["walk"][key], f"walk {key}", 0, WALK_RATES[key] - 1) for key in WALK_KEYS}
     paid = data["fight_paid"]
@@ -663,7 +686,7 @@ def _load_plan(result, data):
     goal = data["goal"]
     if goal is not None:
         fields(goal, ("kind", "id", "x", "y"))
-        if goal["kind"] not in ("spot", "target", "wander", "home", "dodge"):
+        if goal["kind"] not in ("spot", "target", "wander", "home", "dodge", "travel"):
             raise ValueError("invalid goal")
         integer(goal["x"], "goal x")
         integer(goal["y"], "goal y")
@@ -692,6 +715,9 @@ class SavesMixin:
                 "chest": dict(sorted(self.chest.items())),
                 "campfire": dict(self.campfire) if self.campfire else None,
                 "pressure": dict(sorted(self.pressure.items())), "shimmer": sorted(self.shimmer),
+                "pressure_at": dict(sorted(self.pressure_at.items())),
+                "explored": {k: list(v) for k, v in sorted(self.explored.items())},
+                "rolled": {k: list(v) for k, v in sorted(self.rolled.items())},
                 "unlocked": sorted(self.unlocked),
                 "stats": dict(self.stats), "drought": dict(self.drought), "journal": validate_journal(self.journal),
                 "forced": {k: list(v) for k, v in sorted(self.forced.items())},
@@ -702,7 +728,7 @@ class SavesMixin:
                 "possess_drain_duration_ms": self.possess_drain_duration_ms,
                 "opening": self.opening, "night_tick": self.night_tick,
                 "hunting": {k: dict(v) for k, v in sorted(self.hunting.items())},
-                "walk": dict(self.walk), "fight_paid": {k: list(v) for k, v in sorted(self.fight_paid.items())},
+                "walk": dict(self.walk), "farm_harvest_ms": self.farm_harvest_ms, "fight_paid": {k: list(v) for k, v in sorted(self.fight_paid.items())},
                 "monster_ms": self.monster_ms,
                 "budget": dict(self.budget), "spawned": dict(self.spawned),
                 "admitted": sorted([i, e] for i, e in self.admitted.items()), "screened_chunks": sorted(self.screened_chunks),

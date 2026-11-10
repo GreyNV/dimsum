@@ -24,6 +24,7 @@ class LocationsMixin:
             return {"kind": "anchor", "name": "Anchor camp", "actions": actions,
                     "visit": True}
         player = self.game.player
+        leave = self._set_out_row()
         site = self.game.world.site_for(player.chunk)
         if site is not None and site.contains(player.x, player.y):
             px, py = self._player()
@@ -39,9 +40,11 @@ class LocationsMixin:
                                 "description": entry.description, "cost": [],
                                 "reasons": (["busy"] if busy else [])
                                 + ([f"move {distance - 1} steps closer"] if distance > 1 else [])})
-            if actions:
+            if actions or leave:
                 return {"kind": "landmark", "name": site.site.name,
-                        "actions": actions, "visit": False}
+                        "actions": leave + actions, "visit": False}
+        if leave:
+            return {"kind": "camp", "name": leave[0]["place"], "visit": False, "actions": leave}
         fire = next(action for action in BY_ID.values() if action.places == "campfire")
         reasons = reasons_against(fire, self.self_context())
         if busy:
@@ -51,10 +54,28 @@ class LocationsMixin:
                              "cost": [(ITEMS[item].name, count) for item, count in fire.cost],
                              "reasons": reasons}]}
 
+    def _set_out_row(self):
+        """While a camp stands: leave it and roam free (explored.py set_out)."""
+        if not self.camping():
+            return []
+        from ..catalog import LOCATIONS
+        from .explored import explored_name
+        place = LOCATIONS[self.camp["location"]].name
+        rounds = self.camp_rounds()
+        return [{"id": "set_out", "name": "Set out", "place": f"Camp · {place}",
+                 "description": f"Leave the {'bed' if (self.campfire or {}).get('bed') else 'campfire'} "
+                                f"and roam free. The ground here: {explored_name(rounds).lower()}.",
+                 "cost": [], "reasons": []}]   # leaving needs no free hands
+
     def use_location_action(self, ident):
         context = self.location_context()
         if context is None:
             raise ValueError("no location action now")
+        if ident == "set_out":
+            if not any(row["id"] == "set_out" and not row["reasons"] for row in context["actions"]):
+                raise ValueError("no camp to leave now")
+            self.set_out()
+            return
         if ident == "visit_anchor":
             if context["kind"] != "anchor":
                 raise ValueError("visit the anchor only at its camp")

@@ -5,6 +5,9 @@ import unittest
 
 from dimensional_sim.world.autopilot import Expedition, saves
 from dimensional_sim.world.autopilot.constants import SCHEMA_VERSION
+from dimensional_sim.world.tuning import CAMP_MAX_ROUNDS
+from dimensional_sim.world.catalog import STORY
+from dimensional_sim.world.models import chunk_ident
 from dimensional_sim.world.catalog import (BY_ID, CAMP_GRADE, CAMP_IDLE_MS, LOCATION_OF_REGION, LOCATION_OF_SITE,
                                            LOCATIONS, REGIONS, SITES, location_thresholds)
 from dimensional_sim.world.models import ChunkKey
@@ -67,17 +70,26 @@ class CampTests(unittest.TestCase):
         again = Expedition.from_dict(json.loads(canonical_json(e.to_dict())))
         self.assertEqual(again.camp, e.camp)
 
-    def test_an_idle_camp_is_broken_and_not_pitched_again_in_that_place_this_life(self):
+    def test_an_idle_camp_works_its_ground_again_until_it_sets_out_and_does_not_return(self):
         e = far_and_hurt()
         e.health = 100 * 1_000_000
         e.anchor_action({"type": "location_focus", "id": e.location_here(), "mode": "searching"})
+        e.forced.pop(chunk_ident(e.game.player.chunk), None)   # the story's first place stands here; lift it
+        e.knowledge |= {step.id for step in STORY}               # (a chunk holding the story is never rerolled)
         e._place_fire()
         e._pitch_camp()
         self.assertTrue(e.camping())
+        for _ in range(CAMP_MAX_ROUNDS):
+            e._camp_idle(False)
+            e.total_ms += CAMP_IDLE_MS
+            e._camp_idle(False)
+            self.assertTrue(e.camping(), "a spent area is rolled again, not left")
+            e._screen()   # the avatar stands in the area: its chunk is rolled again at once
+        self.assertEqual(e.camp_rounds(), CAMP_MAX_ROUNDS)
         e._camp_idle(False)
         e.total_ms += CAMP_IDLE_MS
         e._camp_idle(False)
-        self.assertFalse(e.camping())
+        self.assertFalse(e.camping(), "too dangerous: it sets out")
         self.assertFalse(e._wants_camp(), "it left this place: no second camp here this life")
 
     def test_the_player_can_make_camp_in_a_mastered_place_and_never_elsewhere(self):
@@ -108,7 +120,7 @@ class MigrationTests(unittest.TestCase):
 
     def test_schema_22_keeps_rolled_encounters_when_the_new_odds_arrive(self):
         e = far_and_hurt()
-        old = {k: v for k, v in e.to_dict().items() if k not in saves.V25_FIELDS}
+        old = {k: v for k, v in e.to_dict().items() if k not in saves.V25_FIELDS + saves.V26_FIELDS + saves.V27_FIELDS}
         old["schema_version"] = 22
         old["encounters"] = "encounters-v11"
         loaded = Expedition.from_dict(json.loads(json.dumps(old)))

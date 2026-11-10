@@ -4,12 +4,14 @@ Every finished wild spot with an `ecology` (catalog.ECOLOGY: wood, berries, game
 eggs) adds one to that ecology's pressure in its region cell (REGION_CELL x REGION_CELL
 chunks). New chunks rolled in that cell weigh that ecology's spots down by
 PRESSURE_STEP[ecology] percent per harvest, never below PRESSURE_FLOOR percent: a worked area
-keeps a trickle, and moving on finds fresh ground. Pressure resets with each life
+keeps a trickle, and moving on finds fresh ground. Left untouched, a cell recovers: it forgets one
+harvest of an ecology every PRESSURE_RECOVER_MS since that ecology was last taken there
+(`pressure_at`). Pressure resets with each life
 (persistent progress is knowledge, mastery and unlocks, never stockpiled ground).
 Spots already rolled keep their plan, so the effect shows as you explore onward.
 """
 from ..catalog import ECOLOGY, REGION_CELL
-from ..tuning import PRESSURE_FLOOR, PRESSURE_STEP, SHIMMER_RARITY_PERCENT
+from ..tuning import PRESSURE_FLOOR, PRESSURE_RECOVER_MS, PRESSURE_STEP, SHIMMER_RARITY_PERCENT
 
 
 def cell_of(key):
@@ -26,17 +28,26 @@ class EcologyMixin:
         if action.ecology is None or action.placement != "spot":
             return
         name = f"{cell_of(key)}:{action.ecology}"
-        self.pressure[name] = self.pressure.get(name, 0) + 1
+        self.pressure[name] = self.harvests(name) + 1
+        self.pressure_at[name] = self.total_ms
+
+    def harvests(self, name):
+        """Harvests of one cell's ecology that still show, after recovering untouched."""
+        count = self.pressure.get(name, 0)
+        if not count:
+            return 0
+        return max(0, count - (self.total_ms - self.pressure_at.get(name, self.total_ms)) // PRESSURE_RECOVER_MS)
 
     def pressure_percents(self, key):
         """{ecology: weight percent} for spots rolled in chunk `key` now (worked ecologies only)."""
         prefix = cell_of(key) + ":"
-        return {name[len(prefix):]: percent(count, name[len(prefix):]) for name, count in self.pressure.items()
-                if name.startswith(prefix)}
+        return {name[len(prefix):]: percent(n, name[len(prefix):]) for name in self.pressure
+                if name.startswith(prefix) and (n := self.harvests(name))}
 
     def renew(self, ecology, key):
         """Lift this life's exhaustion of `ecology` in the region cell of chunk `key`."""
         self.pressure.pop(f"{cell_of(key)}:{ecology}", None)
+        self.pressure_at.pop(f"{cell_of(key)}:{ecology}", None)
 
     def rarity_percent(self, key):
         """Spot tier odds percent in chunk `key`: raised in a shimmering region cell."""
@@ -74,3 +85,11 @@ def valid_pressure(data, dimension):
             raise ValueError("invalid ecological pressure")
         result[name] = count
     return result
+
+
+def valid_pressure_at(data, pressure, total_ms):
+    """Saved {pressure key: last harvest ms}, one per pressure row."""
+    if type(data) is not dict or set(data) != set(pressure) \
+            or any(type(v) is not int or not 0 <= v <= total_ms for v in data.values()):
+        raise ValueError("invalid ecological recovery")
+    return dict(data)

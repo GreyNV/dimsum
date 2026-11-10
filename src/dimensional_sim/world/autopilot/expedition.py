@@ -5,7 +5,7 @@ expedition still owns time, spots, vitals and enemies. Both cut time into steps 
 end at every event (vitals rate change, task end, monster step, lead expiry, attack
 impact), so any slicing of the same total time gives the same state.
 """
-from ..catalog import BUILDINGS, BY_ID
+from ..catalog import BUILDINGS, BY_ID, FARM_GROW_MS
 from ..journal import new_journal
 from ..models import DELTAS, integer
 from ..progression import possession_duration_ms, scaled_ms, sight_radius, speed_permille
@@ -14,6 +14,7 @@ from ..tuning import PITY_CHUNKS
 from .camp import CampMixin
 from .combat import CombatMixin
 from .ecology import EcologyMixin
+from .explored import ExploredMixin
 from .constants import (ANCHOR_COUNTDOWN_MS, MAX_EVENTS_PER_ADVANCE, MONSTER_STEP_MS, PAUSE_BETWEEN_PUNCHES_MS,
                         POSSESS_COOLDOWN_MS, POSSESS_SPEED_PERCENT, PROLOGUE_MS, PROLOGUE_NEXT,
                         REST_MS, RETREAT_BELOW, SELF_ACTIONS, STAT_KEYS, VITAL_MAX, attribute_table, ceil_div)
@@ -36,7 +37,7 @@ FIRE_ACTION = next(a for a in BY_ID.values() if a.places == "campfire")   # maki
 
 class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, OutcomesMixin, VitalsMixin,
                  LivesMixin, LocationsMixin, SavesMixin, PresentationMixin, CampMixin, EcologyMixin, NightMixin,
-                 StoryMixin, PlacesMixin, TrainingMixin):
+                 StoryMixin, PlacesMixin, TrainingMixin, ExploredMixin):
     def __init__(self, game, *, fresh=True, opening=False):
         """fresh=True starts a new expedition (prologue first); loaders pass False.
         opening=True (new games in the browser) starts at the anchor: the player meets
@@ -110,17 +111,21 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         self.last_strike = None
         self.depth = 0
         self.task = None   # {"type": TASK_TYPES, "spot", "elapsed_ms", "duration_ms"}
-        self.goal = None   # {"kind": "spot"|"target"|"wander"|"home", "id", "x", "y"}
+        self.goal = None   # {"kind": "spot"|"target"|"wander"|"home"|"dodge"|"travel", "id", "x", "y"}
         self.stats = {key: 0 for key in STAT_KEYS}
         self.drought = {category: 0 for category in PITY_CHUNKS}
         self.forced = {}   # chunk id -> [encounter id, ...] pity and story spots, in order
         self.camp = None   # this life's camp (places.py): {"location", "dimension", "cx", "cy", "idle_since"}
         self.buildings = set(self.bound_buildings)   # what stands at the camp this life
         self.pressure = {}     # "dimension:cx:cy:ecology" -> harvests this life (autopilot/ecology.py)
+        self.pressure_at = {}  # same keys -> when that ecology was last harvested there (it recovers untouched)
+        self.explored = {}     # chunk id -> [rounds, last worked ms]: worked ground around camps (explored.py)
+        self.rolled = {}       # chunk id -> [rerolls, danger] of the plan rolled there now (explored.py)
         self.shimmer = set()   # "dimension:cx:cy" region cells where rare spots roll more often this life
         self.life_recipes = set()   # recipes found this life: kept with ash at the anchor, or lost
         self.campfire = None   # {"dimension", "x", "y", "fire_x", "fire_y"}: this life's campfire (global cells)
         self.walk = {key: 0 for key in WALK_KEYS}   # walking XP remainders (training.py)
+        self.farm_harvest_ms = getattr(self, "total_ms", 0) - FARM_GROW_MS   # a bound farm is ripe as a life begins
         self.fight_paid = {}   # target id -> [xp, dim xp] paid hit by hit so far (summed on the kill's log line)
         self.hunting = {}      # target id -> {"mode": "hunt" | "flee", "since": ms}: enemies after the avatar (combat._pursue)
         if not any(BUILDINGS[b].function == "storage" for b in self.bound_buildings):
@@ -234,8 +239,9 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
     def _start_perform(self, spot_id, action):
         duration = scaled_ms(action.duration_ms, self.speed(action.attribute))
         spot = self._spot_by_id(spot_id) if action.placement == "site" else None
-        if spot is not None:   # an overgrown site is slow going
-            duration = duration * self.site_condition(spot.chunk).duration_percent // 100
+        condition = self.site_condition(spot.chunk) if spot is not None else None
+        if condition is not None:   # an overgrown site is slow going (a lived-in place has no condition)
+            duration = duration * condition.duration_percent // 100
         self._start_task("perform", max(1, duration), spot_id)
 
     # ----- settle --------------------------------------------------------
@@ -444,6 +450,10 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
             if self._wants_camp() and self.can_make_fire():   # a mastered place with a focus: camp here
                 self._start_self(FIRE_ACTION)
                 return 0
+            harvest = self._harvest_wanted()
+            if harvest is not None:   # food is survival, not camp work: the avatar picks its own crops
+                self._start_self(harvest)
+                return 0
             self.goal = self._choose_goal()
             if self.goal is None:
                 self._run(cap, InputCommand())
@@ -504,8 +514,9 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
     def _travel_step(self, cap):
         """Act on arrival at the goal, else take one step down its distance field."""
         game, here, goal = self.game, self._player(), self.goal
+        game.load_percent = self.load_percent()   # plan the step at today's pace (eating or XP may have changed it)
         goals = self._goal_cells(goal)
-        if here in goals and (goal["kind"] != "home" or here == (goal["x"], goal["y"])):
+        if here in goals and (goal["kind"] not in ("home", "travel") or here == (goal["x"], goal["y"])):
             self._arrive(goal)
             return 0
         field = self._field(goals, until=here)
@@ -524,7 +535,7 @@ class Expedition(PlanningMixin, SpawningMixin, NavigationMixin, CombatMixin, Out
         return step
 
     def _arrive(self, goal):
-        if goal["kind"] == "wander":
+        if goal["kind"] in ("wander", "travel"):   # travel: there now; the next choice finds what it came for
             self.goal = None
         elif goal["kind"] == "dodge":   # out of the strike: turn on the enemy while it recovers
             t = self.game.targets.get(goal["id"])

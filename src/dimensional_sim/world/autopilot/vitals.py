@@ -1,4 +1,5 @@
 """Hunger and health as exact integer rates; every rate change ends a simulation step."""
+from .. import effects
 from ..catalog import ITEMS
 from ..tuning import ENDURANCE_HARD_HUNGER
 from .constants import (EAT_AT, HUNGER_DRAIN, POINT, REGEN, REGEN_ABOVE, REST_REGEN, STARVATION, VITAL_MAX, ceil_div)
@@ -6,8 +7,16 @@ from .constants import (EAT_AT, HUNGER_DRAIN, POINT, REGEN, REGEN_ABOVE, REST_RE
 
 class VitalsMixin:
     # Hunger, health and the cause of death change only here (and when a life begins).
+    def max_health(self):
+        """Full health: VITAL_MAX plus health-slot gear (catalog max_health effects)."""
+        return VITAL_MAX + effects.total(self.equipped, "max_health") * POINT
+
+    def _clamp_health(self):
+        """After gear comes off (consumed by a craft), health above the new maximum is lost."""
+        self.health = min(self.health, self.max_health())
+
     def _heal(self, points):
-        self.health = min(VITAL_MAX, self.health + points * POINT)
+        self.health = min(self.max_health(), self.health + points * POINT)
 
     def _feed(self, points):
         self.hunger = min(VITAL_MAX, self.hunger + points * POINT)
@@ -23,7 +32,7 @@ class VitalsMixin:
         self.hunger = max(0, self.hunger - amount)
 
     def _drain(self):
-        return HUNGER_DRAIN * 1000 // self.speed("endurance")
+        return HUNGER_DRAIN * 1000 // (1000 + self.hunger_relief_permille())
 
     def _health_rate(self):
         rate = 0
@@ -57,8 +66,8 @@ class VitalsMixin:
         rate = self._health_rate()
         if rate < 0 and self.health > 0:
             limits.append(ceil_div(self.health, -rate))
-        elif rate > 0 and self.health < VITAL_MAX:
-            limits.append(ceil_div(VITAL_MAX - self.health, rate))
+        elif rate > 0 and self.health < self.max_health():
+            limits.append(ceil_div(self.max_health() - self.health, rate))
         return max(1, min(limits)) if limits else 1 << 40
 
     def _apply_vitals(self, ms):
@@ -66,6 +75,6 @@ class VitalsMixin:
         if self.hunger == 0:
             self.cause = "starvation"
         self.hunger = max(0, self.hunger - self._drain() * ms)
-        self.health = max(0, min(VITAL_MAX, self.health + rate * ms))
+        self.health = max(0, min(self.max_health(), self.health + rate * ms))
         self.food_cooldown_ms = max(0, self.food_cooldown_ms - ms)
         self.total_ms += ms

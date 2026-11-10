@@ -41,9 +41,46 @@ export function drawEyelids(ctx, opening, width, height, reducedMotion) {
 }
 
 /** A soft dark vignette around the screen edges. */
+/* ---------- ambience: ash on the air and mist on the ground (cosmetic) ----------
+ * Pure in the world position and the clock, so it never flickers between frames: motes are
+ * fixed per 96 px world cell and drift on a slow fall; mist is a few broad soft bands that crawl
+ * across the ground. Both are drawn in world px under the night layer. */
+const MOTE_CELL = 96;
+export function motes(x0, y0, x1, y1, clock) {
+  const out = [];
+  for (let cy = Math.floor(y0 / MOTE_CELL) - 1; cy <= Math.floor(y1 / MOTE_CELL); cy++)
+    for (let cx = Math.floor(x0 / MOTE_CELL); cx <= Math.floor(x1 / MOTE_CELL); cx++) {
+      let h = Math.imul(cx * 374761393 + cy * 668265263, 1274126177) >>> 0;
+      for (let k = 0; k < 2; k++) {
+        h = Math.imul(h ^ (h >>> 13), 1103515245) >>> 0;
+        const fx = (h & 1023) / 1024, fy = ((h >>> 10) & 1023) / 1024, sp = .006 + ((h >>> 20) & 15) / 1600;
+        const y = (cy + fy) * MOTE_CELL + (clock * sp) % (MOTE_CELL * 2);
+        const x = (cx + fx) * MOTE_CELL + Math.sin(clock / 2400 + fx * 9) * 6;
+        out.push({x, y, size: k ? .9 : 1.3, alpha: .18 + ((h >>> 24) & 7) / 40});
+      }
+    }
+  return out;
+}
+export function drawAmbience(ctx, box, clock, {night = 0, reducedMotion = false} = {}) {
+  const [x0, y0, x1, y1] = box, t = reducedMotion ? 0 : clock;
+  ctx.save();
+  for (let i = 0; i < 4; i++) {   // ground mist: wide pale bands, thicker at night
+    const y = y0 + ((i * 211 + t * .004) % (y1 - y0 + 240)) - 120, h = 70 + i * 18;
+    const g = ctx.createLinearGradient(0, y - h, 0, y + h);
+    const a = .045 + night * .05;
+    g.addColorStop(0, 'rgba(170,186,196,0)'); g.addColorStop(.5, `rgba(170,186,196,${a})`); g.addColorStop(1, 'rgba(170,186,196,0)');
+    ctx.fillStyle = g; ctx.fillRect(x0, y - h, x1 - x0, h * 2);
+  }
+  for (const m of motes(x0, y0, x1, y1, t)) {   // ash drifting down through the cold light
+    ctx.globalAlpha = m.alpha; ctx.fillStyle = '#c9d2d8';
+    ctx.fillRect(m.x, m.y, m.size, m.size);
+  }
+  ctx.restore();
+}
+
 export function drawVignette(ctx, width, height) {
   const shade = ctx.createRadialGradient(width/2, height/2, Math.min(width, height)*.24, width/2, height/2, Math.max(width, height)*.68);
-  shade.addColorStop(0, '#00000000'); shade.addColorStop(1, '#040804a0');
+  shade.addColorStop(0, '#00000000'); shade.addColorStop(.55, '#05080c38'); shade.addColorStop(1, '#03060acc');   // cold and deep
   ctx.fillStyle = shade; ctx.fillRect(0, 0, width, height);
 }
 
@@ -183,26 +220,26 @@ export function drawNight(ctx, width, height, alpha, lights = [], {clock = 0, re
 
 
 /* ---------- the colour of the day (cosmetic) ----------
- * Keyframes over the day (fraction of DAY_MS, dawn = 0): a rose-gold dawn that warms and pales
- * into neutral daylight over about three minutes, a golden afternoon, a red sunset, a violet dusk,
- * a cool blue night and a grey-violet hour before dawn. `tint` is laid over the scene in
- * soft-light (it colours without blacking out), `dim` darkens a little more (early morning
- * haze, late dusk), `sun` is a low warm glow from the horizon (east at dawn, west at dusk). */
+ * Keyframes over the day (fraction of DAY_MS, dawn = 0), muted for the cold atmosphere
+ * (docs/design/ATMOSPHERE.md): an ashen rose dawn that pales into grey daylight, a thin amber
+ * afternoon, a dull ember sunset, a slate-violet dusk, a deep blue night and a grey hour before
+ * dawn. `tint` is laid over the scene in soft-light (it colours without blacking out), `dim`
+ * darkens a little more (morning haze, late dusk), `sun` is a low glow from the horizon. */
 const DAY_KEYS = [
-  [0.000, [255, 112, 122], .36, .14, .55],
-  [0.045, [255, 148, 92], .32, .10, .65],
-  [0.100, [255, 188, 112], .22, .05, .45],
-  [0.190, [255, 226, 170], .09, .01, .15],
+  [0.000, [206, 150, 156], .32, .16, .30],
+  [0.045, [210, 164, 140], .26, .12, .34],
+  [0.100, [204, 184, 160], .17, .07, .22],
+  [0.190, [196, 204, 208], .07, .02, .06],
   [0.260, [255, 255, 255], 0, 0, 0],
   [0.500, [255, 255, 255], 0, 0, 0],
-  [0.560, [255, 212, 142], .08, 0, .10],
-  [0.600, [255, 162, 82], .22, .02, .45],
-  [0.635, [240, 112, 92], .30, .06, .60],
-  [0.690, [118, 84, 172], .26, .10, .15],
-  [0.780, [72, 96, 176], .12, 0, 0],
-  [0.940, [96, 92, 170], .14, 0, 0],
-  [0.975, [176, 104, 150], .24, .10, .25],
-  [1.000, [255, 112, 122], .36, .14, .55],
+  [0.560, [214, 196, 160], .07, .01, .05],
+  [0.600, [212, 158, 110], .18, .04, .26],
+  [0.635, [190, 112, 96], .24, .08, .32],
+  [0.690, [96, 92, 150], .24, .12, .08],
+  [0.780, [62, 84, 150], .14, .02, 0],
+  [0.940, [82, 88, 140], .14, .02, 0],
+  [0.975, [150, 118, 140], .22, .12, .14],
+  [1.000, [206, 150, 156], .32, .16, .30],
 ];
 
 /** Pure (tested): {r, g, b, tint, dim, sun, east} for a frame clock ({time_ms, day_ms}). */

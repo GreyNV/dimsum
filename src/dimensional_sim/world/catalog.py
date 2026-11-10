@@ -86,25 +86,29 @@ class FightTier:
     hp_percent: int
     hit_percent: int
     loot_rolls: int                # how many times its loot is rolled
+    windup_percent: int = 100      # its tell is this much of its pattern's wind-up: older ones warn less
+    strikes: int = 1               # strikes in a row before it recovers (an elder charges twice)
 
     def __post_init__(self):
         identifier(self.id, "fight tier ID")
         integer(self.hp_percent, "tier HP percent", 100, 1000)
         integer(self.hit_percent, "tier hit percent", 100, 1000)
         integer(self.loot_rolls, "tier loot rolls", 1, 5)
+        integer(self.windup_percent, "tier wind-up percent", 30, 100)
+        integer(self.strikes, "tier strikes", 1, 3)
 
 
 FIGHT_TIERS = {t.id: t for t in (
     FightTier("common", "", "", 100, 100, 1),
-    FightTier("star", "★", "Old", 200, 150, 2),
-    FightTier("elder", "★★", "Elder", 350, 220, 3),
+    FightTier("star", "★", "Old", 200, 150, 2, windup_percent=75),
+    FightTier("elder", "★★", "Elder", 350, 220, 3, windup_percent=60, strikes=2),
 )}
 
 BIOMES = {b.id: b for b in (
     # docs/design/STATS_AND_ENEMIES_AUDIT.md: no ring growth; deeper rings bring stars and company.
     BiomeDef("dark_forest", "Dark forest", fight_odds=(
-        FightOdds(2, 6, 0, 6), FightOdds(3, 10, 0, 12), FightOdds(4, 14, 3, 18),
-        FightOdds(5, 22, 6, 28), FightOdds(6, 26, 9, 35))),
+        FightOdds(2, 6, 0, 6), FightOdds(3, 10, 0, 12), FightOdds(4, 18, 5, 24),
+        FightOdds(5, 28, 10, 36), FightOdds(6, 34, 14, 45))),
     BiomeDef("ash_plain", "Ash plain", mastery_percent=300),   # terrain exists (assets.py); no content yet
 )}
 
@@ -114,10 +118,13 @@ BIOMES = {b.id: b for b in (
 # multiply in turn (integer floor after each source, gear in slot order).
 EFFECT_STATS = {
     "punch_damage": "add",          # extra damage per punch
-    "enemy_hit_percent": "percent", # damage enemies deal to the avatar
+    "max_health": "add",            # extra maximum health, in vital points (health-slot gear)
     "food_window_bonus": "add",     # extra at-once cap (low and high) for every food source
     "wood_yield": "add",            # extra sticks from every wood harvest (an axe chops)
 }
+EFFECT_WORDS = {"punch_damage": "damage per blow", "max_health": "maximum health",
+                "food_window_bonus": "food found at once", "wood_yield": "stick per wood harvest"}
+ITEM_KIND_NAMES = {"food": "Food", "material": "Material", "gear": "Gear", "treasure": "Treasure"}
 WOOD_YIELD_ITEM = "stick"           # what a wood_yield effect adds to each harvest tagged "wood"
 
 
@@ -213,7 +220,11 @@ def rarity_glint(tier):
 
 # ----- items ------------------------------------------------------------------
 ITEM_KINDS = ("food", "material", "gear", "treasure")   # treasure: no in-run use, carried home as ash
-EQUIPMENT_SLOTS = ("weapon", "body")
+# Eight slots: four add to blows (DAMAGE_SLOTS: punch_damage), four to maximum health
+# (HEALTH_SLOTS: max_health). Rings and the amulet have no item in the first land yet.
+EQUIPMENT_SLOTS = ("weapon", "hands", "ring", "amulet", "head", "body", "feet", "back")
+DAMAGE_SLOTS = ("weapon", "hands", "ring", "amulet")
+HEALTH_SLOTS = ("head", "body", "feet", "back")
 
 
 @dataclass(frozen=True)
@@ -230,9 +241,12 @@ class ItemDef:
     color: str = COLOR_DEFAULT   # HUD text and reward popups
     rarity: str = "common"       # reward reveal and stats-page label (odds live in DropTables)
     attack: str | None = None    # weapons: their AttackDef (reach, shape)
+    art: str = ""                # client icon key (browser/item_art.js ITEM_ART); empty: the item id
 
     def __post_init__(self):
         identifier(self.id, "item ID")
+        object.__setattr__(self, "art", self.art or self.id)
+        identifier(self.art, f"item {self.id} art key")
         if self.rarity not in RARITY:
             raise ValueError(f"item {self.id} has unknown rarity {self.rarity}")
         _effects(self.effects, f"item {self.id}")
@@ -251,6 +265,11 @@ class ItemDef:
             raise ValueError("food, and only food, restores hunger")
         if (self.kind == "gear") != (self.slot in EQUIPMENT_SLOTS):
             raise ValueError("gear must have a valid equipment slot, other items must not")
+        for effect in self.effects:   # a slot's kind decides what its gear may give
+            if effect.stat == "punch_damage" and self.slot not in DAMAGE_SLOTS:
+                raise ValueError(f"only damage-slot gear adds to blows: {self.id}")
+            if effect.stat == "max_health" and self.slot not in HEALTH_SLOTS:
+                raise ValueError(f"only health-slot gear adds maximum health: {self.id}")
         if not isinstance(self.glyph, str) or len(self.glyph) != 1 or not 33 <= ord(self.glyph) <= 126:
             raise ValueError("item glyph must be one printable ASCII character")
 
@@ -273,12 +292,24 @@ ITEMS = {item.id: item for item in (
             rarity="uncommon"),
     ItemDef("amber_charm", "Amber charm", "treasure", glyph="@", ash_value=20, color="#ffb347", rarity="rare"),
     # Gear is worth less than its inputs: crafting spends resources you could carry home.
+    # Health slots (head, body, feet, back) add maximum health; a full first-land set is about +40.
     ItemDef("hide_wrap", "Hide wrap", "gear", glyph="]", ash_value=6, slot="body",
-            effects=(Effect("enemy_hit_percent", 70),), color="#b58c62"),
+            effects=(Effect("max_health", 10),), color="#b58c62"),
     ItemDef("padded_jerkin", "Padded jerkin", "gear", glyph="[", ash_value=5, slot="body",
-            effects=(Effect("enemy_hit_percent", 80),), color="#c9b48a"),
+            effects=(Effect("max_health", 8),), color="#c9b48a"),
+    ItemDef("leather_jerkin", "Leather jerkin", "gear", glyph="H", ash_value=9, slot="body",
+            effects=(Effect("max_health", 12),), color="#9a7650"),
     ItemDef("studded_wrap", "Studded wrap", "gear", glyph="}", ash_value=9, slot="body",
-            effects=(Effect("enemy_hit_percent", 55),), color="#9fa4a8"),
+            effects=(Effect("max_health", 16),), color="#9fa4a8"),
+    ItemDef("leather_hood", "Leather hood", "gear", glyph="m", ash_value=4, slot="head",
+            effects=(Effect("max_health", 8),), color="#8c7a62"),
+    ItemDef("hide_boots", "Hide boots", "gear", glyph="b", ash_value=6, slot="feet",
+            effects=(Effect("max_health", 8),), color="#7d6248"),
+    ItemDef("leather_pack", "Leather pack", "gear", glyph="B", ash_value=6, slot="back",
+            effects=(Effect("max_health", 8),), color="#8a6c4c"),
+    # Damage slots: the weapon and gloves (rings and the amulet come with later lands).
+    ItemDef("leather_gloves", "Leather gloves", "gear", glyph="w", ash_value=4, slot="hands",
+            effects=(Effect("punch_damage", 1),), color="#a0805e"),
     # Weapons: reach and look (AttackDef) and a little damage. The axe also chops.
     ItemDef("walking_staff", "Walking staff", "gear", glyph="|", ash_value=3, slot="weapon",
             effects=(Effect("punch_damage", 1),), attack="staff", color="#c39a62"),
@@ -295,6 +326,9 @@ ITEMS = {item.id: item for item in (
     ItemDef("river_scales", "River scales", "treasure", glyph="*", ash_value=5, color="#9fd0c8", rarity="uncommon"),
     # Night finds.
     ItemDef("wolf_fang", "Wolf fang", "treasure", glyph=">", ash_value=5, color="#e6e0cf"),
+    # The village and the farm (docs/design/VILLAGE.md). Tarnished coins are the village's money.
+    ItemDef("bread", "Loaf of bread", "food", 40, "D", ash_value=2, color="#d9b27a"),
+    ItemDef("turnip", "Turnip", "food", 22, "j", ash_value=1, color="#d8c8e0"),
 )}
 
 
@@ -313,6 +347,46 @@ class Loot:
         integer(self.chance, "loot chance", 1, 100)
 
 
+# ----- hauls: how well one encounter went (docs/design/HAULS.md) -----------------------
+@dataclass(frozen=True)
+class HaulDef:
+    """One outcome of an encounter's loot bucket: every loot line's amount is scaled by `percent`
+    (rounded, at least 1) and every chance line's odds by `chance_percent`. `text` heads the log
+    line (None: the usual haul says nothing)."""
+    id: str
+    name: str
+    weight: int
+    percent: int
+    chance_percent: int
+    text: str | None = None
+
+    def __post_init__(self):
+        identifier(self.id, "haul ID")
+        integer(self.weight, "haul weight", 0, 1000)
+        integer(self.percent, "haul percent", 1, 400)
+        integer(self.chance_percent, "haul chance percent", 1, 400)
+
+
+HAULS = (
+    HaulDef("poor", "Poor haul", 25, 50, 75, "A poor haul"),
+    HaulDef("usual", "Usual haul", 50, 100, 100),
+    HaulDef("good", "Good haul", 20, 150, 125, "A good haul"),
+    HaulDef("rich", "Rich haul", 5, 200, 150, "A rich haul"),
+)
+HAUL_BY_ID = {h.id: h for h in HAULS}
+# Skill: each combined level of the encounter's attribute (regular + dimensional, softcapped) moves
+# HAUL_SKILL_PER_LEVEL weight from the poor haul to the good and rich ones (3:1), at most
+# HAUL_SKILL_MAX: a seasoned forager rarely comes back with a poor haul.
+HAUL_SKILL_PER_LEVEL = 1
+HAUL_SKILL_MAX = 20
+HAUL_POOR_FLOOR = 5
+# What never varies: things made (self actions), the story, and prices (trades and quests).
+STEADY_PLACEMENTS = ("self", "story")
+STEADY_CATEGORIES = ("trade", "quest")
+# Trades a stall keeps offering (not used up by one purchase), unless they teach something.
+REPEAT_CATEGORIES = ("trade",)
+
+
 # ----- buildings (at the anchor camp) ----------------------------------------------
 @dataclass(frozen=True)
 class BuildingDef:
@@ -327,7 +401,7 @@ class BuildingDef:
 
     def __post_init__(self):
         identifier(self.id, "building ID")
-        if self.function not in ("crafting", "storage"):
+        if self.function not in ("crafting", "storage", "farm"):
             raise ValueError(f"unknown building function: {self.id}")
         if not isinstance(self.name, str) or not 1 <= len(self.name) <= 40 or \
                 not isinstance(self.description, str) or not 1 <= len(self.description) <= 160:
@@ -341,7 +415,11 @@ BUILDINGS = {b.id: b for b in (
     BuildingDef("storage_chest", "Storage chest",
                 "Materials brought to the camp are stowed here. Once bound, they stay for later lives.",
                 "storage", 200),
+    BuildingDef("farm", "Farm plot",
+                "Turnips in a fenced plot by the camp, ready every few minutes. Bound, it feeds every life.",
+                "farm", 150),
 )}
+FARM_GROW_MS = 240_000   # a farm's crops ripen this long after the last harvest (and at a life's start)
 WORKPLACES = ("camp",) + tuple(BUILDINGS)
 
 
@@ -427,7 +505,7 @@ DROP_TABLES = {t.id: t for t in (
 #   "spot": a generated point of interest in a chunk (rolled from the spot bucket);
 #   "self": something the avatar does wherever it stands (after-location bucket or a need).
 CATEGORIES = ("forage", "gather", "observe", "climb", "drink", "meditate", "study", "scavenge",
-              "pray", "fight", "hunt", "craft", "reflect", "build", "camp")
+              "pray", "fight", "hunt", "craft", "reflect", "build", "camp", "trade", "quest")
 PLACEMENTS = ("spot", "lead", "self", "site", "story")   # site: inside a landmark (SITES); story: main quest (STORY)
 NEAR = (None, "T", "^", "w")   # spot needs a tree / rock / water (river or ford) beside its cell
 TRIGGERS = (None, "after_location", "need")   # self actions only
@@ -468,6 +546,8 @@ CATEGORY_STYLES = {
     "reflect": CategoryStyle("Reflecting", "sit", "#c8c5ff"),
     "build": CategoryStyle("Building", "crouch", "#d9b27a"),
     "camp": CategoryStyle("Making camp", "crouch", "#ffb347"),
+    "trade": CategoryStyle("Trading at", None, "#e6c36a", seal="#e6c36a"),
+    "quest": CategoryStyle("Helping at", None, "#f1d38a", seal="#f1d38a"),
 }
 
 
@@ -484,7 +564,11 @@ class FightPattern:
       strike "bite": every cell within `reach` of the enemy when the wind-up ends.
       strike "charge": a straight dash of up to `reach` cells toward where the avatar stood when
       the wind-up began; it stops on the avatar (a hit), at a wall (stunned twice as long) or at
-      the end of the dash."""
+      the end of the dash.
+    circle_ms: before its first strike it circles the avatar this long, `circle_range` cells out
+      (a wolf sizes you up); 0 = straight in.
+    hidden: unseen until it notices the avatar (a lurker under the water), then it strikes at once
+      from where it lay."""
     id: str
     strike: str
     windup_ms: int
@@ -492,6 +576,9 @@ class FightPattern:
     recover_ms: int
     retreat: int = 0               # cells it backs off after recovering (0: stays close)
     dash_step_ms: int = 100        # charge: one cell this often
+    circle_ms: int = 0
+    circle_range: int = 2
+    hidden: bool = False
 
     def __post_init__(self):
         identifier(self.id, "fight pattern ID")
@@ -502,11 +589,23 @@ class FightPattern:
         integer(self.recover_ms, "recovery", 0, 5000)
         integer(self.retreat, "retreat", 0, 10)
         integer(self.dash_step_ms, "dash step", 20, 1000)
+        integer(self.circle_ms, "circling", 0, 10000)
+        integer(self.circle_range, "circle range", 2, 5)
+        if type(self.hidden) is not bool:
+            raise ValueError(f"hidden must be boolean: {self.id}")
 
 
 FIGHT_PATTERNS = {p.id: p for p in (
     FightPattern("charge", "charge", windup_ms=600, reach=6, recover_ms=900, retreat=3, dash_step_ms=75),
     FightPattern("lunge", "bite", windup_ms=450, reach=1, recover_ms=450, retreat=2),
+    # a wolf circles two cells out before its first lunge, and after each retreat
+    FightPattern("circle", "bite", windup_ms=450, reach=1, recover_ms=450, retreat=2, circle_ms=1800),
+    # a lurker lies unseen in the shallows, then lunges two cells from the water with a short tell
+    FightPattern("ambush", "bite", windup_ms=300, reach=2, recover_ms=700, retreat=3, hidden=True),
+    # a rat nips fast and darts off; they come in packs (fight company)
+    FightPattern("nip", "bite", windup_ms=250, reach=1, recover_ms=300, retreat=1),
+    # a bandit squares up and swings a club: a clear tell, a long recovery, and he holds his ground
+    FightPattern("swing", "bite", windup_ms=650, reach=1, recover_ms=800),
     FightPattern("heavy", "bite", windup_ms=900, reach=1, recover_ms=900),
     FightPattern("drift", "bite", windup_ms=600, reach=1, recover_ms=600, retreat=1),
 )}
@@ -555,7 +654,7 @@ ENEMIES = {e.id: e for e in (
              cause_text="a wild boar", sprite="boar", sound_profile="beast", pattern="charge"),
     # Fast and fragile: hides by the water, bites lighter, notices you late (small aggro radius).
     EnemyDef("river_lurker", "River lurker", hit=12, aggro_radius=4, cause="lurker",
-             cause_text="a river lurker", sprite="lurker", sound_profile="water", step_ms=200),
+             cause_text="a river lurker", sprite="lurker", sound_profile="water", step_ms=200, pattern="ambush"),
     # Slow and stubborn: rises at ruins, takes many blows, walks you down slowly.
     EnemyDef("restless_bones", "Restless bones", hit=20, aggro_radius=5, cause="bones",
              cause_text="restless bones", sprite="skeleton", sound_profile="bone", step_ms=450, pattern="heavy"),
@@ -564,7 +663,13 @@ ENEMIES = {e.id: e for e in (
              cause_text="a pale wisp", sprite="wisp", sound_profile="spectral", step_ms=350, drains="hunger", pattern="drift"),
     # Night only: quick and keen-nosed, it follows the avatar into firelight.
     EnemyDef("wolf", "Wolf", hit=18, aggro_radius=10, cause="wolf", cause_text="a wolf in the night",
-             sprite="wolf", sound_profile="canine", step_ms=250, fears_fire=False),
+             sprite="wolf", sound_profile="canine", step_ms=250, fears_fire=False, pattern="circle"),
+    # The village road (docs/design/VILLAGE.md): rats in the village's granary, and the bandits
+    # who killed the traveller on the old road.
+    EnemyDef("granary_rat", "Rat", hit=7, aggro_radius=6, cause="rats", cause_text="rats",
+             sprite="rat", sound_profile="beast", step_ms=170, pattern="nip"),
+    EnemyDef("road_bandit", "Bandit", hit=22, aggro_radius=8, cause="bandit", cause_text="a bandit on the old road",
+             sprite="bandit", step_ms=260, fears_fire=False, pattern="swing"),
 )}
 # Enemies placed by map assets (not by spot rolls) count against this fight spot's window.
 ASSET_ENEMY_ACTION = "bramble_boar"
@@ -572,14 +677,14 @@ DEATH_CAUSES = ("starvation", "exhaustion", "return", *dict.fromkeys(e.cause for
 
 
 REQUIREMENT_KINDS = ("action_count", "item_count", "knowledge", "unlock", "recipe", "level", "gear",
-                     "location")   # location: the place the avatar stands in has this mastery grade (id "here")
+                     "location", "unknown")   # unknown: knowledge the life does not hold yet (a blueprint to buy once)   # location: the place the avatar stands in has this mastery grade (id "here")
 OUTCOME_KINDS = ("knowledge", "recipe", "lead", "note", "reveal", "shimmer", "renew")
 # note: only logs its text (a trail gone cold); reveal: shows the map around the avatar;
 # shimmer: rare spots roll more often in this region cell for the rest of the life (id = what caused it);
 # renew: the region cell's exhaustion of one ECOLOGY (the id) is lifted
 ECOLOGY = ("wood", "berries", "game", "fungi", "eggs", "fish")   # see autopilot/ecology.py
-PLACEABLES = ("campfire",)   # things a self action sets down in the world for the rest of the life
-NEED_FLAGS = ("camp_wanted",)   # camp_wanted: badly hurt far from any rest place, or in a mastered place whose focus calls for camp
+PLACEABLES = ("campfire", "bed")   # bed: a rented bed in a village, a rest place and camp without a fire   # things a self action sets down in the world for the rest of the life
+NEED_FLAGS = ("camp_wanted", "farm_ripe")   # farm_ripe: the camp's farm has crops ready (FARM_GROW_MS)   # camp_wanted: badly hurt far from any rest place, or in a mastered place whose focus calls for camp
 ACTION_ROLES = ("base", "unlockable", "discovery", "lead", "contextual", "craft", "combat", "reflection", "site",
                 "story")
 
@@ -737,8 +842,10 @@ class ActionDef:
             raise ValueError(f"invalid cost: {self.id}")
         if (self.category == "fight") != (self.hp > 0):
             raise ValueError(f"fights, and only fights, have hit points: {self.id}")
-        if (self.category in ("craft", "build", "camp")) != bool(self.cost):
-            raise ValueError(f"crafts, buildings and camps, and only they, consume items: {self.id}")
+        if self.category in ("craft", "build", "camp") and not self.cost:
+            raise ValueError(f"crafts, buildings and camps consume items: {self.id}")
+        if self.cost and self.category not in ("craft", "build", "camp", "trade", "quest"):
+            raise ValueError(f"only crafts, buildings, camps, trades and quests consume items: {self.id}")
         if self.effect is not None and (self.effect not in ITEMS or ITEMS[self.effect].kind != "gear"):
             raise ValueError(f"effect must name a gear item: {self.id}")
         if self.placement in ("spot", "site") and (self.trigger is not None or self.visible_only):
@@ -773,8 +880,9 @@ class ActionDef:
         integer(self.lead_spread, "lead spread", 0, 1)
         if self.ecology is not None and (self.ecology not in ECOLOGY or self.placement != "spot"):
             raise ValueError(f"only wild spots deplete an ecology, from ECOLOGY: {self.id}")
-        if self.places is not None and (self.places not in PLACEABLES or self.placement != "self"):
-            raise ValueError(f"only self actions place things, from PLACEABLES: {self.id}")
+        if self.places is not None and (self.places not in PLACEABLES
+                                        or self.placement != ("site" if self.places == "bed" else "self")):
+            raise ValueError(f"only self actions place things (a bed is rented at a site), from PLACEABLES: {self.id}")
         if self.need_flag is not None and (self.need_flag not in NEED_FLAGS or self.trigger != "need"):
             raise ValueError(f"need flags are for need actions, from NEED_FLAGS: {self.id}")
         if self.lead_spread and self.placement != "lead":
@@ -1045,7 +1153,9 @@ ACTIONS = (
               loot=(L("boar_meat", 1, 1), L("boar_hide", 1, 1, 60)), drops="boar_spoils",
               roles=("base", "combat"), interaction="Fighting the boar",
               outcomes=(OutcomeDef("recipe", "hide_wrap", chance=30,
-                                   text="Skinning it, you see how the hide could be worn."),)),
+                                   text="Skinning it, you see how the hide could be worn."),
+                        OutcomeDef("recipe", "leather_gloves", chance=12,
+                                   text="The tough hide of its neck would make a pair of gloves."))),
     # --- opened by dimensional levels (UNLOCKS) ------------------------------------
     ActionDef("gnarled_tree", "Old tree", "climb", "spot", "agility", XP, 3200, 10,
               "Climb for bird eggs and a look over the canopy.", "Climbed a gnarled tree and scouted the canopy.",
@@ -1099,13 +1209,13 @@ ACTIONS = (
               "Packs left by travellers who never came back.",
               "Rummaged through packs the travellers left behind.", unlock="scavenging", site="abandoned_camp",
               loot=(L("stick", 1, 2), L("cloth_scrap", 1, 2, 70)), drops="traveller_cache",
-              outcomes=(OutcomeDef("lead", "map_scrap", chance=35, ttl_ms=120_000),),
+              outcomes=(OutcomeDef("lead", "map_scrap", chance=35, ttl_ms=120_000), OutcomeDef("recipe", "leather_pack")),
               roles=("site", "unlockable", "discovery"), interaction="Searching the bags"),
     ActionDef("camp_firepit", "Old campfire", "scavenge", "site", "perception", XP, 2600, 8,
               "Ashes, a cooking spit and whatever was left tied up nearby.",
               "Sifted a cold firepit and untied what was left.", unlock="scavenging", site="abandoned_camp",
               loot=(L("rope", 1, 1, 60), L("bramble_thorn", 1, 1, 40)), roles=("site", "unlockable", "discovery"),
-              outcomes=(OutcomeDef("lead", "bootprints", chance=35, ttl_ms=120_000),),
+              outcomes=(OutcomeDef("lead", "bootprints", chance=35, ttl_ms=120_000), OutcomeDef("recipe", "leather_hood")),
               interaction="Searching the ashes"),
     ActionDef("camp_bedroll", "Torn blanket", "scavenge", "site", "endurance", XP, 2800, 7,
               "Bedding stuffed with wool - and a way to stitch it into something useful.",
@@ -1148,13 +1258,13 @@ ACTIONS = (
     ActionDef("lodge_racks", "Hide racks", "scavenge", "site", "strength", XP, 3400, 9,
               "Frames of hides left to dry. Some are still good.",
               "Cut the sound hides down from a hunter's drying racks.", unlock="snares", site="hunters_lodge",
-              loot=(L("boar_hide", 1, 2), L("rope", 1, 1, 40)), roles=("site", "unlockable"),
-              interaction="Taking the hides"),
+              loot=(L("boar_hide", 1, 2), L("rope", 1, 1, 40)), roles=("site", "unlockable", "discovery"),
+              outcomes=(OutcomeDef("recipe", "leather_jerkin"),), interaction="Taking the hides"),
     ActionDef("lodge_snares", "Old traps", "hunt", "site", "perception", XP, 3000, 8,
               "A line of snares around the lodge, one of them still sprung.",
               "Walked the old snare line around the lodge.", unlock="snares", site="hunters_lodge",
               loot=(L("snared_hare", 1, 1, 70), L("bramble_thorn", 1, 2)), roles=("site", "unlockable"),
-              outcomes=(OutcomeDef("recipe", "snare"),), interaction="Checking the traps"),
+              outcomes=(OutcomeDef("recipe", "snare"), OutcomeDef("recipe", "hide_boots")), interaction="Checking the traps"),
     ActionDef("lodge_trophies", "Antler wall", "scavenge", "site", "intelligence", XP, 3600, 5,
               "Antlers and tusks nailed above the lodge door.",
               "Took down what was worth keeping from the trophy wall.", unlock="snares", site="hunters_lodge",
@@ -1210,14 +1320,14 @@ ACTIONS = (
               "A longer, wordless pause.", "Contemplated the forest for a while.", trigger="after_location",
               roles=("reflection", "contextual"), interaction="Contemplating the forest"),
     ActionDef("craft_jerkin", "Stitch a padded jerkin", "craft", "self", "endurance", XP, 6000, 1,
-              "Cloth and rope become a jerkin: enemy hits hurt 20% less this life.",
+              "Cloth and rope become a jerkin: a little more health this life.",
               "Stitched cloth scraps into a padded jerkin.", cost=(("cloth_scrap", 3), ("rope", 1)),
               effect="padded_jerkin", trigger="need", need_priority=4, recipe="padded_jerkin",
               workplace="crafting_station",
               roles=("craft", "contextual"), requirements=(Requirement("knowledge", "primitive_crafting"),),
               interaction="Stitching a padded jerkin"),
     ActionDef("craft_studded", "Stud the hide wrap", "craft", "self", "strength", XP, 6000, 1,
-              "Nails hammered into a hide wrap: enemy hits hurt 45% less this life.",
+              "Nails hammered into a hide wrap: the most health a body piece gives.",
               "Hammered iron studs into the hide wrap.", cost=(("hide_wrap", 1), ("iron_nails", 3)),
               effect="studded_wrap", trigger="need", need_priority=2, recipe="studded_wrap",
               workplace="crafting_station",
@@ -1231,7 +1341,7 @@ ACTIONS = (
               workplace="crafting_station",
               roles=("craft", "contextual"), interaction="Setting a bramble snare"),
     ActionDef("craft_wrap", "Wrap boar hide", "craft", "self", "endurance", XP, 5000, 1,
-              "Two hides become a wrap: boar hits hurt 30% less this life.",
+              "Two hides become a wrap: more health to lose before you fall.",
               "Wrapped boar hide around your arms and chest.", recipe="hide_wrap",
               cost=(("boar_hide", 2),), effect="hide_wrap", trigger="need",
               need_priority=1,
@@ -1239,6 +1349,111 @@ ACTIONS = (
               roles=("craft", "contextual"), interaction="Wrapping boar hide"),
     # Weapons (crafting station). The spear and the axe are built on a staff: crafting one
     # replaces the staff, and a worn weapon is never replaced by a craft that keeps it.
+    # --- the road out and the village (docs/design/VILLAGE.md) --------------------------------
+    # The bandit camp: the men who killed the traveller on this road. Coins, cloth and rope.
+    ActionDef("bandit_lookout", "Bandit lookout", "fight", "site", "strength", XP, 1, 9,
+              "A man with a club watching the road.", "Beat the bandit lookout.", site="bandit_camp",
+              hp=12, enemy="road_bandit", loot=(L("tarnished_coin", 1, 3), L("cloth_scrap", 1, 1, 50)),
+              roles=("site", "combat"), interaction="Fighting the bandit"),
+    ActionDef("bandit_spoils", "Bandits' spoils", "scavenge", "site", "perception", XP, 3600, 6,
+              "Sacks of what they took from travellers on the road.", "Went through the bandits' spoils.",
+              site="bandit_camp", loot=(L("tarnished_coin", 2, 4), L("rope", 1, 1, 60), L("cloth_scrap", 1, 2, 60)),
+              roles=("site", "discovery"), art="camp_packs", interaction="Going through the sacks",
+              outcomes=(OutcomeDef("note", "own_satchel", text="Among the sacks: your own satchel. You remember this road."),)),
+    # The village: trade with tarnished coins, and folk who need a hand (quest templates:
+    # deliver now, fetch what they ask, or clear a nuisance - a fight lead nearby).
+    ActionDef("bread_stall", "Baker's stall", "trade", "site", "intelligence", XP, 1500, 10,
+              "Fresh loaves for a coin.", "Bought bread at the baker's stall.", site="village",
+              cost=(("tarnished_coin", 1),), loot=(L("bread", 2, 2),), roles=("site",), art="camp_packs",
+              interaction="Buying bread"),
+    ActionDef("tanner_stall", "Tanner's yard", "trade", "site", "strength", XP, 1500, 7,
+              "The tanner buys good hides.", "Sold hides to the tanner.", site="village",
+              cost=(("boar_hide", 2),), loot=(L("tarnished_coin", 3, 3),), roles=("site",), art="lodge_racks",
+              interaction="Selling hides"),
+    ActionDef("trophy_buyer", "Curio seller", "trade", "site", "intelligence", XP, 1500, 5,
+              "A woman who pays for tusks, fangs and antlers.", "Sold a trophy to the curio seller.", site="village",
+              cost=(("boar_tusk", 1),), loot=(L("tarnished_coin", 2, 3),), roles=("site",), art="lodge_trophies",
+              interaction="Selling a tusk"),
+    ActionDef("builders_notes", "Builder's notes", "trade", "site", "intelligence", XP, 4000, 6,
+              "The village builder sells how to fence and sow a farm plot.",
+              "Bought the builder's notes on a farm plot.", site="village", cost=(("tarnished_coin", 4),),
+              requirements=(Requirement("unknown", "farming"),), roles=("site", "discovery"), art="old_carvings",
+              outcomes=(OutcomeDef("knowledge", "farming", text="You know how to lay out a farm plot. It is yours in every life."),),
+              interaction="Reading the builder's notes"),
+    ActionDef("widow_woodpile", "The widow's woodpile", "quest", "site", "strength", XP, 2500, 8,
+              "An old widow needs firewood brought to her door.", "Brought the widow her firewood.", site="village",
+              cost=(("stick", 4),), loot=(L("tarnished_coin", 2, 2),), roles=("site",), art="fallen_branches",
+              interaction="Stacking her firewood"),
+    ActionDef("miller_bake", "The miller's bake", "quest", "site", "perception", XP, 2500, 7,
+              "The miller wants berries for his pies.", "Brought the miller berries; he paid and gave a loaf.",
+              site="village", cost=(("wild_berries", 5),), loot=(L("tarnished_coin", 2, 2), L("bread", 1, 1)),
+              roles=("site",), art="bramble_berries", interaction="Handing over the berries"),
+    ActionDef("granary_rats", "Rats in the granary", "quest", "site", "strength", XP, 2000, 8,
+              "The miller's granary is full of rats.", "Agreed to clear the miller's granary.", site="village",
+              roles=("site", "discovery"), art="trail_marker", interaction="Hearing the miller out",
+              outcomes=(OutcomeDef("lead", "rat_nest", ttl_ms=150_000, text="Rats scatter under the granary floor."),)),
+    ActionDef("road_trouble", "Trouble on the road", "quest", "site", "willpower", XP, 2000, 5,
+              "The reeve wants the bandit scouts off the road.", "Took the reeve's job: the scouts on the road.",
+              site="village", roles=("site", "discovery"), art="trail_marker", interaction="Hearing the reeve out",
+              outcomes=(OutcomeDef("lead", "bandit_scouts", ttl_ms=180_000, text="Two men with clubs watch the road out of the village."),)),
+    ActionDef("village_inn", "The inn", "camp", "site", "endurance", XP, 3000, 6,
+              "A bed for a coin. Rest here and roam the village and the road.", "Rented a bed at the inn.",
+              site="village", cost=(("tarnished_coin", 1),), places="bed", roles=("site",), art="camp_firepit",
+              interaction="Renting a bed"),
+    ActionDef("rat_nest", "Rat nest", "fight", "lead", "strength", XP, 1, 1,
+              "Rats under the granary floor.", "Cleared the rats out of the granary; the miller paid.",
+              hp=5, enemy="granary_rat", loot=(L("tarnished_coin", 2, 3),), roles=("lead", "combat"),
+              art="lurker_burrow", interaction="Fighting the rats"),
+    ActionDef("bandit_scouts", "Bandit scouts", "fight", "lead", "strength", XP, 1, 1,
+              "Bandit scouts on the road.", "Ran the bandit scouts off the road; the reeve paid.",
+              hp=10, enemy="road_bandit", loot=(L("tarnished_coin", 3, 5),), roles=("lead", "combat"),
+              art="bramble_boar", interaction="Fighting the bandits"),
+    # The farm (camp building; its notes are bought in the village): crops ripen every FARM_GROW_MS.
+    ActionDef("build_farm", "Lay out a farm plot", "build", "self", "building", XP, 20000, 1,
+              "Fence a plot by the anchor stone and sow it.", "Fenced and sowed a farm plot beside the camp.",
+              cost=(("stick", 10), ("rope", 1)), builds="farm", workplace="camp", trigger="need",
+              need_priority=2, roles=("craft", "contextual"), requirements=(Requirement("knowledge", "farming"),),
+              interaction="Fencing and sowing a farm plot"),
+    ActionDef("harvest_farm", "Harvest the farm", "forage", "self", "endurance", XP, 6000, 1,
+              "Pull the ripe turnips.", "Pulled a basket of turnips from the farm.", loot=(L("turnip", 3, 4),),
+              workplace="farm", trigger="need", need_priority=1, need_flag="farm_ripe", roles=("craft", "contextual"),
+              interaction="Pulling ripe turnips"),
+    # Leather gear (recipes from the abandoned camp, the hunters' lodge and boars): one piece per slot.
+    ActionDef("craft_gloves", "Cut leather gloves", "craft", "self", "strength", XP, 5000, 1,
+              "Hide and cord become gloves: every blow lands a little harder.",
+              "Cut and laced a pair of leather gloves.", cost=(("boar_hide", 1), ("rope", 1)),
+              effect="leather_gloves", trigger="need", need_priority=3, recipe="leather_gloves",
+              workplace="crafting_station",
+              roles=("craft", "contextual"), requirements=(Requirement("knowledge", "primitive_crafting"),),
+              interaction="Cutting leather gloves"),
+    ActionDef("craft_leather_jerkin", "Sew a leather jerkin", "craft", "self", "endurance", XP, 7000, 1,
+              "Three hides sewn with cord: more health to lose before you fall.",
+              "Sewed hides into a leather jerkin.", cost=(("boar_hide", 3), ("rope", 1)),
+              effect="leather_jerkin", trigger="need", need_priority=3, recipe="leather_jerkin",
+              workplace="crafting_station",
+              roles=("craft", "contextual"), requirements=(Requirement("knowledge", "primitive_crafting"),),
+              interaction="Sewing a leather jerkin"),
+    ActionDef("craft_hood", "Sew a leather hood", "craft", "self", "endurance", XP, 5000, 1,
+              "Hide lined with cloth, pulled over the head.",
+              "Sewed a hood of hide lined with cloth.", cost=(("boar_hide", 1), ("cloth_scrap", 1)),
+              effect="leather_hood", trigger="need", need_priority=6, recipe="leather_hood",
+              workplace="crafting_station",
+              roles=("craft", "contextual"), requirements=(Requirement("knowledge", "primitive_crafting"),),
+              interaction="Sewing a leather hood"),
+    ActionDef("craft_boots", "Stitch hide boots", "craft", "self", "endurance", XP, 6000, 1,
+              "Two hides and cord: boots for the long roads.",
+              "Stitched a pair of hide boots.", cost=(("boar_hide", 2), ("rope", 1)),
+              effect="hide_boots", trigger="need", need_priority=6, recipe="hide_boots",
+              workplace="crafting_station",
+              roles=("craft", "contextual"), requirements=(Requirement("knowledge", "primitive_crafting"),),
+              interaction="Stitching hide boots"),
+    ActionDef("craft_pack", "Make a leather pack", "craft", "self", "strength", XP, 6000, 1,
+              "Hide stretched on a frame of sticks, carried on the back.",
+              "Lashed hide over a stick frame into a pack.", cost=(("boar_hide", 2), ("rope", 1), ("stick", 3)),
+              effect="leather_pack", trigger="need", need_priority=7, recipe="leather_pack",
+              workplace="crafting_station",
+              roles=("craft", "contextual"), requirements=(Requirement("knowledge", "primitive_crafting"),),
+              interaction="Lashing a leather pack"),
     ActionDef("craft_staff", "Cut a walking staff", "craft", "self", "strength", XP, 5000, 1,
               "A straight length of wood: hits from two steps away, a little harder.",
               "Cut and smoothed a walking staff.", cost=(("stick", 5),), effect="walking_staff",
@@ -1303,6 +1518,10 @@ STORY_ACTIONS = (
 )
 ACTIONS = ACTIONS + STORY_ACTIONS
 BY_ID = {action.id: action for action in ACTIONS}
+# Stalls that sell food (repeatable trades whose loot feeds): a hungry avatar with the price walks to
+# one, and keeps their price back from other purchases (planning._food_trade_trip, outcomes.worth_paying).
+FOOD_TRADES = tuple(a for a in ACTIONS if a.category in REPEAT_CATEGORIES and a.cost and a.feeds
+                    and not any(o.kind == "knowledge" for o in a.outcomes))
 
 
 # ----- unlocks, mastery ---------------------------------------------------
@@ -1453,13 +1672,16 @@ REGIONS = {r.id: r for r in (
 # ----- recipes: found during a life, kept for later lives with ash -------------------------
 # A recipe outcome teaches a craft for the rest of that life; at the anchor the soul can keep it
 # (pass the knowledge on) for this much ash. Every recipe a craft names must be here.
-RECIPE_KEEP_COST = {"snare": 15, "hide_wrap": 20, "padded_jerkin": 25, "spear": 35, "axe": 35, "studded_wrap": 40}
+RECIPE_KEEP_COST = {"snare": 15, "hide_wrap": 20, "padded_jerkin": 25, "spear": 35, "axe": 35, "studded_wrap": 40,
+                    "leather_hood": 20, "leather_gloves": 30, "hide_boots": 25, "leather_pack": 25, "leather_jerkin": 30}
 RECIPE_NAMES = {"snare": "Bramble snare", "hide_wrap": "Hide wrap", "padded_jerkin": "Padded jerkin",
-                "spear": "Spear", "axe": "Axe", "studded_wrap": "Studded wrap"}
+                "spear": "Spear", "axe": "Axe", "studded_wrap": "Studded wrap", "leather_hood": "Leather hood",
+                "leather_gloves": "Leather gloves", "hide_boots": "Hide boots", "leather_pack": "Leather pack",
+                "leather_jerkin": "Leather jerkin"}
 
 # ----- sites (landmarks) --------------------------------------------------------------
 SITE_CELL = 3          # at most one site per SITE_CELL x SITE_CELL chunks (one candidate chunk each)
-STRUCTURES = ("camp", "tower", "lumber", "lodge", "shrine", "barrow")   # terrain layout styles in open_terrain (client tile art by glyph)
+STRUCTURES = ("camp", "tower", "lumber", "lodge", "shrine", "barrow", "village", "bandits")   # terrain layout styles in open_terrain (client tile art by glyph)
 
 
 @dataclass(frozen=True)
@@ -1514,7 +1736,15 @@ SITES = {s.id: s for s in (
     SiteDef("old_barrow", "Burial mound", "dark_forest",
             {"bramble_thicket": 150, "deep_woods": 100, "old_road": 50}, "barrow", spots=(2, 3), size=(6, 3),
             min_ring=5, rarity="rare"),
+    # On the road out of the forest (LandDef.road_out), never rolled: placed on the road itself.
+    SiteDef("bandit_camp", "Bandit camp", "dark_forest", {"old_road": 1}, "bandits", spots=(2, 3), size=(6, 3),
+            min_ring=50, rarity="rare"),
+    SiteDef("village", "Village", "dark_forest", {"old_road": 1}, "village", spots=(4, 6), size=(7, 4),
+            min_ring=50, rarity="rare"),
 )}
+VILLAGE_SITE = "village"             # at the far end of a land's road out
+ROAD_OUT_SITES = ("bandit_camp",)     # on the road out, from its second chunk outward
+ROAD_SITE_IDS = frozenset({VILLAGE_SITE, *ROAD_OUT_SITES})
 
 
 @dataclass(frozen=True)
@@ -1696,23 +1926,44 @@ class LandDef:
     """The explorable area of one dimension (a land). Every chunk up to `edge_ring` can be reached;
     a chunk in rings edge_ring+1..`lobe_ring` can be too where its region cell rolls under
     `lobe_percent`, so the edge is ragged, not a square. Past that the land is closed by what is
-    there: impassable thicket in the woods, fallen trees across a road, a broken bridge over a river."""
+    there: impassable thicket in the woods, fallen trees across a road, a broken bridge over a river.
+    `road_out` (side, length): one road leaves the land on that side, a corridor of chunks along the
+    axis from ring edge_ring+1 to lobe_ring+length, walled by thicket; its sites stand on it
+    (VILLAGE_SITE at the far end, ROAD_OUT_SITES on the way). None: no road out (older worlds)."""
     dimension: str
     name: str
     edge_ring: int
     lobe_ring: int
     lobe_percent: int
+    road_out: tuple | None = None
 
     def __post_init__(self):
         identifier(self.dimension, "land dimension")
         integer(self.edge_ring, "land edge ring", 1, 1000)
         integer(self.lobe_ring, "land lobe ring", self.edge_ring, 1000)
         integer(self.lobe_percent, "land lobe percent", 0, 100)
+        if self.road_out is not None:
+            if type(self.road_out) not in (tuple, list) or len(self.road_out) != 2 \
+                    or self.road_out[0] not in ("north", "south", "east", "west"):
+                raise ValueError(f"road_out is (side, length): {self.dimension}")
+            integer(self.road_out[1], "road out length", 1, 20)
+            object.__setattr__(self, "road_out", tuple(self.road_out))
+
+    def pinned(self):
+        """The dict pinned in world saves (and digested): `road_out` only when the land has one, so
+        worlds pinned before it existed keep their digest."""
+        data = {"dimension": self.dimension, "name": self.name, "edge_ring": self.edge_ring,
+                "lobe_ring": self.lobe_ring, "lobe_percent": self.lobe_percent}
+        if self.road_out is not None:
+            data["road_out"] = list(self.road_out)
+        return data
 
 
 # Rings 5-6: where auto-pilot lives level off (docs/design/STORY.md measurements).
 LANDS = {land.dimension: land for land in (
-    LandDef("forest", "The forest", edge_ring=5, lobe_ring=6, lobe_percent=45),
+    # The old road leaves the forest to the east, past the fallen trees: two chunks of road
+    # (a bandit camp on it), then the village (docs/design/VILLAGE.md).
+    LandDef("forest", "The forest", edge_ring=5, lobe_ring=6, lobe_percent=45, road_out=("east", 2)),
 )}
 
 # ----- locations: kinds of place the avatar masters (docs/design/LOCATIONS.md) ----------------
@@ -1745,6 +1996,8 @@ LOCATIONS = {loc.id: loc for loc in (
     LocationDef("hunters_cabin", "Hunter's cabin", "site", ("hunters_lodge",), "Racks, traps and trophies of a hunter long gone."),
     LocationDef("old_ruins", "Old ruins", "site", ("fallen_watchtower", "ruined_shrine", "old_barrow"),
                 "Fallen watchtowers, ruined shrines and burial mounds, and what guards them."),
+    LocationDef("bandit_camp", "Bandit camp", "site", ("bandit_camp",), "Tents and spoils on the old road out: the men who killed you."),
+    LocationDef("village", "The village", "site", ("village",), "Folk past the forest: a baker, a tanner, an inn, and work for a coin."),
 )}
 LOCATION_OF_REGION = {m: loc.id for loc in LOCATIONS.values() if loc.kind == "region" for m in loc.members}
 LOCATION_OF_SITE = {m: loc.id for loc in LOCATIONS.values() if loc.kind == "site" for m in loc.members}

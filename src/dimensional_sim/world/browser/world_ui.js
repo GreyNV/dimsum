@@ -22,8 +22,16 @@ export function regionCue(region) {
   return place && cue ? `${place} ${cue}` : place || cue;
 }
 
+/** Worked ground (explored.py): how many times the ground here was worked over, and a den. */
+export function groundCue(ground) {
+  if (!ground) return '';
+  const den = ground.den ? ' Something has made a den nearby.' : '';
+  return `${ground.name} ground: ${ground.rounds ? 'more danger, new finds' : 'recovering'}.${den}`;
+}
+
 function regionFlavour(region) {
   if (region?.shimmer) return 'The air hums here. Rare things are closer this life.';
+  if (region?.ground) return groundCue(region.ground);   // worked ground replaces the flavour line
   const base = region?.site ? `${region.site}: ${region.condition?.text || 'a landmark with its own encounters and materials.'}`
     : REGION_CUES[region?.id] || '';
   const worked = (region?.worked || []).map(e => ECOLOGY_WORDS[e] || e);

@@ -8,7 +8,7 @@ from ..progression import combined_level, scaled_ms
 from ..runtime import InputCommand, Target
 from .navigation import MOVES_8
 from ..seeds import derive_seed
-from ..tuning import (COMFORT_DAMAGE_PERCENT, DODGE_BASE_PERCENT, DODGE_MAX_PERCENT, DODGE_PERCENT_PER_LEVEL,
+from ..tuning import (COMFORT_DAMAGE_PERCENT, DANGER_RINGS_PER_ROUND, DODGE_BASE_PERCENT, DODGE_MAX_PERCENT, DODGE_PERCENT_PER_LEVEL,
                       STRENGTH_LEVELS_PER_PUNCH)
 from .constants import CAMP_SAFE_RADIUS, EAT_AT, MONSTER_STEP_MS, PAUSE_BETWEEN_PUNCHES_MS, POINT, VITAL_MAX, ceil_div
 
@@ -41,11 +41,10 @@ class CombatMixin:
 
     def enemy_hit(self, key, enemy, tier=None):
         """Health one bite of `enemy` takes in chunk `key`: fixed in its land (the biome's
-        hit_percent), raised by its FightTier, softened by Endurance and enemy_hit_percent effects."""
+        hit_percent), raised by its FightTier. Nothing softens it: gear and Endurance add health
+        and slow hunger instead."""
         tier = tier or FIGHT_TIERS["common"]
-        hit = enemy.hit * POINT * self.biome(key).hit_percent // 100 * tier.hit_percent // 100
-        hit = hit * 1000 // self.speed("endurance")
-        return effects.scale(hit, self.equipped, "enemy_hit_percent")
+        return enemy.hit * POINT * self.biome(key).hit_percent // 100 * tier.hit_percent // 100
 
     def enemy_hp(self, action, key, tier=None):
         """Hit points of the fight spot `action` in chunk `key`: fixed in its land, raised by its tier."""
@@ -71,7 +70,17 @@ class CombatMixin:
 
     def _fight_odds(self, ident):
         key = self._spot_chunk(ident)
-        return None if key is None else self.biome(key).odds_at(self.ring(key))
+        if key is None:
+            return None
+        danger = self.rolled_danger(key) if ident.startswith("enc:") else 0   # worked ground: deeper
+        return self.biome(key).odds_at(self.ring(key) + DANGER_RINGS_PER_ROUND * danger)
+
+    def _fight_salt(self, ident):
+        """Seed parts of a fight's tier and company: its id, and its chunk's reroll when rerolled
+        (a reroll reuses spot ids, so it must roll its fights afresh)."""
+        key = self._spot_chunk(ident)
+        n = 0 if key is None or not ident.startswith("enc:") else self.rerolls(key)
+        return (ident,) if n == 0 else (ident, "reroll", n)
 
     def tier_of(self, ident):
         """The FightTier a fight rolled: pure in the world seed, the spot id and its ring, so it
@@ -79,7 +88,7 @@ class CombatMixin:
         odds = None if self.companion_of(ident) else self._fight_odds(ident)
         if odds is None:
             return FIGHT_TIERS["common"]
-        roll = derive_seed(self.game.world.world_seed, "fight-tier-v1", ident) % 100
+        roll = derive_seed(self.game.world.world_seed, "fight-tier-v1", *self._fight_salt(ident)) % 100
         return FIGHT_TIERS["elder"] if roll < odds.elder else FIGHT_TIERS["star"] if roll < odds.elder + odds.star \
             else FIGHT_TIERS["common"]
 
@@ -89,8 +98,9 @@ class CombatMixin:
         odds = None if self.companion_of(ident) else self._fight_odds(ident)
         if odds is None or not odds.extra:
             return 0
-        first = derive_seed(self.game.world.world_seed, "fight-company-v1", ident, 1) % 100 < odds.extra
-        second = first and derive_seed(self.game.world.world_seed, "fight-company-v1", ident, 2) % 200 < odds.extra
+        salt = self._fight_salt(ident)
+        first = derive_seed(self.game.world.world_seed, "fight-company-v1", *salt, 1) % 100 < odds.extra
+        second = first and derive_seed(self.game.world.world_seed, "fight-company-v1", *salt, 2) % 200 < odds.extra
         return int(first) + int(second)
 
     def _place_company(self, spot, entry):
@@ -121,18 +131,20 @@ class CombatMixin:
         clip = ceil_div(self.game.animations["attack"].duration_ms * 100, self.game.attack_rate_percent)
         return clip + scaled_ms(PAUSE_BETWEEN_PUNCHES_MS, self.speed("strength"))
 
-    def _strikes_taken(self, enemy, hp):
+    def _strikes_taken(self, enemy, hp, tier=None):
         """How many strikes `enemy` gets in before `hp` worth of blows bring it down: the first
-        after its wind-up, then one each pattern cycle (wind-up, strike, recovery, backing off)."""
-        pattern = FIGHT_PATTERNS[enemy.pattern]
+        after its wind-up, then one each pattern cycle (wind-up, strike, recovery, backing off).
+        A starred tier warns for less long and may strike more than once per cycle."""
+        pattern, tier = FIGHT_PATTERNS[enemy.pattern], tier or FIGHT_TIERS["common"]
+        windup = pattern.windup_ms * tier.windup_percent // 100
         # blows take half as long again as the bare punch cycle: a hunter backs off and must be followed
         fight_ms = ceil_div(hp, self.punch_damage()) * self.punch_cycle_ms() * 3 // 2
-        if fight_ms <= pattern.windup_ms:
+        if fight_ms <= windup:
             return 0
         # a charger strikes again from where it backed off to; a biter must walk back in first
         back = pattern.retreat * enemy.step_ms * (1 if pattern.strike == "charge" else 2)
-        cycle = pattern.windup_ms + MONSTER_STEP_MS + pattern.recover_ms + back
-        return 1 + (fight_ms - pattern.windup_ms) // cycle
+        cycle = tier.strikes * (windup + MONSTER_STEP_MS) + pattern.recover_ms + back
+        return tier.strikes * (1 + (fight_ms - windup) // cycle)
 
     def dodge_percent(self):
         """The autopilot's chance to step out of a strike it sees coming: Agility and Perception
@@ -153,7 +165,7 @@ class CombatMixin:
             return 0   # costs hunger, not health
 
         def one(t):
-            return self._strikes_taken(enemy, self.enemy_hp(action, key, t)) * self.enemy_hit(key, enemy, t) \
+            return self._strikes_taken(enemy, self.enemy_hp(action, key, t), t) * self.enemy_hit(key, enemy, t) \
                 * (100 - self.dodge_percent()) // 100
         if tier is not None:
             return one(tier)
@@ -183,13 +195,16 @@ class CombatMixin:
         return [a for a in BY_ID.values() if a.enemy is not None and a.placement != "lead" and biome in a.biomes]
 
     def frontier(self):
-        """Deepest ring the auto-pilot is willing to explore: one fight with the worst
+        """Deepest ring the auto-pilot is willing to explore: one fight with the worst roaming
         threat there must cost at most COMFORT_DAMAGE_PERCENT of full health. Stronger lives
         (XP, gear) push the frontier outward; hunger pushes one ring further."""
-        threats, cap = self.threats(), self.biome(self.game.player.chunk).ring_cap
+        # roaming enemies only: a landmark's guards stay at their site, and the avatar chooses
+        # whether to take them on (_wind_up refuses fights it cannot afford)
+        threats = [a for a in self.threats() if a.placement != "site"]
+        cap = self.biome(self.game.player.chunk).ring_cap
         ring = 1
         while ring < cap and threats and max(self.fight_damage(ring + 1, a) for a in threats) * 100 \
-                <= VITAL_MAX * COMFORT_DAMAGE_PERCENT:
+                <= self.max_health() * COMFORT_DAMAGE_PERCENT:
             ring += 1
         if self.hunger <= EAT_AT and not self._has_food():
             ring += 1
@@ -304,7 +319,7 @@ class CombatMixin:
 
     # ----- fight patterns (catalog FightPattern) ----------------------------------------------
     def _row(self, target, mode, **extra):
-        row = {"mode": mode, "since": self.total_ms, "ax": 0, "ay": 0, "ox": 0, "oy": 0, "left": 0}
+        row = {"mode": mode, "since": self.total_ms, "ax": 0, "ay": 0, "ox": 0, "oy": 0, "left": 0, "n": 0}
         row.update(extra)
         self.hunting[target.id] = row
         return row
@@ -314,24 +329,36 @@ class CombatMixin:
         (a bite, or a charge that may last a few ticks) -> recover (open to blows) -> retreat."""
         pattern, row = FIGHT_PATTERNS[enemy.pattern], self.hunting[target.id]
         held = self.total_ms - row["since"]
-        if mode == "hunt":
+        if mode == "hunt" and pattern.circle_ms and not row["left"]:
+            tx, ty = self._global(target.chunk, target.x, target.y)
+            if max(abs(tx - px), abs(ty - py)) <= pattern.circle_range + 1:   # near: size the avatar up first
+                self._row(target, "circle")
+                mode = "circle"
+        if mode == "circle":
+            if held >= pattern.circle_ms:
+                self._row(target, "hunt", left=1)   # left=1: circled, now it comes in
+            else:
+                for _ in range(self._steps_this_tick(enemy)):
+                    if self._circle_step(target, pattern, grid, w, h, px, py) is None:
+                        break
+        elif mode == "hunt":
             tx, ty, _ = self._close_in(target, enemy, grid, w, h, px, py, field)
             if self._can_strike(pattern, tx, ty, px, py):
                 self._row(target, "windup", ax=px, ay=py, ox=tx, oy=ty)
                 self._wind_up(target, enemy, pattern, tx, ty, px, py)
-        elif mode == "windup" and held >= pattern.windup_ms:
+        elif mode == "windup" and held >= pattern.windup_ms * self.tier_of(target.id).windup_percent // 100:
             tx, ty = self._global(target.chunk, target.x, target.y)
             if pattern.strike == "bite":
                 if max(abs(tx - px), abs(ty - py)) <= pattern.reach:
                     self._enemy_bites(target)
-                self._row(target, "recover")
+                self._after_strike(target, enemy, pattern, row["n"], px, py)
             else:
-                self._row(target, "charge", ax=row["ax"], ay=row["ay"], ox=tx, oy=ty)
+                self._row(target, "charge", ax=row["ax"], ay=row["ay"], ox=tx, oy=ty, n=row["n"])
                 self._charge(target, pattern, w, h, px, py)
         elif mode == "charge":
             self._charge(target, pattern, w, h, px, py)
         elif mode == "recover" and held >= pattern.recover_ms * (2 if row["left"] else 1):   # left: stunned on a wall
-            if pattern.retreat:
+            if pattern.retreat:   # (a circler circles again once it has backed off)
                 self._row(target, "retreat", left=pattern.retreat)
             else:
                 self._row(target, "hunt")
@@ -343,6 +370,40 @@ class CombatMixin:
                 row["left"] -= 1
             if row["left"] <= 0:
                 self._row(target, "hunt")
+
+    def _after_strike(self, target, enemy, pattern, done, px, py):
+        """A strike is over: recover, or - a starred enemy with strikes to spare (FightTier.strikes) -
+        wind up again at once from where it stands."""
+        if done + 1 < self.tier_of(target.id).strikes:
+            tx, ty = self._global(target.chunk, target.x, target.y)
+            self._row(target, "windup", ax=px, ay=py, ox=tx, oy=ty, n=done + 1)
+            self._wind_up(target, enemy, pattern, tx, ty, px, py)
+        else:
+            self._row(target, "recover")
+
+    def _circle_step(self, target, pattern, grid, w, h, px, py):
+        """One step round the avatar at `circle_range` cells, always the same way round (a pure
+        roll on the enemy's id). Returns the new cell, or None when no step keeps the ring."""
+        tx, ty = self._global(target.chunk, target.x, target.y)
+        turn = 1 if derive_seed(self.game.world.world_seed, "circle", target.id) % 2 else -1
+        blocked, choices = self._blocked(), []
+        for direction in DIRECTIONS:
+            dx, dy = DELTAS[direction]
+            nx, ny = tx + dx, ty + dy
+            key = ChunkKey(self.dimension, nx // w, ny // h)
+            if (nx, ny) == (px, py) or key not in self.game.initialized_chunks \
+                    or not self._can_move(grid, blocked, tx, ty, direction):
+                continue
+            spin = (tx - px) * (ny - py) - (ty - py) * (nx - px)   # > 0: clockwise on screen
+            off = abs(max(abs(nx - px), abs(ny - py)) - pattern.circle_range)
+            if spin * turn > 0 and off <= 1:
+                choices.append((off, direction, nx, ny, key))
+        if not choices:
+            return None
+        _, _, nx, ny, key = min(choices)
+        target.chunk, target.x, target.y = key, nx % w, ny % h
+        self._field_cache.clear()
+        return nx, ny
 
     def _can_strike(self, pattern, tx, ty, px, py):
         """Close enough to start a wind-up: a bite within its reach; a charge within its dash and
@@ -372,7 +433,7 @@ class CombatMixin:
             nx, ny = path[row["left"]]
             if (nx, ny) == (px, py):
                 self._enemy_bites(target)
-                self._row(target, "recover")
+                self._after_strike(target, self.enemy_of(target), pattern, row["n"], px, py)
                 return
             key = ChunkKey(self.dimension, nx // w, ny // h)
             chunk = self.game.world.peek(key)
@@ -384,8 +445,8 @@ class CombatMixin:
             self._field_cache.clear()
             row["left"] += 1
             steps -= 1
-        if row["left"] >= len(path):
-            self._row(target, "recover")
+        if row["left"] >= len(path):   # ran its whole dash past the avatar
+            self._after_strike(target, self.enemy_of(target), pattern, row["n"], px, py)
 
     def _wind_up(self, target, enemy, pattern, tx, ty, px, py):
         """A hunter shows its tell. The avatar answers: it turns to fight or runs (as before), and
@@ -396,7 +457,7 @@ class CombatMixin:
             self.task = None
             name = enemy.name.lower()
             expected = self.fight_damage(self.ring(target.chunk), self.target_action(target.id), self.tier_of(target.id))
-            if self.health - expected >= VITAL_MAX // 4:   # fight only with a quarter of full health to spare
+            if self.health - expected >= self.max_health() // 4:   # fight only with a quarter of full health to spare
                 self.goal = {"kind": "target", "id": target.id, "x": tx, "y": ty}
                 self._entry("ambush", f"A {name} attacks you!")
             elif cornered:   # already at the camp or the fire: running gains nothing, so fight

@@ -282,7 +282,7 @@ export function spotCanvas(key) {
   const art = SPOT_ART[key];
   if (!art) return null;
   const [w, h, draw] = art;
-  return paintedCanvas(`spot|${key}`, w, h, c => draw(c, w, h));
+  return paintedCanvas(`spot|${key}`, w, h, c => draw(c, w, h), {cold: .35});
 }
 
 // --- site structures (art.js STRUCTURE_ART glyphs) ----------------------------------------
@@ -318,7 +318,7 @@ export function structureCanvas(glyph) {
   const art = STRUCTURE_PAINT[glyph];
   if (!art) return null;
   const [w, h, draw] = art;
-  return {canvas: paintedCanvas(`site|${glyph}`, w, h, c => draw(c, w, h)), w, h};
+  return {canvas: paintedCanvas(`site|${glyph}`, w, h, c => draw(c, w, h), {cold: .35}), w, h};
 }
 
 // --- camp building parts and the ambush wreckage ------------------------------------------
@@ -352,6 +352,10 @@ export const PART_PAINT = {
   arrow: [24, 7, (c, w, h) => { line(c, '#3b2a1c', 1, 2, 3.5, 20, 3.5); fill(c, P([[19, 1.6], [23.6, 3.5], [19, 5.4]]), '#b9bfae', {sheen: .5}); for (const d of [-1, 1]) line(c, '#e8dcc4', .8, 1, 3.5 + d * 1.6, 4, 3.5); }],
   ambushSack: [20, 14, (c, w, h) => sack(c, 1, 1, 18, 12, '#9b7944')],
   tornCloth: [24, 14, (c, w, h) => cloth(c, [[1, 2], [22, 1], [20, 8], [15, 12], [11, 8], [7, 13], [2, 8]], CLOTH)],
+  // the farm plot: a low wattle fence and rows of turnip tops in dark earth
+  fence: [44, 12, (c, w, h) => { for (let x = 2; x < 44; x += 7) plank(c, x, 2, 2, 10, {nails: false}); line(c, WOOD, 1.2, 1, 5, 43, 5); line(c, WOOD, 1.2, 1, 8.4, 43, 8.4); }],
+  crops: [40, 14, (c, w, h) => { for (const y of [3, 8]) { fill(c, R(1, y + 2, 38, 3, 1.2), '#2a2118', {sheen: .1, edge: .3});
+    for (let x = 3; x < 38; x += 4.6) { fill(c, E(x, y + 2, 1.6, 1.1), '#d8c8e0', {sheen: .4, edge: .35}); line(c, '#3b5243', 1, x, y + 1.6, x - 1, y - 1.4); line(c, '#4f6656', 1, x, y + 1.6, x + 1.4, y - 1); } } }],
 };
 function wheel(c, x, y, r) {
   c.strokeStyle = '#2a1f16'; c.lineWidth = 2.6; c.beginPath(); c.ellipse(x, y, r, r, 0, 0, Math.PI * 2); c.stroke();
@@ -363,5 +367,5 @@ export function partCanvas(key) {
   const art = PART_PAINT[key];
   if (!art) return null;
   const [w, h, draw] = art;
-  return {canvas: paintedCanvas(`part|${key}`, w, h, c => draw(c, w, h)), w, h};
+  return {canvas: paintedCanvas(`part|${key}`, w, h, c => draw(c, w, h), {cold: .35}), w, h};
 }

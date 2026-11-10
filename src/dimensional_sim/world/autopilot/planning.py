@@ -3,8 +3,9 @@
 Every choice is a pure function of state plus seeds derived from the world seed and
 the saved decision counter, so a reload replays the same decisions.
 """
-from ..catalog import BY_ID, ITEMS
-from ..models import ChunkKey
+from ..catalog import BY_ID, FOOD_TRADES, ITEMS
+from ..models import ChunkKey, chunk_ident
+from ..tuning import FOOD_TRIP_CHUNKS
 from ..seeds import derive_seed
 from .constants import EAT_AT, RETREAT_BELOW
 
@@ -40,8 +41,10 @@ class PlanningMixin:
         for kind, ident, entry, gx, gy in self._candidates():
             if kind == "target":  # monsters initiate combat when they catch the avatar
                 continue
-            if max(abs(gx // w), abs(gy // h)) > limit:
-                continue   # beyond the frontier this life can survive
+            if entry.cost and not self.worth_paying(entry):
+                continue   # a trade or a quest asks for what the avatar does not carry (or should keep)
+            if max(abs(gx // w), abs(gy // h)) > limit and not (hungry and entry.feeds):
+                continue   # beyond the frontier this life can survive (food is worth the risk when starving)
             if not (hungry and entry.feeds) and not self.camp_wants(
                     entry, ChunkKey(self.game.player.chunk.dimension, gx // w, gy // h)):
                 continue   # camped: only what the camp's place and focus are about
@@ -59,10 +62,44 @@ class PlanningMixin:
             return self._rest_goal()
         if self._camp_work_ready():   # a full pack may be stowed at the camp
             return self._home_goal()
+        if self.hunger <= EAT_AT and not self._has_food() and self.farm_ripe() and not self.at_camp():
+            return self._home_goal()   # hungry with nothing to eat: the farm at the camp has a crop
         player_field = self._field({self._player()})
         best = self._best_candidate(player_field)
         self._camp_idle(best is not None)
+        if self.hunger <= EAT_AT and not self._has_food() and not self._feeds_goal(best):
+            trip = self._food_trade_trip()   # hungry with coins and no food in reach: walk to a food stall
+            if trip is not None:
+                return trip
         return best or self._wander_goal(player_field)
+
+    def _feeds_goal(self, goal):
+        if goal is None or goal["kind"] != "spot":
+            return False
+        spot = self._spot_by_id(goal["id"])
+        return spot is not None and BY_ID[spot.encounter].feeds
+
+    def _food_trade_trip(self):
+        """A travel goal to the nearest food stall the avatar can pay at, within FOOD_TRIP_CHUNKS:
+        one rolled this life (its spot), or a landmark seen before whose own encounters sell food."""
+        w, h = self._dims()
+        here = self.game.player.chunk
+        best = None
+        for chunk_id, plan in sorted(self.spot_plans.items()):
+            for index, (encounter, x, y) in enumerate(plan):
+                entry = BY_ID[encounter]
+                if entry in FOOD_TRADES and self.worth_paying(entry):
+                    _, cx, cy = chunk_id.rsplit(":", 2)
+                    best = _nearer(best, here, int(cx), int(cy), int(cx) * w + x, int(cy) * h + y)
+        for key, status in self.game.world.discovered(here.dimension):
+            if status != "visited" or chunk_ident(key) in self.spot_plans:
+                continue
+            site = self.game.world.site_for(key)
+            if site is not None and any(e.site == site.site.id and self.worth_paying(e) for e in FOOD_TRADES):
+                best = _nearer(best, here, key.x, key.y, key.x * w + site.x, key.y * h + site.y)
+        if best is None or best[0] > FOOD_TRIP_CHUNKS:
+            return None
+        return {"kind": "travel", "id": None, "x": best[1], "y": best[2]}
 
     def _wander_goal(self, reachable):
         w, h = self._dims()
@@ -110,10 +147,10 @@ class PlanningMixin:
             return {(goal["x"], goal["y"])}
         if goal["kind"] == "target":   # anywhere a blow reaches it from
             return self.strike_cells(goal["x"], goal["y"])
-        if goal["kind"] != "home":
+        if goal["kind"] not in ("home", "travel"):
             return self._approach(goal["x"], goal["y"])
         w, h = self._dims()
-        ax, ay = goal["x"], goal["y"]   # the anchor, or this life's campfire
+        ax, ay = goal["x"], goal["y"]   # the anchor, this life's campfire, or a far place (travel)
         acx, acy = ax // w, ay // h
         center = self.game.player.chunk
         if abs(acx - center.x) <= 1 and abs(acy - center.y) <= 1 and \
@@ -123,3 +160,8 @@ class PlanningMixin:
         step = (acx > center.x) - (acx < center.x), (acy > center.y) - (acy < center.y)
         tx, ty = center.x + step[0], center.y + step[1]
         return {(tx * w + x, ty * h + y) for y in range(h) for x in range(w)}
+
+
+def _nearer(best, here, cx, cy, gx, gy):
+    d = max(abs(cx - here.x), abs(cy - here.y))
+    return (d, gx, gy) if best is None or (d, gx, gy) < best else best

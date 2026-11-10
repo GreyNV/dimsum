@@ -458,7 +458,7 @@ test('terrain marks never draw undefined glyphs or colors, for every terrain gly
 
 test('every camp building has well-formed art', async () => {
   const {BUILDING_ART, BUILDING_PARTS} = await import('../src/dimensional_sim/world/browser/place_art.js');
-  assert.deepEqual(Object.keys(BUILDING_ART).sort(), ['crafting_station', 'storage_chest']);
+  assert.deepEqual(Object.keys(BUILDING_ART).sort(), ['crafting_station', 'farm', 'storage_chest']);
   for (const art of Object.values(BUILDING_ART)) {
     assert.ok(art.parts.length >= 3);
     for (const [name] of art.parts) {

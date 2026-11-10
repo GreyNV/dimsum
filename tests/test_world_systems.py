@@ -28,7 +28,7 @@ def js_object_keys(source, name):
     """Top-level keys of `export const <name> = Object.freeze({...})` in a client module."""
     start = source.index(f"export const {name} = Object.freeze({{")
     body = source[start:source.index("});", start)]
-    return set(re.findall(r"([a-z_]+):\s*(?:\{paint|[A-Z])", body))
+    return set(re.findall(r"(?<![\w.'])([a-z_]+):\s*(?:\{paint|[A-Z]|\(g)", body))
 
 
 def expedition(seed=482910):
@@ -45,6 +45,11 @@ class ArtCoverageTests(unittest.TestCase):
                          and a.sprite not in spots)
         self.assertEqual(missing, [], "add these keys to place_art.js SPOTS")
 
+    def test_every_item_has_client_art(self):
+        icons = js_object_keys((BROWSER / "item_art.js").read_text(encoding="utf-8"), "ITEM_ART")
+        self.assertEqual(sorted(i.art for i in ITEMS.values() if i.art not in icons), [],
+                         "add these keys to item_art.js ITEM_ART")
+
     def test_every_enemy_has_client_art(self):
         sprites = js_object_keys((BROWSER / "combat_art.js").read_text(encoding="utf-8"), "ENEMY_SPRITES")
         self.assertEqual(sorted(e.sprite for e in ENEMIES.values() if e.sprite not in sprites), [])
@@ -59,12 +64,27 @@ class EffectTests(unittest.TestCase):
     def test_gear_effects_combine_in_slot_order(self):
         with test_weapon():
             self.assertEqual(effects.total({"weapon": "test_staff"}, "punch_damage"), 1)
-        both = effects.scale(1000, {"body": "hide_wrap"}, "enemy_hit_percent")
-        self.assertEqual(both, 1000 * 70 // 100)
-        self.assertEqual(effects.scale(1000, {}, "enemy_hit_percent"), 1000)
-        self.assertEqual(effects.breakdown({"body": "hide_wrap"}, "enemy_hit_percent"), [("Hide wrap", 70)])
+        worn = {"body": "hide_wrap", "head": "leather_hood", "hands": "leather_gloves"}
+        self.assertEqual(effects.total(worn, "max_health"), 18)
+        self.assertEqual(effects.breakdown(worn, "max_health"), [("Leather hood", 8), ("Hide wrap", 10)])
+        self.assertEqual(effects.total(worn, "punch_damage"), 1)
+        with self.assertRaises((KeyError, ValueError)):
+            effects.total({}, "enemy_hit_percent")   # gone: gear adds health, it never softens bites
+
+    def test_damage_slots_add_to_blows_and_health_slots_add_health(self):
+        from dimensional_sim.world.catalog import DAMAGE_SLOTS, EQUIPMENT_SLOTS, HEALTH_SLOTS
+        self.assertEqual(len(EQUIPMENT_SLOTS), 8)
+        self.assertEqual(set(DAMAGE_SLOTS) | set(HEALTH_SLOTS), set(EQUIPMENT_SLOTS))
+        for item in ITEMS.values():
+            for effect in item.effects:
+                if effect.stat == "max_health":
+                    self.assertIn(item.slot, HEALTH_SLOTS, item.id)
+                if effect.stat == "punch_damage":
+                    self.assertIn(item.slot, DAMAGE_SLOTS, item.id)
+        full = {"body": "studded_wrap", "head": "leather_hood", "feet": "hide_boots", "back": "leather_pack"}
+        self.assertEqual(effects.total(full, "max_health"), 40, "a full first-land set: about +40% health")
         with self.assertRaises(ValueError):
-            effects.total({}, "enemy_hit_percent")
+            replace(ITEMS["leather_gloves"], effects=(Effect("max_health", 5),))   # hands are a damage slot
 
     def test_a_new_gear_effect_needs_no_engine_change(self):
         spear = replace(TEST_STAFF, id="test_spear", name="Test spear",
@@ -84,7 +104,7 @@ class EffectTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Effect("flying", 1)
         with self.assertRaises(ValueError):
-            Effect("enemy_hit_percent", 0)
+            Effect("max_health", -1)
         with self.assertRaises(ValueError):
             Effect("food_window_bonus", -1)
         with self.assertRaises(ValueError):

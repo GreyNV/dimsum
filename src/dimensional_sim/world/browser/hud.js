@@ -9,6 +9,7 @@ export const usedAttributes = attributes => ATTRIBUTES.filter(([id]) => attribut
 export const LABEL = Object.freeze(Object.fromEntries(ATTRIBUTES.map(([id, name]) => [id, name])));
 /** Text color for items without a catalog color (catalog.ItemDef.color arrives in frames). */
 export const ITEM_COLOR_DEFAULT = '#e7d7b0';
+import {itemIcon} from './item_art.js';
 
 /** One-line description of what the auto-pilot is doing. */
 export function activityLabel(activity) {
@@ -115,10 +116,10 @@ export class ExpeditionHud {
       Math.ceil((ex.clock?.until_ms || 0) / 1000), ex.clock?.night].join();
     if (signature === this.vitalsSignature) return;
     this.vitalsSignature = signature;
-    for (const [name, value] of [['health', v.health], ['hunger', v.hunger]]) {
-      const pct = Math.max(0, Math.min(100, value / v.max * 100));
+    for (const [name, value, max] of [['health', v.health, v.health_max || v.max], ['hunger', v.hunger, v.max]]) {
+      const pct = Math.max(0, Math.min(100, value / max * 100));
       this.$(`${name}-bar`).style.width = pct.toFixed(1) + '%';
-      this.$(`${name}-value`).textContent = String(Math.ceil(pct));
+      this.$(`${name}-value`).textContent = String(Math.ceil(value / 100));   // vital points (gear raises max health)
       this.$(`${name}-bar`).closest('.vital').classList.toggle('low', pct < 30);
     }
     this.$('life').textContent = `Life ${ex.life}`;
@@ -185,18 +186,47 @@ export class ExpeditionHud {
     for (let i = 0; i < ex.inventory_slots; i++) {
       const row = rows[i], li = this.doc.createElement('li');
       if (!row) { li.className = 'empty'; slots.push(li); continue; }
-      li.className = row.kind;
-      li.title = `${row.name} x${row.count}` + (row.food ? ` - restores ${row.food} hunger (eaten when it fully fits)` : ' - material');
-      li.setAttribute('aria-label', `${row.name}, ${row.count}.` + (row.food ? ` Restores ${row.food} hunger when it fully fits.` : ''));
+      li.className = row.kind + (row.equipped ? ' worn' : '');
+      const about = row.about || '';
+      li.title = `${row.name} x${row.count}. ${about}`;
+      li.setAttribute('aria-label', `${row.name}, ${row.count}. ${about}`);
+      li.tabIndex = 0;
       li.dataset.name = row.name;
       li.dataset.count = String(row.count);
-      li.textContent = row.glyph;
+      li.dataset.about = about;
+      const icon = row.art && itemIcon(row.art, row.color, this.doc);
+      if (icon) { icon.setAttribute('aria-hidden', 'true'); li.append(icon); }
+      else li.textContent = row.glyph;   // no art yet: the glyph
       li.style.color = row.color || ITEM_COLOR_DEFAULT;
       const count = this.doc.createElement('small'); count.textContent = String(row.count);
       li.append(count);
       slots.push(li);
     }
     this.$('inventory').replaceChildren(...slots);
+    this.bindItemTips();
+  }
+  /** Tap (or click, or Enter) an item for what it is - the same text hovering shows on a PC. */
+  bindItemTips() {
+    const list = this.$('inventory'), tip = this.$('item-tip');
+    if (!list || !tip || list.dataset.tips) return;
+    list.dataset.tips = '1';
+    const show = li => {
+      if (!li || li.classList.contains('empty')) { tip.hidden = true; return; }
+      if (!tip.hidden && tip.dataset.for === li.dataset.name) { tip.hidden = true; return; }   // tap again: close
+      tip.dataset.for = li.dataset.name;
+      const head = this.doc.createElement('b'); head.textContent = `${li.dataset.name} ×${li.dataset.count}`;
+      const body = this.doc.createElement('span'); body.textContent = li.dataset.about;
+      tip.replaceChildren(head, body);
+      tip.hidden = false;
+      const r = li.getBoundingClientRect(), w = Math.min(240, innerWidth - 16);
+      tip.style.width = w + 'px';
+      tip.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px';
+      const below = r.bottom + 6, h = tip.offsetHeight;
+      tip.style.top = (below + h > innerHeight - 8 ? r.top - h - 6 : below) + 'px';
+    };
+    list.addEventListener('click', e => show(e.target.closest('li')));
+    list.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); show(e.target.closest('li')); } });
+    this.doc.addEventListener('pointerdown', e => { if (!tip.hidden && !e.target.closest('#inventory, #item-tip')) tip.hidden = true; });
   }
   renderLog(ex) {
     const entries = [...ex.log].reverse().slice(0, 4);

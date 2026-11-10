@@ -18,7 +18,8 @@ from collections import deque
 from dataclasses import dataclass, replace
 
 from .actions import Context, bucket, spot_tiers
-from .catalog import ACTIONS, BY_ID, ActionDef
+from .catalog import (ACTIONS, BY_ID, HAUL_POOR_FLOOR, HAUL_SKILL_MAX, HAUL_SKILL_PER_LEVEL, HAULS,
+                      STEADY_CATEGORIES, STEADY_PLACEMENTS, ActionDef)
 from .drops import cascade, roll_table, weighted
 from .models import DELTAS, ChunkKey, integer
 from .seeds import derive_seed
@@ -108,16 +109,54 @@ def _candidates(asset, reachable, near):
     return result
 
 
-def roll_loot(entry, seed):
+def steady(entry):
+    """Whether an encounter always gives what it says (made things, the story, prices)."""
+    return entry.placement in STEADY_PLACEMENTS or entry.category in STEADY_CATEGORIES
+
+
+def haul_weights(level=0):
+    """{haul id: weight} after `level` combined levels of the encounter's attribute."""
+    weights = {h.id: h.weight for h in HAULS}
+    poor = weights.get("poor")
+    if poor is None:
+        return weights
+    moved = min(poor - HAUL_POOR_FLOOR, HAUL_SKILL_MAX, int(level) * HAUL_SKILL_PER_LEVEL)
+    if moved > 0:
+        weights["poor"] -= moved
+        weights["good"] = weights.get("good", 0) + moved * 3 // 4
+        weights["rich"] = weights.get("rich", 0) + moved - moved * 3 // 4
+    return weights
+
+
+def roll_haul(entry, seed, level=0):
+    """The HaulDef this completion drew from the encounter's outcome bucket, or None (steady)."""
+    if steady(entry) or not entry.loot:
+        return None
+    weights = haul_weights(level)
+    roll = derive_seed(seed, "haul") % sum(weights.values())
+    for haul in HAULS:
+        if roll < weights[haul.id]:
+            return haul
+        roll -= weights[haul.id]
+    return None
+
+
+def roll_loot(entry, seed, haul=None):
     """Deterministic loot for one completed encounter: [(item_id, count)].
 
-    Fixed `loot` rolls each entry independently (food and crafting inputs the auto-pilot
-    plans around); `drops` adds one cascading bonus roll from its DropTable."""
+    Each `loot` line rolls on its own (its chance, then an amount in its range); a `haul`
+    (roll_haul) scales every amount and chance. `drops` adds one cascading bonus roll from its
+    DropTable."""
     result = []
     for index, loot in enumerate(entry.loot):
         roll = derive_seed(seed, "loot", index)
-        if roll % 100 < loot.chance:
-            result.append((loot.item, loot.low + (roll // 100) % (loot.high - loot.low + 1)))
+        chance = loot.chance if haul is None or loot.chance >= 100 \
+            else min(100, loot.chance * haul.chance_percent // 100)
+        if roll % 100 < chance:
+            count = loot.low + (roll // 100) % (loot.high - loot.low + 1)
+            if haul is not None:
+                count = max(1, (count * haul.percent + 50) // 100)
+            result.append((loot.item, count))
     if entry.drops is not None:
         result += [(item, count) for item, count, _ in roll_table(entry.drops, derive_seed(seed, "drops"))]
     return result

@@ -18,7 +18,7 @@ from statistics import mean
 from .actions import Context, describe_bucket, explain
 from .autopilot import Expedition
 from .autopilot.constants import POINT
-from .catalog import BY_ID, ENEMIES, ITEMS, REGION_CELL, REGIONS
+from .catalog import BUILDINGS, BY_ID, ENEMIES, ITEMS, REGION_CELL, REGIONS
 from .encounters import chunk_spots, features
 from .models import ChunkKey
 from .regions import region_cell
@@ -33,8 +33,15 @@ def anchor_policy(e, policy):
     """Spend at the anchor according to `policy`, then begin the next life."""
     if policy == "idle":
         return
+    farm = {b.id for b in BUILDINGS.values() if b.function == "farm"}
     while True:
-        rows = [r for r in e.anchor_offers() if r["available"]]
+        offers = e.anchor_offers()
+        rows = [r for r in offers if r["available"]]
+        # a sensible player binds a farm first (it feeds every later life) and saves ash for it;
+        # otherwise it buys cheapest first
+        wanted = [r for r in offers if r["kind"] == "bind" and r["id"] in farm]
+        if wanted:
+            rows = [r for r in rows if r in wanted]
         choice = min(rows, key=lambda r: (r["cost"], r["id"]), default=None)
         if choice is None:
             break

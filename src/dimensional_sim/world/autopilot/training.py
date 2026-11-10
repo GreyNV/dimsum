@@ -4,7 +4,8 @@
   heavily loaded) and Perception for newly seen ground, so exploring pays and pacing does not.
 - Fights pay per landed hit (FIGHT_XP_PER_HP per hit point taken off); the finishing blow adds
   FINISH_XP_PERCENT of the enemy's whole worth (outcomes._reward).
-- Movement: the whole Agility multiplier shortens the step interval on a log curve.
+- Movement: the whole Agility multiplier shortens the step interval on a log curve; Endurance
+  slows hunger on the same curve.
 
 Remainders of walking XP are saved (`walk`), so how time is sliced never changes the XP earned.
 """
@@ -13,7 +14,8 @@ import math
 from ..catalog import BY_ID
 from ..progression import speed_permille
 from ..tuning import (AGILITY_TILES_PER_XP, ENDURANCE_HARD_HUNGER, ENDURANCE_TILES_PER_XP, FIGHT_XP_PER_HP,
-                      FINISH_XP_PERCENT, MOVE_BONUS_PER_DECADE, PERCEPTION_CELLS_PER_XP)
+                      FINISH_XP_PERCENT, HUNGER_RELIEF_PER_DECADE, MOVE_BONUS_PER_DECADE,
+                      PERCEPTION_CELLS_PER_XP)
 from .constants import POINT
 
 WALK_KEYS = ("agility", "endurance", "perception")   # the saved remainders, in tiles or cells
@@ -22,10 +24,19 @@ WALK_RATES = {"agility": AGILITY_TILES_PER_XP, "endurance": ENDURANCE_TILES_PER_
 
 
 class TrainingMixin:
+    def log_bonus_permille(self, attribute, per_decade):
+        """`per_decade` permille x log10(the attribute's whole multiplier): with 100, 30 at x2,
+        100 at x10, 200 at x100. Movement (Agility) and hunger (Endurance) grow this way."""
+        speed = speed_permille(self.regular[attribute], self.dimensional[attribute])
+        return int(round(per_decade * math.log10(speed / 1000))) if speed > 1000 else 0
+
     def move_bonus_permille(self):
-        """+10% x log10(Agility multiplier), in permille: 30 at x2, 100 at x10, 200 at x100."""
-        speed = speed_permille(self.regular["agility"], self.dimensional["agility"])
-        return int(round(MOVE_BONUS_PER_DECADE * math.log10(speed / 1000))) if speed > 1000 else 0
+        """Faster steps from Agility: +10% x log10(Agility multiplier)."""
+        return self.log_bonus_permille("agility", MOVE_BONUS_PER_DECADE)
+
+    def hunger_relief_permille(self):
+        """Slower hunger from Endurance, on the same curve: +10% x log10(Endurance multiplier)."""
+        return self.log_bonus_permille("endurance", HUNGER_RELIEF_PER_DECADE)
 
     def _advance_game(self, ms, command, *, pay=True):
         """game.advance, then what the avatar earned on the way: landed hits and walking. With

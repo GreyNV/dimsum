@@ -303,3 +303,38 @@ body.context-open.active-control:not(.page-open):not(.anchor-active) .touch-cont
 .story-card{bottom:118px}
 #story-card-text{margin:0;color:#f1e6c8;font:italic 15px/1.5 Georgia,serif}
 @media(max-width:720px){.story-card{bottom:150px}#story-card-text{font-size:13px}}
+
+/* The full map (atlas_ui.js) */
+#minimap{cursor:zoom-in}
+.atlas{position:absolute;inset:48px 64px 96px;display:flex;flex-direction:column;padding:10px 12px;z-index:30;background:#0b100a!important}
+.atlas-head{display:flex;justify-content:space-between;align-items:center;font:10px ui-monospace,Consolas,monospace;color:#bb9e6f;letter-spacing:1px;margin-bottom:8px;gap:8px}
+.atlas-head button{min-height:28px;padding:0 10px;margin-left:6px}
+.atlas-body{flex:1;display:flex;gap:12px;min-height:0}
+#atlas-map{flex:1;min-width:0;height:100%;display:block;background:#080b09;border:1px solid #3f3524;cursor:grab;touch-action:none}
+#atlas-map:active{cursor:grabbing}
+.atlas-side{width:230px;display:flex;flex-direction:column;gap:8px;min-height:0;font:11px/1.45 ui-monospace,Consolas,monospace;color:#c8c0a0}
+.atlas-info{margin:0;min-height:64px;padding:8px;border:1px solid #3f3524;background:#0d120c}
+.atlas-legend{display:flex;flex-wrap:wrap;gap:4px 10px;margin:0;font-size:9px;color:#a9a58c}
+.atlas-legend span{display:flex;align-items:center;gap:4px}
+.atlas-legend i{width:8px;height:8px;display:inline-block}
+.atlas-legend .me{background:#fff1bc}.atlas-legend .anchor{background:#f1d38a;transform:rotate(45deg)}.atlas-legend .fire{background:#ff9a4a;transform:rotate(45deg)}
+.atlas-legend .site{background:#c9b48a}
+.atlas-legend .worked{background:rgba(200,70,50,.6)}.atlas-legend .frontier{border:1px dashed #c8be96}
+.atlas-places{overflow:auto;display:flex;flex-direction:column;gap:3px}
+.atlas-place{display:grid;grid-template-columns:10px 1fr;column-gap:6px;text-align:left;padding:4px 6px;min-height:0}
+.atlas-place i{width:10px;height:10px;grid-row:span 2;align-self:center}
+.atlas-place b{font-weight:400;color:#e7d3a8}.atlas-place small{color:#9e9a80;font-size:10px}
+@media(max-width:720px){.atlas{inset:8px 8px 70px}.atlas-body{flex-direction:column}.atlas-side{width:auto;max-height:42%;overflow:auto}.atlas-head span:first-child{display:none}.atlas-head{justify-content:flex-end}.atlas-info{min-height:0}}
+.atlas-legend .spot{background:#e2c066}.atlas-legend .foe{background:#e0604f}.atlas-legend .camparea{border:2px solid #ff9a4a}
+#atlas-places-toggle[aria-pressed=true]{background:#4a3f26;border-color:#d0a868}
+/* Items (item_art.js): an icon on a shade of its kind - food, material, gear (crafted), treasure */
+.slots li{cursor:pointer}
+.slots li canvas{width:78%;height:78%;pointer-events:none;filter:drop-shadow(0 1px 0 #0008)}
+.slots li.food{background:linear-gradient(160deg,rgba(96,120,48,.55),rgba(40,52,22,.7));border-color:rgba(150,180,90,.75)}
+.slots li.material{background:linear-gradient(160deg,rgba(120,86,52,.55),rgba(52,36,22,.7));border-color:rgba(176,132,84,.7)}
+.slots li.gear{background:linear-gradient(160deg,rgba(66,92,124,.6),rgba(26,36,52,.75));border-color:rgba(120,156,200,.75)}
+.slots li.treasure{background:linear-gradient(160deg,rgba(120,72,130,.55),rgba(48,28,56,.75));border-color:rgba(200,150,220,.7)}
+.slots li.worn::before{content:'';position:absolute;left:2px;top:2px;width:5px;height:5px;border-radius:50%;background:#9fe0a0;box-shadow:0 0 0 1px #0a0a0a}
+.slots li small{text-shadow:0 1px 0 #000,0 0 3px #000}
+.item-tip{position:fixed;z-index:40;padding:8px 10px;background:#0f140d;border:1px solid #9f8050;box-shadow:0 8px 30px #000c;font:11px/1.45 ui-monospace,Consolas,monospace;color:#d9cfae;display:flex;flex-direction:column;gap:3px}
+.item-tip b{color:#f1dfb0;font-weight:700}

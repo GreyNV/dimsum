@@ -65,11 +65,92 @@ class SaveTests(unittest.TestCase):
         e = started()
         data = json.loads(json.dumps(e.to_dict()))
         self.assertEqual(Expedition.from_dict(data).walk, e.walk)
-        old = {k: v for k, v in data.items() if k not in saves.V25_FIELDS}
+        old = {k: v for k, v in data.items() if k not in saves.V25_FIELDS + saves.V26_FIELDS + saves.V27_FIELDS}
         old["schema_version"] = 24
         loaded = Expedition.from_dict(old)
         self.assertEqual(loaded.walk, {"agility": 0, "endurance": 0, "perception": 0})
         self.assertEqual(loaded.to_dict()["schema_version"], SCHEMA_VERSION)
+
+
+class StarredPatternTests(unittest.TestCase):
+    def test_an_elder_strikes_twice_and_warns_for_less_long(self):
+        from dimensional_sim.world.catalog import FIGHT_PATTERNS, FIGHT_TIERS
+        from dimensional_sim.world.runtime import Target
+        e = started(minutes=0)
+        key = e.game.player.chunk
+        target = Target("enc:test:elder", key, e.game.player.x + 1, e.game.player.y, 30)
+        e.game.targets[target.id] = target
+        e.admitted[target.id] = "bramble_boar"
+        e.tier_of = lambda ident: FIGHT_TIERS["elder"]
+        e.hunting[target.id] = {"mode": "hunt", "since": 0, "ax": 0, "ay": 0, "ox": 0, "oy": 0, "left": 0, "n": 0}
+        pattern = FIGHT_PATTERNS[e.enemy_of(target).pattern]
+        px, py = e._player()
+        e._after_strike(target, e.enemy_of(target), pattern, 0, px, py)
+        self.assertEqual((e.hunting[target.id]["mode"], e.hunting[target.id]["n"]), ("windup", 1), "a second strike at once")
+        e._after_strike(target, e.enemy_of(target), pattern, 1, px, py)
+        self.assertEqual(e.hunting[target.id]["mode"], "recover", "then it is open to blows")
+        self.assertLess(FIGHT_TIERS["elder"].windup_percent, FIGHT_TIERS["star"].windup_percent)
+        self.assertLess(FIGHT_TIERS["star"].windup_percent, 100)
+
+
+class EnduranceTests(unittest.TestCase):
+    def test_endurance_slows_hunger_on_the_movement_curve_and_never_softens_bites(self):
+        from dimensional_sim.world.catalog import ENEMIES
+        e = started(minutes=0)
+        key = e.game.player.chunk
+        drain, bite = e._drain(), e.enemy_hit(key, ENEMIES["bramble_boar"])
+        e.regular["endurance"] = 10 ** 6
+        self.assertLess(e._drain(), drain)
+        self.assertGreaterEqual(e._drain() * 110, drain * 100 - 110, "at most about 10% slower")
+        self.assertEqual(e.enemy_hit(key, ENEMIES["bramble_boar"]), bite)
+
+
+class PatternTests(unittest.TestCase):
+    def _hunter(self, enemy_action, dx):
+        from dimensional_sim.world.runtime import Target
+        e = started(minutes=2)   # past the prologue: nothing hunts during it
+        e.task = e.goal = None
+        key = e.game.player.chunk
+        px, py = e.game.player.x, e.game.player.y
+        target = Target("enc:test:" + enemy_action, key, px + dx, py, 9)
+        e.game.targets[target.id] = target
+        e.admitted[target.id] = enemy_action
+        return e, target
+
+    def test_a_wolf_circles_round_the_avatar_before_it_lunges(self):
+        e, wolf = self._hunter("night_wolf", 2)
+        e.anchor = (e._player()[0] + 60, e._player()[1])   # far from the camp's safety
+        start = e._global(wolf.chunk, wolf.x, wolf.y)
+        e.hunting[wolf.id] = {"mode": "hunt", "since": e.total_ms, "ax": 0, "ay": 0, "ox": 0, "oy": 0, "left": 0, "n": 0}
+        cells, modes = set(), []
+        for _ in range(12):
+            e.total_ms += 300
+            e.monster_ms = 300
+            e._pursue()
+            modes.append(e.hunting[wolf.id]["mode"])
+            cells.add(e._global(wolf.chunk, wolf.x, wolf.y))
+        self.assertEqual(modes[0], "circle")
+        self.assertGreater(len(cells), 2, "it moves round, not in")
+        px, py = e._player()
+        self.assertTrue(all(max(abs(x - px), abs(y - py)) >= 1 for x, y in cells))
+        self.assertIn("hunt", modes[modes.index("circle"):], "then it comes in")
+        self.assertNotEqual(start, e._global(wolf.chunk, wolf.x, wolf.y))
+
+    def test_a_lurker_lies_hidden_until_it_notices_and_then_strikes_from_two_cells(self):
+        from dimensional_sim.world.catalog import FIGHT_PATTERNS, ENEMIES
+        from dimensional_sim.world.session import snapshot
+        e, lurker = self._hunter("river_lurker", 2)
+        pattern = FIGHT_PATTERNS[ENEMIES["river_lurker"].pattern]
+        self.assertTrue(pattern.hidden)
+        self.assertGreaterEqual(pattern.reach, 2)
+        frame = snapshot(e.game, expedition=e, control="auto")
+        self.assertTrue(next(t for t in frame["targets"] if t["id"] == lurker.id)["hidden"])
+        e.anchor = (e._player()[0] + 60, e._player()[1])   # far from the camp's safety
+        e.monster_ms = 300
+        e._pursue()
+        self.assertEqual(e.hunting[lurker.id]["mode"], "windup", "it strikes from where it lay")
+        frame = snapshot(e.game, expedition=e, control="auto")
+        self.assertFalse(next(t for t in frame["targets"] if t["id"] == lurker.id)["hidden"])
 
 
 if __name__ == "__main__":

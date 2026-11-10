@@ -15,11 +15,27 @@ EDGE_VERSION = "land-edge-v1"
 SIDES = (("north", 0, -1), ("south", 0, 1), ("west", -1, 0), ("east", 1, 0))
 
 
-def chunk_open(world_seed, key, lands=None):
+AXES = {side: (dx, dy) for side, dx, dy in SIDES}
+
+
+def road_out_chunks(land, dimension):
+    """The corridor of a land's road out (`LandDef.road_out`), inner end first; () without one."""
+    if land is None or land.road_out is None:
+        return ()
+    side, length = land.road_out
+    dx, dy = AXES[side]
+    return tuple(ChunkKey(dimension, dx * ring, dy * ring) for ring in range(land.edge_ring + 1, land.lobe_ring + length + 1))
+
+
+def chunk_open(world_seed, key, lands=None, *, road=True):
     """Whether chunk `key` lies inside its land's explorable area (`lands`: a world's pinned
-    land catalog; the current catalog by default)."""
+    land catalog; the current catalog by default). `road=False` leaves the road out's corridor
+    out (the landmark plan of the land itself is drawn without it, so a road added to an older
+    world never moves its landmarks)."""
     land = (LANDS if lands is None else lands).get(key.dimension)
     if land is None:
+        return True
+    if road and key in road_out_chunks(land, key.dimension):
         return True
     ring = max(abs(key.x), abs(key.y))
     if ring <= land.edge_ring:

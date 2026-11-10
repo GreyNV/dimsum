@@ -160,12 +160,17 @@ class NightSpawnTests(unittest.TestCase):
         before = e.health
         e.monster_ms = 300
         e._pursue()
-        self.assertEqual(e.hunting[lead["id"]]["mode"], "windup", "the wolf's tell comes first")
-        self.assertIsNone(e.task, "the raid interrupts rest")
-        for _ in range(4):   # the lunge lands after its wind-up unless the avatar steps away
+        self.assertEqual(e.hunting[lead["id"]]["mode"], "circle", "a wolf sizes you up first")
+        modes = set()
+        for _ in range(20):   # circling, then a wind-up (the tell), then the lunge
             e.total_ms += 300
             e.monster_ms = 300
             e._pursue()
+            modes.add(e.hunting.get(lead["id"], {}).get("mode"))
+            if e.health < before:
+                break
+        self.assertIn("windup", modes)
+        self.assertIsNone(e.task, "the raid interrupts rest")
         self.assertLess(e.health, before)
 
     def test_cornered_at_the_camp_the_avatar_fights_back_and_never_heals_through_bites(self):
@@ -191,7 +196,7 @@ class NightSpawnTests(unittest.TestCase):
         e.health = 2 * e.enemy_hit(target.chunk, ENEMIES["wolf"])   # one bite from death's door
         e.goal, e.task = e._home_goal(), {"type": "rest", "spot": None, "elapsed_ms": 0, "duration_ms": 10_000}
         hp, life = target.hp, e.life
-        e.advance(1000)
+        e.advance(3000)   # a wolf circles about two seconds before it lunges
         self.assertTrue(e.life > life or e.anchor_ms is not None or (e.goal or {}).get("kind") == "target",
                         "cornered, it turns on the wolf")
         e.advance(60_000)

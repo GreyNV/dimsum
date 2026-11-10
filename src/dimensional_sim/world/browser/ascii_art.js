@@ -32,9 +32,12 @@ export const STYLES = Object.freeze({
   glyphs: {backing: 'none', dim: 0, lift: 1.35, whiten: .35},
   tint: {backing: 'tint', dim: .42, lift: 1.3, whiten: .3},
   paint: {backing: 'paint', dim: .62, lift: 1.2, whiten: .45},
+  // The dark-fantasy grade (docs/design/ATMOSPHERE.md): dimmer text, a cold key light, colour
+  // drained toward grey-blue; `cold` scales by what is read (world 1, actors .55, spots .35).
+  cold: {backing: 'paint', dim: .56, lift: 1.08, whiten: .24, gain: .76, cold: 1},
   bold: {backing: 'paint', dim: .72, lift: 1.15, whiten: .5, cell: [2, 3.6], gain: .85},
   picture: {backing: 'picture'}});   // the painted picture as is (no text): for comparison
-let STYLE = STYLES.paint;   // bright pictures with text texture (Andrew: the bright drawings were more fun)
+let STYLE = STYLES.cold;   // the atmosphere shift (2026-10-30): cold and dim, still readable (was STYLES.paint)
 const listeners = new Set();
 export const currentStyle = () => STYLE;
 export function onStyleChange(f) { listeners.add(f); }
@@ -111,13 +114,31 @@ const lum = (r, g, b) => (.2126 * r + .7152 * g + .0722 * b) / 255;
  * opts: cell, pad, ground (soft dark halo), absolute ([lo, hi] light scale instead of the
  * piece's own), base (a solid colour under everything), glyphs (allowed characters), style.
  */
-export function asciify(source, w, h, kIn, kOut = kIn, {cell = null, pad = 0, ground = true, absolute = null, base = null, glyphs = null, style = null} = {}) {
+/** The cold grade, in place on RGBA bytes: colour drained toward its own grey, then pushed toward
+ * a blue-grey key light and darkened a little. `k` 0..1 (0: untouched). Pure. */
+export function coldGrade(data, k) {
+  if (!(k > 0)) return data;
+  const desat = .55 * k, cr = 1 - .10 * k, cg = 1 - .03 * k, cb = 1 + .09 * k, dark = 1 - .12 * k;
+  for (let i = 0; i < data.length; i += 4) {
+    if (!data[i + 3]) continue;
+    const r = data[i], g = data[i + 1], b = data[i + 2], l = .299 * r + .587 * g + .114 * b;
+    data[i] = (r + (l - r) * desat) * cr * dark;
+    data[i + 1] = (g + (l - g) * desat) * cg * dark;
+    data[i + 2] = (b + (l - b) * desat) * cb * dark;
+  }
+  return data;
+}
+
+export function asciify(source, w, h, kIn, kOut = kIn, {cell = null, pad = 0, ground = true, absolute = null, base = null, glyphs = null, style = null, cold = 1} = {}) {
   const st = {gain: .8, ...STYLE, ...(style || {})};
   glyphs = glyphs || st.glyphs || null;   // a style may restrict the character set
   const [cw, chh] = cell || st.cell || [CELL_W, CELL_H];
   const cols = Math.ceil(w / cw), rows = Math.ceil(h / chh);
   const SW = source.width, SH = source.height;
-  const src = source.getContext('2d', {willReadFrequently: true}).getImageData(0, 0, SW, SH).data;
+  const sctx = source.getContext('2d', {willReadFrequently: true}), image = sctx.getImageData(0, 0, SW, SH);
+  const grade = (st.cold || 0) * cold;
+  if (grade > 0) { coldGrade(image.data, grade); sctx.putImageData(image, 0, 0); }   // backing and text both see it
+  const src = image.data;
   const at = (lx, ly) => {   // light x alpha and alpha at a logical point (frame coordinates)
     const x = Math.floor((pad + lx) * kIn), y = Math.floor((pad + ly) * kIn);
     if (x < 0 || y < 0 || x >= SW || y >= SH) return [0, 0];

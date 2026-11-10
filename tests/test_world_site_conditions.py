@@ -27,12 +27,15 @@ class ConditionPickTests(unittest.TestCase):
         for life in range(1, 41):
             for p in found.values():
                 c = condition_for(SEED, p, life)
+                if p.site.structure in ("village", "bandits"):
+                    self.assertIsNone(c, "a lived-in place has no ruin's condition")
+                    continue
                 self.assertIs(c, condition_for(SEED, p, life), "pure")
                 self.assertTrue(c.structures is None or p.site.structure in c.structures)
                 seen[c.id] += 1
         self.assertEqual(set(seen), set(SITE_CONDITIONS), "every condition shows up")
         self.assertEqual(seen.most_common(1)[0][0], "quiet", "most visits find a site as it was")
-        any_site = next(iter(found.values()))
+        any_site = next(p for p in found.values() if p.site.structure not in ("village", "bandits"))
         self.assertGreater(len({condition_for(SEED, any_site, life).id for life in range(1, 30)}), 1,
                            "a site changes from life to life")
 
@@ -92,11 +95,12 @@ class ConditionEffectTests(unittest.TestCase):
         from dimensional_sim.world.autopilot import outcomes
         seen = []
         real = outcomes.roll_loot
-        with patch.object(outcomes, "roll_loot", lambda entry, seed: seen.append(entry.drops) or real(entry, seed)):
+        with patch.object(outcomes, "roll_loot", lambda entry, seed, haul=None: seen.append(entry.drops) or real(entry, seed, haul)):
             for condition in ("picked_over", "quiet"):
                 e.site_condition = lambda k, c=SITE_CONDITIONS[condition]: c
                 e._reward(spot.id, drops)
-        self.assertEqual(seen, [None, drops.drops], "an already-searched site skips the bonus drop roll")
+        self.assertEqual(list(dict.fromkeys(seen)), [None, drops.drops],
+                         "an already-searched site skips the bonus drop roll")
 
     def test_the_hud_names_the_condition(self):
         from dimensional_sim.world.session import snapshot

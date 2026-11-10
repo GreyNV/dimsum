@@ -9,10 +9,27 @@ export function visibleAt(fog, x, y, width, height) {
   return fog?.[`${cx}:${cy}`]?.[y-cy*height]?.[x-cx*width] === '1';
 }
 
+/** One chunk as the maps paint it (the minimap and the full map share this): every seen tile in
+ * its terrain colour (`tiles` glyph rows; a plain colour while they are not known yet), and a
+ * dotted fog where nothing of the chunk was seen. (x, y) is its top-left, `scale` px per tile. */
+export function paintChunk(map, tiles, rows, x, y, scale, width, height) {
+  if (!rows) {
+    map.fillStyle='#1f2826';
+    for(let py=y+3;py<y+height*scale;py+=5) for(let px=x+3;px<x+width*scale;px+=5) map.fillRect(px,py,.7,.7);
+    return;
+  }
+  const size=Math.max(.7,scale);
+  for (let ry=0;ry<height;ry++) for(let rx=0;rx<width;rx++) {
+    if (rows[ry]?.[rx] !== '1') continue;
+    map.fillStyle=tiles ? terrainColor(tiles[ry][rx]) : '#34443a';
+    map.fillRect(x+rx*scale,y+ry*scale,size,size);
+  }
+}
+
 /** Paint the minimap for snapshot `state` into the 2D context `map`. */
 export function drawMinimap(map, state, chunks, dpr) {
   map.setTransform(dpr,0,0,dpr,0,0);
-  map.fillStyle = '#0b110b'; map.fillRect(0,0,MAP_W,MAP_H);
+  map.fillStyle = '#090d0d'; map.fillRect(0,0,MAP_W,MAP_H);
   const entries = state.minimap;
   if (!entries.length) return;
   const minX = Math.min(...entries.map(p=>p.x)), maxX = Math.max(...entries.map(p=>p.x));
@@ -24,20 +41,10 @@ export function drawMinimap(map, state, chunks, dpr) {
   for (const entry of entries) {
     const x=left+(entry.x-minX)*state.chunk_width*scale, y=top+(entry.y-minY)*state.chunk_height*scale;
     const w=state.chunk_width*scale, h=state.chunk_height*scale;
-    map.fillStyle = '#10180f';
+    map.fillStyle = '#0e1414';
     map.fillRect(x,y,w,h);
-    const chunk=coords.get(entry.x+':'+entry.y);
-    const rows=fog[`${entry.x}:${entry.y}`];
-    if (rows) {
-      for (let ry=0;ry<state.chunk_height;ry++) for(let rx=0;rx<state.chunk_width;rx++) {
-        if (rows[ry]?.[rx] !== '1') continue;
-        map.fillStyle=chunk ? terrainColor(chunk.tiles[ry][rx]) : '#405031';
-        map.fillRect(x+rx*scale,y+ry*scale,Math.max(.7,scale),Math.max(.7,scale));
-      }
-    } else {
-      map.fillStyle='#26301f';
-      for(let py=y+3;py<y+h;py+=5) for(let px=x+3;px<x+w;px+=5) map.fillRect(px,py,.7,.7);
-    }
+    paintChunk(map, coords.get(entry.x+':'+entry.y)?.tiles, fog[`${entry.x}:${entry.y}`], x, y, scale,
+               state.chunk_width, state.chunk_height);
   }
   const px=left+(state.player.x-minX*state.chunk_width+.5)*scale;
   const py=top+(state.player.y-minY*state.chunk_height+.5)*scale;
@@ -57,7 +64,7 @@ export function drawMinimap(map, state, chunks, dpr) {
       const mx=left+(t.x-minX*state.chunk_width+.5)*scale, my=top+(t.y-minY*state.chunk_height+.5)*scale;
       map.strokeStyle='#ff5a46'; map.lineWidth=.8; map.strokeRect(mx-pulse-1.4,my-pulse-1.4,(pulse+1.4)*2,(pulse+1.4)*2);
     } else if (t.hunting === 'flee') mark(t.x,t.y,'#8a5a50',1);
-    else if (visibleAt(fog, t.x, t.y, state.chunk_width, state.chunk_height)) mark(t.x,t.y,'#e0604f',1.1);
+    else if (!t.hidden && visibleAt(fog, t.x, t.y, state.chunk_width, state.chunk_height)) mark(t.x,t.y,'#e0604f',1.1);
   }
   // The anchor camp (and this life's campfire), kept on the map's edge when outside it.
   const place=(gx,gy,color)=>{

@@ -15,12 +15,12 @@ test('every encounter, structure, camp part, wreck piece and enemy has painted a
   assert.deepEqual(Object.keys(ENEMY_SPRITES).filter(k => !ENEMY_FRAMES[k]), [], 'enemies');
 });
 
-test('every body gear item has a look on the traveller', async () => {
+test('every worn (non-weapon) gear item has a look on the traveller', async () => {
   const {readFileSync} = await import('node:fs');
   const catalog = readFileSync(new URL('../src/dimensional_sim/world/catalog.py', import.meta.url), 'utf8');
-  const body = [...catalog.matchAll(/ItemDef\("([a-z_]+)"[^\n]*slot="body"/g)].map(m => m[1]);
-  assert.ok(body.length >= 3);
-  assert.deepEqual(body.filter(id => !GEAR_LOOK_IDS.includes(id)), [], 'body gear without a look');
+  const worn = [...catalog.matchAll(/ItemDef\("([a-z_]+)"[^\n]*slot="(head|body|hands|feet|back|ring|amulet)"/g)].map(m => m[1]);
+  assert.ok(worn.length >= 8);
+  assert.deepEqual(worn.filter(id => !GEAR_LOOK_IDS.includes(id)), [], 'worn gear without a look');
 });
 
 test('without a DOM the painted builders step aside for the cell-sprite fallback', () => {

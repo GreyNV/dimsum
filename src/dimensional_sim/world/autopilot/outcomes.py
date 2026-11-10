@@ -3,14 +3,16 @@ from dataclasses import replace
 
 from .. import effects
 from ..actions import bucket, outcome_chance, reasons_against
-from ..catalog import BY_ID, ITEMS, RECIPE_KEEP_COST, RECIPE_NAMES, WOOD_YIELD_ITEM
-from ..encounters import features, lead_spot, roll_loot
+from ..catalog import (BUILDINGS, BY_ID, FOOD_TRADES, ITEMS, RECIPE_KEEP_COST, RECIPE_NAMES, REPEAT_CATEGORIES,
+                       WOOD_YIELD_ITEM)
+from ..encounters import features, lead_spot, roll_haul, roll_loot
 from ..equipment import equip_item
 from ..journal import record_action, record_items
 from ..models import ChunkKey, chunk_ident
-from ..progression import DIMENSIONAL_DIVISOR, scaled_ms
+from ..progression import DIMENSIONAL_DIVISOR, combined_level, scaled_ms
 from ..seeds import derive_seed
 from .ecology import cell_of
+from .places import CAMP_ROAM_HUNGER
 from .constants import (AFTER_LOCATION_REST_WEIGHT, FOOD_HEALS_DIVISOR,
                         FIRE_KIT, INVENTORY_SLOTS, LEAD_HISTORY_LIMIT, LOG_LIMIT, LOOK_RADIUS, NEED_ACTIONS,
                         PAUSE_AFTER_ACTIVITY_MS, POINT, STACK_LIMIT, VITAL_MAX)
@@ -42,6 +44,7 @@ class OutcomesMixin:
             del self.inventory[item]
             # Gear consumed by a craft (e.g. a wrap being studded) leaves its slot empty.
             self.equipped = {slot: worn for slot, worn in self.equipped.items() if worn != item}
+            self._clamp_health()
 
     def _gain_xp(self, attribute, xp):
         """Regular XP for this life plus the persistent dimensional share; returns that share."""
@@ -172,8 +175,42 @@ class OutcomesMixin:
         if self.goal and self.goal.get("id") in gone:
             self.goal = None
 
+    def affordable(self, entry):
+        """The avatar carries what a trade or quest out in the world asks for."""
+        return all(self.inventory.get(item, 0) >= count for item, count in entry.cost)
+
+    def repeats(self, entry):
+        """A stall keeps offering its trade (unless it teaches something, once)."""
+        return entry.category in REPEAT_CATEGORIES and not any(o.kind == "knowledge" for o in entry.outcomes)
+
+    def worth_paying(self, entry):
+        """The autopilot takes a priced encounter: it can pay, buys food only when it runs low with
+        none carried, and otherwise keeps back the price of the cheapest food stall (a coin or two)."""
+        if not self.affordable(entry):
+            return False
+        if entry in FOOD_TRADES:
+            return self.hunger <= CAMP_ROAM_HUNGER and not self._has_food()
+        reserve = min((t.cost for t in FOOD_TRADES), key=lambda c: sum(n for _, n in c), default=())
+        gained = {o.item for o in entry.loot}
+        return all(self.inventory.get(item, 0) - dict(entry.cost).get(item, 0) >= n
+                   for item, n in reserve if item not in gained)
+
+    def haul_level(self, entry):
+        """Combined levels of the encounter's attribute: they tip the haul toward good ones."""
+        attribute = entry.attribute
+        if attribute not in self.regular:
+            return 0
+        return int(combined_level(self.regular[attribute], self.dimensional.get(attribute, 0)))
+
     def _reward(self, ident, entry):
-        self.completed.add(ident)
+        if entry.cost and entry.placement != "self":   # trades and quests take their price on the spot
+            if not self.affordable(entry):
+                return   # the price is gone (eaten, spent): the spot stays for later
+            self._pay(entry.cost)
+        if not self.repeats(entry):   # a stall keeps offering its trade
+            self.completed.add(ident)
+        if entry.places == "bed":
+            self._rent_bed()
         tier = self.tier_of(ident) if entry.category == "fight" else None
         if tier:   # paid hit by hit as the blows landed (training._landed); the log shows the sum
             xp, dim = self.fight_paid.pop(ident, (0, 0))
@@ -183,9 +220,10 @@ class OutcomesMixin:
         spot = self._spot_by_id(self.companion_of(ident) or ident)   # company belongs to its spot
         condition = self.site_condition(spot.chunk) if spot is not None and entry.placement == "site" else None
         looted = entry if condition is None or condition.drops else replace(entry, drops=None)
-        rolled = roll_loot(looted, seed)
+        haul = roll_haul(entry, seed, self.haul_level(entry))   # the bucket of outcomes: poor .. rich
+        rolled = roll_loot(looted, seed, haul)
         for k in range(1, tier.loot_rolls if tier else 1):   # a starred enemy drops its loot again
-            rolled = [*rolled, *roll_loot(looted, derive_seed(seed, "tier-loot", k))]
+            rolled = [*rolled, *roll_loot(looted, derive_seed(seed, "tier-loot", k), haul)]
         chop = effects.total(self.equipped, "wood_yield") if "wood" in entry.tags else 0
         if chop:   # an axe: more wood from every wood harvest
             rolled = [*rolled, (WOOD_YIELD_ITEM, chop)]   # once per harvest, however many rows rolled
@@ -208,7 +246,10 @@ class OutcomesMixin:
             self.stats["fights"] += 1
         if entry.category == "pray":
             self.stats["prayers"] += 1
-        self._entry("encounter", entry.log, encounter=entry.id, attribute=entry.attribute,
+        plain = sum(n for _, n in roll_loot(looted, seed)) if haul is not None and haul.text else None
+        named = plain is not None and items and sum(n for _, n in rolled) != plain * (tier.loot_rolls if tier else 1)
+        text = f"{haul.text}: {entry.log}" if named else entry.log   # a haul is named only when it made a difference
+        self._entry("encounter", text, encounter=entry.id, attribute=entry.attribute,
                     xp=xp, dim_xp=dim, items=items)
 
     def _eat(self):
@@ -291,6 +332,8 @@ class OutcomesMixin:
         self._apply_outcomes(action, f"self:{self.sequence}")
         record_items(self.journal, [(i, n) for i, n in items if n > 0])
         dim = self._gain_xp(action.attribute, action.xp)
+        if action.workplace in BUILDINGS and BUILDINGS[action.workplace].function == "farm":
+            self.farm_harvest_ms = self.total_ms   # harvested: the next crop starts growing
         if action.category == "craft":
             self.stats["crafted"] += 1
             text = action.log if len(items) > len(action.cost) else action.log + " Nothing came of it."

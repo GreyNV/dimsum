@@ -362,7 +362,7 @@ class RepositoryTests(unittest.TestCase):
         world.visit(ChunkKey("forest", 0, 0))
         snapshot = json.loads(canonical_json(world.to_dict()))
         changes = (
-            lambda p: p.update(schema_version=10),
+            lambda p: p.update(schema_version=11),
             lambda p: p.update(schema_version=True),
             lambda p: p.update(generator_version=9),
             lambda p: p.update(generator_version=6),

@@ -4,7 +4,7 @@
  * - `soundEvents(prev, next, surfaceAt)` is pure: it compares two snapshots and names
  *   what was heard (a step on grass, a thrust, a hit, loot, a level...). Tested in node.
  * - `SoundEngine` turns names into short synth patches and keeps a quiet ambience bed
- *   (wind, birds, the river when water is near, fire crackle beside a fire).
+ *   (a low wind and drone, rare birds, the river when water is near, fire crackle beside a fire).
  * Cosmetic only: Math.random here never touches the simulation. The context starts on
  * the first key or pointer press (browser autoplay rules); a hidden tab suspends it. */
 
@@ -115,8 +115,10 @@ export class SoundEngine {
     const len = c.sampleRate | 0, buffer = c.createBuffer(1, len, c.sampleRate), data = buffer.getChannelData(0);
     for (let i = 0; i < len; i++) data[i] = this.random() * 2 - 1;
     this.noise = buffer;
-    // ambience beds: wind (low band, slow swell) and river (wider band), both looping noise
-    this.wind = this.bed(380, .6, 'bandpass');
+    // ambience beds: wind (a low, hollow band, slow swell), river (wider band) and a deep cold
+    // drone under everything (the atmosphere: an old, empty forest), all looping noise
+    this.wind = this.bed(240, .7, 'bandpass');
+    this.drone = this.bed(70, .9, 'lowpass');
     this.river = this.bed(900, .5, 'lowpass');
     this.fireBed = this.bed(260, .8, 'lowpass');
     const lfo = c.createOscillator(), depth = c.createGain();
@@ -256,12 +258,13 @@ export class SoundEngine {
     const work = !scene.paused && WORK[scene.work];
     if (work && now >= this.workAt) { this.play(work[0]); this.workAt = now + work[1] * (.85 + this.random() * .3); }
     if (!work) this.workAt = now + 250;
-    this.wind.gain.gain.setTargetAtTime(quiet ? .006 : .035, t, .8);
+    this.wind.gain.gain.setTargetAtTime(quiet ? .006 : .04, t, .8);
+    this.drone.gain.gain.setTargetAtTime(quiet ? 0 : .05, t, 1.5);
     this.river.gain.gain.setTargetAtTime(quiet ? 0 : .07 * scene.water, t, .6);
     this.fireBed.gain.gain.setTargetAtTime(scene.paused ? 0 : .05 * scene.fire, t, .4);
     if (!quiet && this.settings.ambience && now >= this.nextBird) {
       if (this.nextBird) this.bird();
-      this.nextBird = now + 3500 + this.random() * 7000;
+      this.nextBird = now + 9000 + this.random() * 16000;   // few birds left in these woods
     }
     if (!scene.paused && scene.fire > 0 && this.settings.ambience && now >= this.nextCrackle) {
       this.burst({freq: 2000 + this.random() * 3000, q: 4, dur: .015 + this.random() * .02, gain: .06 * scene.fire, bus: this.amb});

@@ -10,10 +10,11 @@ Carry load: every carried unit beyond CARRY_FREE slows walking, softened by
 Endurance and Strength. The movement interval is a pure function of state, set on the
 runtime before each step, so any slicing of time moves the same.
 """
-from ..catalog import BUILDINGS, CAMP_GRADE, ITEMS
+from ..catalog import BUILDINGS, CAMP_GRADE, FARM_GROW_MS, ITEMS
 from ..models import DELTAS
 from ..tuning import CAMPFIRE_AWAY, CARRY_FREE, CARRY_MAX_PERCENT, CARRY_PERCENT_PER_ITEM, CHEST_SLOTS, STOW_TRIP_AT
-from .constants import CAMP_SAFE_RADIUS, FIRE_KIT, POSSESS_SPEED_PERCENT, RESTED_AT, RETREAT_BELOW, STACK_LIMIT
+from .constants import CAMP_SAFE_RADIUS, FIRE_KIT, NEED_ACTIONS, POSSESS_SPEED_PERCENT, RESTED_AT, RETREAT_BELOW, STACK_LIMIT
+HARVEST_BELOW_FOOD = 80   # vital points of food carried below which the avatar harvests a ripe farm
 
 STATION_FUNCTION = "crafting"
 
@@ -143,6 +144,29 @@ class CampMixin:
                 break
         self.campfire = {"dimension": self.dimension, "x": gx, "y": gy, "fire_x": fire[0], "fire_y": fire[1]}
         self.goal = None
+
+    def farm_ripe(self):
+        """A farm stands at the camp and its crops are ready (FARM_GROW_MS since the last harvest)."""
+        return any(BUILDINGS[b].function == "farm" for b in self.buildings) \
+            and self.total_ms - self.farm_harvest_ms >= FARM_GROW_MS
+
+    def _harvest_wanted(self):
+        """At the camp with a ripe farm and short of food: the farm's harvest action, else None."""
+        if not (self.at_camp() and self.farm_ripe() and not self.task) or self._food_carried() >= HARVEST_BELOW_FOOD:
+            return None
+        from ..actions import reasons_against
+        ctx = self.self_context("need")
+        return next((a for a in NEED_ACTIONS if a.need_flag == "farm_ripe" and not reasons_against(a, ctx)), None)
+
+    def _food_carried(self):
+        return sum(n * ITEMS[i].food for i, n in self.inventory.items() if ITEMS[i].kind == "food")
+
+    def _rent_bed(self):
+        """A bed rented at a village inn: this life's rest place (like a campfire, no fire), and a
+        camp there that holds the avatar to the village and the road around it."""
+        self._place_fire()
+        self.campfire["bed"] = True
+        self._pitch_camp(force=True)
 
     def _wants_rest(self):
         return self.health < RESTED_AT and (self.hunger > 0 or self._has_food())

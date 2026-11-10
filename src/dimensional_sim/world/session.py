@@ -8,9 +8,9 @@ threading imports belong here; callers own any locking and should pass `now`.
 from .animation import rotate
 from .autopilot import INVENTORY_SLOTS, Expedition
 from .autopilot.constants import CONTACT_COOLDOWN_MS, POSSESS_COOLDOWN_MS, POSSESS_SPEED_PERCENT
-from . import details
+from . import atlas, details
 from .autopilot.ecology import cell_of
-from .catalog import BY_ID, DEFAULT_TREES, ENEMIES, ITEMS, REGION_TREES, TREE_KINDS, UNLOCKS, rarity_glint
+from .catalog import BY_ID, DEFAULT_TREES, ENEMIES, FIGHT_PATTERNS, ITEMS, REGION_TREES, TREE_KINDS, UNLOCKS, rarity_glint
 from .models import ChunkKey, chunk_ident, integer
 from .progression import attribute_report
 from .runtime import InputCommand
@@ -72,7 +72,8 @@ def _tree_kinds(world, key, asset, chunk_seed, fallback):
     return rows
 
 
-def snapshot(game, known=(), *, paused=False, expedition=None, control="manual", debug=False, detail=False):
+def snapshot(game, known=(), *, paused=False, expedition=None, control="manual", debug=False, detail=False,
+             atlas_view=False):   # False, or a mutable set of chunk ids already sent
     """Read-only transport projection: no get/stream/generate or simulation calls."""
     asset = game.current_chunk().asset
     w, h = asset.width, asset.height
@@ -107,10 +108,14 @@ def snapshot(game, known=(), *, paused=False, expedition=None, control="manual",
             enemy, tier = ENEMIES[BY_ID[kinds[t["id"]]].enemy], expedition.tier_of(t["id"])
             t["name"] = f"{tier.title} {enemy.name.lower()}" if tier.title else enemy.name
             t["sprite"], t["tier"], t["sound_profile"] = enemy.sprite, tier.mark, enemy.sound_profile   # "" | "★" | "★★"
-            t["hunting"] = expedition.hunting.get(t["id"], {}).get("mode")   # a fight-pattern mode (hunt, windup, charge, recover, retreat), "flee" or None
+            t["hunting"] = expedition.hunting.get(t["id"], {}).get("mode")   # a fight-pattern mode (hunt, circle, windup, charge, recover, retreat), "flee" or None
+            t["hidden"] = FIGHT_PATTERNS[enemy.pattern].hidden and t["hunting"] is None   # lying unseen (a lurker under the water)
         frame_extra = {"spots": [] if in_anchor else expedition.visible_spots(),
                        "target_kinds": {t["id"]: kinds[t["id"]] for t in targets},
                        "expedition": _expedition_view(expedition, control, debug=debug, detail=detail)}
+        if atlas_view is not False:   # a set: chunk ids whose tiles this viewer already holds
+            frame_extra["atlas"] = atlas.atlas(expedition, atlas_view)
+            atlas_view.update(c["id"] for c in frame_extra["atlas"]["chunks"] if c["tiles"] is not None)
     minimap = game.world.minimap(center, MINIMAP_RADIUS)
     fog = {}
     for entry in minimap:
@@ -139,8 +144,7 @@ def _chunk_view(world, chunk, expedition):
             "trees": _tree_kinds(world, key, a, chunk.seed, region),
             "width": a.width, "height": a.height, "biome": a.biome,
             "seed": derive_seed(chunk.seed, "browser-art-v1") % 2**32,
-            "tiles": ["".join((obj or env).glyph for obj, env in zip(orow, erow))
-                      for orow, erow in zip(a.objects, a.environment)],
+            "tiles": atlas.tile_rows(a),
             "collision": ["".join("1" if c else "0" for c in row) for row in a.collision]}
 
 
@@ -178,7 +182,7 @@ def _expedition_view(e, control, *, debug, detail):
             "auto_target": unarmed_target[1] if unarmed_target else None,
             "skill_slots": _skill_slots(e, shop_open),
             "campfire": None if in_anchor or e.campfire is None or e.campfire["dimension"] != e.dimension
-            else {"x": e.campfire["fire_x"], "y": e.campfire["fire_y"]},
+            else {"x": e.campfire["fire_x"], "y": e.campfire["fire_y"], **({"bed": True} if e.campfire.get("bed") else {})},
             "prologue": e.prologue(),
             "story": None if e.opening else e.story_view(),
             "region": _region_view(e),
@@ -266,6 +270,7 @@ def _region_view(expedition):
                                         "condition": None if condition is None or condition.id == "quiet"
                                         else {"name": condition.name, "text": condition.text},
                                         "worked": expedition.worked_here(),
+                                        "ground": expedition.ground_view(key),
                                         "shimmer": cell_of(key) in expedition.shimmer,
                                         "place": _place_view(expedition)}
 
@@ -281,12 +286,14 @@ def _place_view(e):
 
 def validate_input(data):
     base = {"move", "attack", "paused", "known"}
-    if type(data) is not dict or not base <= set(data) or not set(data) <= base | {"action", "debug", "detail", "control", "interact"}:
+    if type(data) is not dict or not base <= set(data) or not set(data) <= base | {"action", "debug", "detail", "atlas", "control", "interact"}:
         raise ValueError("invalid input fields")
     if "control" in data and data["control"] not in ("auto", "active"):
         raise ValueError("invalid control mode")
     if "interact" in data and type(data["interact"]) is not bool:
         raise ValueError("interact must be boolean")
+    if "atlas" in data and type(data["atlas"]) is not bool and data["atlas"] != "reset":
+        raise ValueError("atlas must be boolean or 'reset'")
     for flag in ("debug", "detail"):
         if flag in data and type(data[flag]) is not bool:
             raise ValueError(f"{flag} must be boolean")
@@ -335,6 +342,8 @@ class BrowserSession:
         self.input_time = float("-inf")
         self.debug = False
         self.detail = False
+        self.atlas = False
+        self.atlas_sent = {}   # world seed -> chunk ids whose tiles the full map already holds
 
     @property
     def game(self):
@@ -352,13 +361,18 @@ class BrowserSession:
     def _frame(self, known=(), now=None):
         return snapshot(self.game, known, paused=self.paused, expedition=self.expedition, control=self._control(),
                         debug=self.debug and self.expedition is not None,
-                        detail=self.detail and self.expedition is not None)
+                        detail=self.detail and self.expedition is not None,
+                        atlas_view=self.atlas_sent.setdefault(self.game.world.world_seed, set())
+                        if self.atlas and self.expedition is not None else False)
 
     def input(self, data, now):
         command, paused, known = validate_input(data)
         with self.lock:
             self.debug = data.get("debug", False)
             self.detail = data.get("detail", False)
+            self.atlas = bool(data.get("atlas", False))
+            if data.get("atlas") == "reset":   # a fresh viewer (page load): it holds no tiles yet
+                self.atlas_sent = {}
             action_error = None
             if "action" in data:
                 if self.expedition is None:

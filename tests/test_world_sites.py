@@ -6,13 +6,13 @@ from unittest.mock import patch
 
 from dimensional_sim.world.actions import Context
 from dimensional_sim.world.autopilot import Expedition
-from dimensional_sim.world.catalog import BY_ID, LandDef, REGIONS, SITE_CELL, SITES, UNLOCKS
+from dimensional_sim.world.catalog import BY_ID, LandDef, REGIONS, ROAD_SITE_IDS, SITE_CELL, SITES, UNLOCKS
 from dimensional_sim.world.encounters import _reachable, chunk_spots
 from dimensional_sim.world.models import ChunkKey, DimensionSpec
 from dimensional_sim.world.open_terrain import open_assets
 from dimensional_sim.world.repository import WorldRepository
 from dimensional_sim.world.runtime import Exploration
-from dimensional_sim.world.seeds import canonical_json
+from dimensional_sim.world.seeds import canonical_json, content_digest
 from dimensional_sim.world.catalog import STRUCTURES
 from dimensional_sim.world.sites import STRUCTURE_GLYPHS, bounded_site_plan, site_at
 from dimensional_sim.world.web import new_world
@@ -31,15 +31,20 @@ def first(world, site_id):
                 if p.id == site_id)
 
 
+LAND_SITES = {k: v for k, v in SITES.items() if k not in ROAD_SITE_IDS}   # the road out's own are tested below
+
+
 class PlacementTests(unittest.TestCase):
     def test_sites_are_rare_spaced_out_far_from_the_anchor_and_pure(self):
         w = new_world(SEED)
         found = sites(w)
         self.assertGreaterEqual(len(found), len(SITES))
         self.assertLess(len(found), len(AREA) // SITE_CELL ** 2, "at most one per block, most blocks stay wild")
-        blocks = [(k.x // SITE_CELL, k.y // SITE_CELL) for k in found]
+        blocks = [(k.x // SITE_CELL, k.y // SITE_CELL) for k, p in found.items() if p.id not in ROAD_SITE_IDS]
         self.assertEqual(len(blocks), len(set(blocks)))
         for key, p in found.items():
+            if p.id in ROAD_SITE_IDS:
+                continue   # placed on the road out, not rolled (RoadOutTests)
             self.assertGreaterEqual(max(abs(key.x), abs(key.y)), p.site.min_ring)
             self.assertIn(w.region_for(key).id, p.site.weights)
         self.assertEqual({p.id for p in found.values()}, set(SITES))
@@ -80,7 +85,7 @@ class PlacementTests(unittest.TestCase):
         w = new_world(SEED)
         before = sites(w)
         saved = json.loads(canonical_json(w.to_dict()))
-        self.assertEqual(saved["schema_version"], 9)
+        self.assertEqual(saved["schema_version"], 10)
         moved = {k: replace(v, weights={r: 1 for r in v.weights}) for k, v in SITES.items()}
         with patch.dict(SITES, moved):
             self.assertEqual(sites(WorldRepository.from_dict(saved)), before, "a catalog edit never moves sites")
@@ -128,7 +133,8 @@ class PlacementTests(unittest.TestCase):
             self.assertEqual({placement.id for placement in found.values()}, set(SITES), seed)
             for key, placement in found.items():
                 self.assertTrue(chunk_open(seed, key), key)
-                self.assertIn(world.region_for(key).id, placement.site.weights)
+                if placement.id not in ROAD_SITE_IDS:
+                    self.assertIn(world.region_for(key).id, placement.site.weights)
             restored = WorldRepository.from_dict(json.loads(canonical_json(world.to_dict())))
             self.assertEqual(found, {key: restored.site_for(key) for key in found})
 
@@ -156,7 +162,7 @@ class PlacementTests(unittest.TestCase):
 class EncounterTests(unittest.TestCase):
     def test_site_encounters_roll_inside_the_clearing_once_unlocked(self):
         w = new_world(SEED)
-        for site_id in SITES:
+        for site_id in LAND_SITES:   # the road out's places are open to whoever gets there
             unlocks = {a.unlock for a in BY_ID.values() if a.site == site_id}
             key, p = first(w, site_id)
             chunk, region = w.get(key), w.region_for(key)
@@ -207,3 +213,39 @@ class EncounterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RoadOutTests(unittest.TestCase):
+    """The road out of the forest (LandDef.road_out, docs/design/VILLAGE.md)."""
+
+    def test_the_road_leads_east_past_the_edge_to_the_bandit_camp_and_the_village(self):
+        from dimensional_sim.world.catalog import LANDS
+        from dimensional_sim.world.edges import road_out_chunks
+        land = LANDS["forest"]
+        for seed in (SEED, 1, 2, 3):
+            w = new_world(seed)
+            road = road_out_chunks(land, "forest")
+            self.assertEqual([k.x for k in road], list(range(land.edge_ring + 1, land.lobe_ring + land.road_out[1] + 1)))
+            self.assertTrue(all(w.chunk_open(k) for k in road))
+            self.assertFalse(w.chunk_open(ChunkKey("forest", road[-1].x + 1, 0)), "the road ends at the village")
+            self.assertEqual(w.site_for(road[-1]).id, "village")
+            self.assertEqual(w.site_for(road[1]).id, "bandit_camp")
+            # walk it: the village is reachable from the anchor over open ground
+            asset = w.get(road[-1]).asset
+            p = w.site_for(road[-1])
+            self.assertFalse(asset.collision[p.y][p.x], "the village square is open")
+
+    def test_an_older_world_gains_the_road_and_keeps_its_landmarks(self):
+        w = new_world(SEED)
+        before = {k: v for k, v in sites(w).items() if v.id not in ROAD_SITE_IDS}
+        old = json.loads(canonical_json(w.to_dict()))
+        old["schema_version"] = 9
+        old["land_catalog"] = [{k: v for k, v in raw.items() if k != "road_out"} for raw in old["land_catalog"]]
+        old["site_catalog"] = [raw for raw in old["site_catalog"] if raw["id"] not in ROAD_SITE_IDS]
+        old["land_catalog_digest"] = content_digest(old["land_catalog"])
+        old["site_catalog_digest"] = content_digest(old["site_catalog"])
+        restored = WorldRepository.from_dict(old)
+        after = sites(restored)
+        self.assertEqual({k: v for k, v in after.items() if v.id not in ROAD_SITE_IDS}, before)
+        self.assertEqual({v.id for v in after.values()} & ROAD_SITE_IDS, set(ROAD_SITE_IDS))
+        self.assertEqual(restored.to_dict()["schema_version"], 10)

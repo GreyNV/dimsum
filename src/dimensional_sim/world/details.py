@@ -10,9 +10,9 @@ from .actions import Context, describe_bucket, known, spot_tiers
 from .autopilot import INVENTORY_SLOTS, POINT, REGEN, REST_REGEN
 from . import effects
 from .catalog import (ACTIONS, BY_ID, ENEMIES, ITEMS, JOURNAL_GROUPS, LOCATION_OF_REGION, LOCATION_OF_SITE, LOCATIONS,
-                      RARITY, REGIONS, SITES, UNLOCKS)
+                      HAULS, RARITY, REGIONS, SITES, UNLOCKS)
 from .drops import SCALE, table_chances, tier_chances
-from .encounters import spawn_window
+from .encounters import spawn_window, steady
 from .journal import achievements
 from .models import ChunkKey
 from .progression import attribute_report, dimensional_level, scaled_ms, sight_radius, speed_permille
@@ -34,7 +34,7 @@ def character(e):
     gear = [ITEMS[i].name for i in e.equipped.values()]
     return {
         "life": e.life, "depth": e.depth, "best_depth": e.best_depth, "frontier": frontier,
-        "health": _pts(e.health), "hunger": _pts(e.hunger),
+        "health": _pts(e.health), "health_max": _pts(e.max_health()), "hunger": _pts(e.hunger),
         "punch_damage": e.punch_damage(), "gear": gear,
         "threats": [{"id": a.id, "name": ENEMIES[a.enemy].name,
                      "hp": e.enemy_hp(a, ChunkKey(e.dimension, frontier, 0)),
@@ -80,15 +80,12 @@ def multipliers(e):
         effective = base if a.category in ("reflect", "pray") and a.placement == "self" else scaled_ms(base, speed)
         actions.append({"id": a.id, "name": a.name, "attribute": a.attribute, "speed": speed,
                         "base_ms": base, "effective_ms": effective})
-    endurance = e.speed("endurance")
-    hit_parts = [["Endurance", round(1000 / endurance, 3)]]
-    hit_parts += [[name, percent / 100] for name, percent in effects.breakdown(e.equipped,
-                                                                               "enemy_hit_percent")]
+    health_parts = [["Base", 100]] + [[name, n] for name, n in effects.breakdown(e.equipped, "max_health")]
     punch = e.punch_damage()
     bonuses = effects.breakdown(e.equipped, "punch_damage")
     return {"actions": actions,
-            "hunger_drain": round(1000 / endurance, 3),
-            "enemy_hit": hit_parts,
+            "hunger_drain": round(1000 / (1000 + e.hunger_relief_permille()), 3),
+            "max_health": health_parts,
             "punch_damage": punch,
             "punch_parts": [["Base", 1], ["Strength levels", punch - 1 - sum(n for _, n in bonuses)],
                             *[[name, n] for name, n in bonuses]]}
@@ -108,7 +105,11 @@ def rolls(e):
     loot = []
     for a in ACTIONS:
         if (a.loot or a.drops) and known(a, known_ctx):
-            drops = [{"item": ITEMS[l.item].name, "min": l.low, "max": l.high, "chance": l.chance,
+            varies = not steady(a)   # hauls: poor .. rich scale every amount (docs/design/HAULS.md)
+            low_pct = min(h.percent for h in HAULS) if varies else 100
+            high_pct = max(h.percent for h in HAULS) if varies else 100
+            drops = [{"item": ITEMS[l.item].name, "min": max(1, (l.low * low_pct + 50) // 100),
+                      "max": max(1, (l.high * high_pct + 50) // 100), "chance": l.chance,
                       "roll": "fixed"} for l in a.loot]
             bonus = table_chances(a.drops) if a.drops else {}
             drops += [{"item": ITEMS[item].name, "min": low, "max": high, "chance": bp / 100,

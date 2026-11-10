@@ -11,6 +11,7 @@
  * and callers keep their cell-sprite fallback.
  */
 import {READ_K, asciify, onStyleChange} from './ascii_art.js';
+import {paintTraveller, travellerPose} from './traveller_art.js';   // a bandit is a man like the traveller (used at paint time only)
 const OUTLINE = '#070a06';
 let RES = 2;
 const cache = new Map();
@@ -21,7 +22,7 @@ const PAD = 2;
 
 /** A cached canvas of logical size (w + 2*PAD) x (h + 2*PAD); `draw(ctx)` paints in the w x h
  * frame. `outline` adds the soft silhouette edge. */
-export function paintedCanvas(key, w, h, draw, {outline = true} = {}) {
+export function paintedCanvas(key, w, h, draw, {outline = true, cold = .55} = {}) {
   if (cache.has(key)) return cache.get(key);
   if (typeof document === 'undefined' || !document.createElement) return null;
   const W = w + PAD * 2, H = h + PAD * 2, k = RES, kr = READ_K;   // painted fine, for reading
@@ -34,7 +35,7 @@ export function paintedCanvas(key, w, h, draw, {outline = true} = {}) {
   a.under = []; a.after = [];
   draw(a);
   // Shown as text, never as the picture: the ASCII shader reads it (ascii_art.js).
-  const text = asciify(art, w, h, kr, k, {pad: PAD});
+  const text = asciify(art, w, h, kr, k, {pad: PAD, cold});   // cold: how far the atmosphere grade drains it
   let out = text;
   if (a.under.length || a.after.length) {
     out = document.createElement('canvas');
@@ -113,10 +114,10 @@ export function fill(ctx, shape, base, {sheen = .32, shade = .5, light = [.3, .2
   ctx.clip();
   const cx = x + w * light[0], cy = y + h * light[1], r = Math.max(w, h) * 1.05 + 1;
   const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-  g.addColorStop(0, `rgba(255, 246, 222, ${sheen})`);
-  g.addColorStop(.42, 'rgba(255, 246, 222, 0)');
-  g.addColorStop(.62, 'rgba(12, 10, 24, 0)');
-  g.addColorStop(1, `rgba(12, 10, 24, ${shade})`);
+  g.addColorStop(0, `rgba(214, 226, 236, ${sheen * .85})`);   // a cold key light (it was warm: 255, 246, 222)
+  g.addColorStop(.42, 'rgba(214, 226, 236, 0)');
+  g.addColorStop(.62, 'rgba(9, 12, 17, 0)');
+  g.addColorStop(1, `rgba(9, 12, 17, ${Math.min(.9, shade * 1.25)})`);   // deeper shade
   ctx.fillStyle = g; ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
   if (rim) {   // a thin back-light along the lower right edge
     ctx.strokeStyle = rim; ctx.lineWidth = .8; ctx.globalAlpha = .55;
@@ -159,15 +160,16 @@ export function T(x0, y0, r0, x1, y1, r1) {
 /* Sized against the avatar (about 1.75 m in a 40 px frame): a boar stands about half a person
  * at the shoulder, a wolf a little less, a lurker lies low, the bones are a person's height and
  * a wisp is no bigger than a lantern-glow. ENEMY_ART draws at `scale` 1 in ENEMY_ART_FRAMES. */
-const ENEMY_ART_FRAMES = {boar: [41, 26, 1], lurker: [48, 32, .74], skeleton: [24, 41, 1], wisp: [34, 40, .62], wolf: [54, 38, .74]};
+const ENEMY_ART_FRAMES = {boar: [41, 26, 1], lurker: [48, 32, .74], skeleton: [24, 41, 1], wisp: [34, 40, .62], wolf: [54, 38, .74],
+  rat: [22, 11, 1], bandit: [32, 40, 1]};
 export const ENEMY_FRAMES = Object.freeze(Object.fromEntries(Object.entries(ENEMY_ART_FRAMES).map(([k, [w, h, s]]) => [k, [Math.round(w * s), Math.round(h * s)]])));
 /** Enemies seen side-on (boar, wolf) turn to face the avatar; the art faces east. */
-export const SIDE_ON = Object.freeze(new Set(['boar', 'wolf']));
+export const SIDE_ON = Object.freeze(new Set(['boar', 'wolf', 'rat', 'bandit']));
 
 function boar(c) {
   // A wild boar seen side-on, facing east: high bristled withers, a long wedge head, tusks,
   // thin legs under a heavy barrel body - with brambles tangled in the mane.
-  const coat = '#4e2b2c', coatLight = '#74404a', dark = '#2a1517', snout = '#8e6464', thorn = '#33502a';
+  const coat = '#3b2f28', coatLight = '#6e6256', dark = '#16110e', snout = '#5a4a40', thorn = '#2a3428';
   c.save(); c.strokeStyle = coat; c.lineWidth = .7; c.beginPath(); c.moveTo(4.2, 10.4); c.quadraticCurveTo(2, 12.4, 2.2, 15.6); c.stroke(); c.restore();
   fill(c, E(2.2, 16, .8, 1.3), dark, {edge: .4});                                                     // tail tuft
   for (const [x0, y0, x1] of [[9.6, 17, 8.6], [29.6, 17, 30.4]]) {                                     // far legs
@@ -186,10 +188,10 @@ function boar(c) {
   c.restore();
   c.save(); c.strokeStyle = thorn; c.lineWidth = .8;                                                // brambles in the mane
   c.beginPath(); c.moveTo(8, 7.4); c.bezierCurveTo(13, 2.6, 22, 1.4, 29, 5.4); c.stroke();
-  c.fillStyle = '#5c7f3c';
+  c.fillStyle = '#41503c';
   for (const [x, y] of [[11, 5], [15, 3.4], [19, 2.6], [23, 2.8], [27, 4.2]]) { c.beginPath(); c.moveTo(x - .5, y); c.lineTo(x + .2, y - 1.4); c.lineTo(x + .5, y); c.fill(); }
   c.restore();
-  for (const [x, y] of [[13.4, 4.4], [21, 2.4], [25.6, 3.8]]) { dot(c, x, y, .65, '#b8323f'); dot(c, x - .2, y - .2, .25, '#ffb0a0'); }
+  for (const [x, y] of [[13.4, 4.4], [21, 2.4], [25.6, 3.8]]) { dot(c, x, y, .55, '#5e2a2a'); }   // a few dark old berries
   fill(c, E(9.4, 13.6, 4, 4.6), coat, {sheen: .28, shade: .5, edge: .35});                            // haunch
   fill(c, T(9.8, 16.4, 1.7, 9.4, 24.6, .85), coat, {shade: .5});                                     // near legs
   fill(c, R(8.4, 24.2, 2.1, 1.7, .5), '#120a08', {edge: .4});
@@ -201,19 +203,19 @@ function boar(c) {
   fill(c, E(39.3, 12.7, .95, 1.35), snout, {sheen: .35, edge: .55});
   dot(c, 39.5, 12.4, .3, '#2a1214'); dot(c, 39.4, 13.2, .3, '#2a1214');
   fill(c, P([[32.2, 6.6], [31.2, 2.8], [34, 5.8]], true), coat, {edge: .55});                         // ear
-  fill(c, P([[32.3, 5.6], [31.9, 3.9], [33.2, 5.6]], true), '#8e5a5a', {edge: 0});
-  fill(c, P([[36.2, 14.6], [37.6, 12.2], [38.2, 10.6], [38.1, 12.8], [37.2, 14.8]], true), '#efe6cf', {sheen: .5, shade: .3, edge: .6});   // tusk
+  fill(c, P([[32.3, 5.6], [31.9, 3.9], [33.2, 5.6]], true), '#4a3a34', {edge: 0});
+  fill(c, P([[36.2, 14.6], [37.6, 12.2], [38.2, 10.6], [38.1, 12.8], [37.2, 14.8]], true), '#d6d0c0', {sheen: .5, shade: .3, edge: .6});   // tusk
   dot(c, 34.6, 9.4, .7, '#1a0606');
   const g = c.createRadialGradient(34.6, 9.3, 0, 34.6, 9.3, .75);
-  g.addColorStop(0, '#fff3a8'); g.addColorStop(.55, '#ff9d3c'); g.addColorStop(1, 'rgba(255,120,40,0)');
+  g.addColorStop(0, '#e8d6a0'); g.addColorStop(.55, '#9a6a34'); g.addColorStop(1, 'rgba(120,80,40,0)');   // a dull wet eye
   c.fillStyle = g; c.beginPath(); c.arc(34.6, 9.3, .75, 0, Math.PI * 2); c.fill();
 }
 
 function lurker(c) {
-  const hide = '#2f5f57', hideDark = '#1b3d37', belly = '#9fbf8a', eye = '#e8d84a';
+  const hide = '#2c3a33', hideDark = '#141d19', belly = '#6d7562', eye = '#c9b860';
   for (const [x0, y0, x1, y1] of [[12, 22, 3.5, 29.5], [36, 22, 44.5, 29.5], [15, 25, 9, 30.5], [33, 25, 39, 30.5]]) {
     fill(c, C(x0, y0, x1, y1, 2.2), hideDark, {shade: .5});
-    for (const d of [-1.6, 0, 1.6]) fill(c, E(x1 + d, y1 + .8, 1.1, .8), '#16352f', {edge: .4});   // webbed toes
+    for (const d of [-1.6, 0, 1.6]) fill(c, E(x1 + d, y1 + .8, 1.1, .8), '#121a16', {edge: .4});   // webbed toes
   }
   const body = E(24, 20, 18.4, 9.2);
   fill(c, body, hide, {sheen: .32, shade: .55});
@@ -226,10 +228,10 @@ function lurker(c) {
   for (let i = 0; i < 7; i++) fill(c, E(12 + i * 4, 12.6 - Math.sin(i / 6 * Math.PI) * 1.4, 1.4, 1.1), hideDark, {edge: .4, sheen: .2});  // ridge
   fill(c, E(24, 25, 13.6, 4.2), belly, {sheen: .3, shade: .35});
   const jaw = E(24, 21.6, 11.4, 6.2);
-  fill(c, jaw, '#3a7067', {sheen: .35, shade: .45});
+  fill(c, jaw, '#34443b', {sheen: .35, shade: .45});
   c.strokeStyle = OUTLINE; c.lineWidth = .8;
   c.beginPath(); c.moveTo(13.6, 23); c.quadraticCurveTo(24, 27.2, 34.4, 23); c.stroke();
-  c.fillStyle = '#f1ecd2';
+  c.fillStyle = '#cfc9b4';
   for (let i = 0; i < 8; i++) { const x = 15.6 + i * 2.4, y = 24 + Math.sin(i / 7 * Math.PI) * 1.7; c.beginPath(); c.moveTo(x - .6, y - .2); c.lineTo(x, y + 1.1); c.lineTo(x + .6, y - .2); c.fill(); }
   for (const s of [-1, 1]) {                                                                     // eyes up on top
     fill(c, E(24 + s * 7, 12.6, 3.4, 3), hide, {sheen: .3, shade: .5});
@@ -242,7 +244,7 @@ function lurker(c) {
 
 function skeleton(c) {
   // A person's frame, about the avatar's height: a small skull, a narrow ribcage, long bones.
-  const bone = '#d8d2bc', boneDark = '#9d977f', socket = '#14100c', rust = '#8a5130';
+  const bone = '#b8b4a4', boneDark = '#77746a', socket = '#07080a', rust = '#5e3a26';
   for (const s of [-1, 1]) {
     const hip = 12 + s * 1.9;
     fill(c, T(hip, 22.4, .95, hip + s * .3, 31, .75), bone, {shade: .45});
@@ -303,7 +305,7 @@ function wisp(c) {
 }
 
 function wolf(c) {
-  const coat = '#62676f', coatLight = '#8d939b', saddle = '#383b41', dark = '#26282c';
+  const coat = '#4a4e54', coatLight = '#7a8088', saddle = '#25272b', dark = '#16171a';
   fill(c, P([[10, 18], [5, 21], [1.6, 27.4], [3, 31.4], [6.4, 27.6], [9.6, 25], [12.4, 22]], true), coat, {sheen: .3, shade: .5});   // tail
   fill(c, P([[3.6, 29.6], [1.6, 27.4], [2.6, 31.6]], true), coatLight, {edge: .3});
   for (const [x0, x1] of [[16.6, 15.6], [37, 38]]) {                                            // far legs
@@ -322,7 +324,7 @@ function wolf(c) {
   }
   fill(c, P([[42.8, 12.6], [43.6, 4.4], [46.8, 11]], true), coat, {edge: .55});               // ears
   fill(c, P([[46, 11.4], [48, 4.8], [50, 12]], true), coat, {edge: .55});
-  fill(c, P([[44.2, 11], [44.4, 6.8], [45.8, 10.6]], true), '#a77d7d', {edge: 0});
+  fill(c, P([[44.2, 11], [44.4, 6.8], [45.8, 10.6]], true), '#5e4a4a', {edge: 0});
   fill(c, E(46.4, 15, 6, 5.2), coat, {sheen: .35, shade: .45});
   fill(c, P([[48, 13.6], [53.6, 16.2], [53.2, 19.4], [47.4, 19.8]], true), coatLight, {sheen: .4, shade: .35});   // muzzle
   dot(c, 53.4, 16.6, 1.15, '#101114');
@@ -330,10 +332,36 @@ function wolf(c) {
   for (let i = 0; i < 3; i++) { c.beginPath(); c.moveTo(48.6 + i * 1.5, 19.4); c.lineTo(49.2 + i * 1.5, 20.8); c.lineTo(49.8 + i * 1.5, 19.4); c.fill(); }
   dot(c, 48.8, 14, 1.2, '#20160a');
   const g = c.createRadialGradient(48.8, 14, 0, 48.8, 14, 1.1);
-  g.addColorStop(0, '#fff8c0'); g.addColorStop(.6, '#ffe066'); g.addColorStop(1, 'rgba(255,224,102,0)');
+  g.addColorStop(0, '#f2f4e0'); g.addColorStop(.6, '#c8d0a0'); g.addColorStop(1, 'rgba(200,208,160,0)');   // a pale cold eye
   c.fillStyle = g; c.beginPath(); c.arc(48.8, 14, 1.1, 0, Math.PI * 2); c.fill();
 }
-const ENEMY_ART = {boar, lurker, skeleton, wisp, wolf};
+function rat(c) {
+  // A big grey-brown granary rat, side-on facing east: a hunched body, a long bare tail, pink ears.
+  const fur = '#4a4440', dark = '#221f1d', light = '#7a726a';
+  c.save(); c.strokeStyle = '#8a7268'; c.lineWidth = .6; c.beginPath(); c.moveTo(4, 7.6); c.quadraticCurveTo(-1, 6, .6, 2.6); c.stroke(); c.restore();
+  for (const x of [7, 14]) fill(c, T(x, 8, .7, x - .4, 10.4, .45), dark, {shade: .5, edge: .35});
+  const body = P([[3.6, 7.4], [5, 3.4], [9.6, 1.8], [14, 2.6], [17.4, 4.6], [16.8, 8.4], [12, 9.4], [6, 9.2]], true);
+  fill(c, body, fur, {sheen: .3, shade: .55});
+  strokes(c, body, dark, 30, {len: 1, angle: Math.PI * .1, spread: .4, width: .3, seed: 5, alpha: .7});
+  strokes(c, body, light, 10, {len: .8, angle: Math.PI * .1, spread: .4, width: .25, seed: 6, alpha: .5});
+  const head = P([[15.6, 3.4], [19.6, 5.2], [21.6, 7], [19.6, 8.2], [15.6, 7.8]], true);
+  fill(c, head, fur, {sheen: .32, shade: .45, light: [.4, .2]});
+  fill(c, E(16.4, 2.8, 1.1, 1.3), '#8a6a68', {edge: .4});                                  // ear
+  dot(c, 21.4, 7, .35, '#2a1a1a');
+  dot(c, 18.6, 5.2, .45, '#0c0808'); dot(c, 18.7, 5.05, .15, 'rgba(220, 230, 235, .9)');
+  for (const x of [10, 17]) fill(c, T(x, 8.4, .7, x + .4, 10.6, .45), fur, {shade: .45, edge: .35});
+}
+
+function bandit(c) {
+  // A road bandit, the traveller's own build but meaner: a dark leather jerkin and hood, a club.
+  const j = travellerPose({breath: .25});
+  paintTraveller(c, j, {worn: {body: 'leather_jerkin', head: 'leather_hood'}});
+  const [hx, hy] = j.wristF;
+  fill(c, T(hx + .2, hy + 1.2, .55, hx + 4.4, hy - 6.6, 1.25), '#4a3626', {sheen: .25, shade: .6, edge: .5});   // the club
+  dot(c, hx + 4.1, hy - 5.6, .35, '#8d9496'); dot(c, hx + 3.5, hy - 4.2, .3, '#8d9496');                         // nails in it
+}
+
+const ENEMY_ART = {boar, lurker, skeleton, wisp, wolf, rat, bandit};
 export function enemyCanvas(sprite, breathe = 0, west = false) {
   const draw = ENEMY_ART[sprite];
   if (!draw) return null;

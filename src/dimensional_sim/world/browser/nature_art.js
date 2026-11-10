@@ -26,7 +26,7 @@ export function blobLight(circles, px, py, sy = 1) {
 const ramp = (list, v) => list[Math.max(0, Math.min(list.length - 1, Math.floor(v * list.length)))];
 
 // --- grass -------------------------------------------------------------------
-export const GRASS = Object.freeze(['#203316', '#2c441d', '#3a5726', '#4c6c2f', '#618438', '#7f9d46']);
+export const GRASS = Object.freeze(['#18241c', '#203025', '#2a3d30', '#36493a', '#465a49', '#5c7060']);
 /** Thin leaning strokes for one ground tile: [{x, y, h, lean, color, tip}] (pure). */
 export function grassBlades(glyph, variant, seed = 0) {
   const tall = glyph === ';', moss = glyph === 'o';
@@ -56,9 +56,10 @@ export function drawBlades(ctx, blades) {
  * is shaded twice: once by the whole crown (a big lit ball) and once by its own leaf clump (a
  * small lit ball), which is what makes a canopy read as many bunches of leaves instead of one
  * flat blob. Sub-cell specks (1 px) and a dark rim do the rest. */
-export const LEAF = Object.freeze(['#0f1a0b', '#16250f', '#1f3415', '#2b461b', '#395c22', '#4b732a', '#628c33', '#80a53f', '#a6c05a', '#cbd884']);
-const OLD_BARK = ['#110d08', '#1e170f', '#2e2317', '#43331f', '#5e4a2e', '#7a6040'];
-const BARK = ['#1e170f', '#2e2317', '#4a3826', '#6c5435', '#937246', '#b59050'];
+// Cold, old woods (docs/design/ATMOSPHERE.md): grey-green crowns, deep undersides, pale cold tops.
+export const LEAF = Object.freeze(['#090f0c', '#0e1712', '#142019', '#1b2a21', '#24362b', '#2e4335', '#3b5243', '#4f6656', '#6e8577', '#94a89c']);
+const OLD_BARK = ['#0d0b09', '#191613', '#26221d', '#363029', '#4a4238', '#625a4e'];
+const BARK = ['#171411', '#25201b', '#3a332b', '#524840', '#6e645a', '#8a8076'];
 export const TREE_W = 52, TREE_H = 70;
 export const LEAF_STEP = 2;
 const clamp01 = v => Math.max(0, Math.min(.999, v));
@@ -166,10 +167,10 @@ export function drawLitTree(ctx, variant) {
 }
 
 // Tree kinds (catalog.TREE_KINDS; the frame sends one letter per tree cell: chunk.trees).
-const PINE = ['#07120d', '#0a1712', '#10231a', '#173323', '#1f442e', '#2a573a', '#376b47', '#4a8257', '#669a6b', '#8db58a'];
-const BIRCH_LEAF = ['#141f0b', '#1c2a10', '#2a3d16', '#3b561d', '#4f7024', '#668b2c', '#82a636', '#a2bf4a', '#c5d667', '#e4e89a'];
+const PINE = ['#060c0b', '#091310', '#0e1c18', '#142720', '#1b3329', '#244134', '#2f5042', '#406254', '#5a7a6c', '#7f9a8e'];
+const BIRCH_LEAF = ['#10170e', '#172115', '#22301e', '#2f4129', '#3e5334', '#506641', '#677b55', '#839470', '#a3b092', '#c4cdb6'];
 const BIRCH_BARK = ['#5a5649', '#8b8676', '#b3ae9c', '#d3cfbf', '#e9e6da', '#f7f5ec'];
-const MOSS = ['#0b150a', '#101d0d', '#172b12', '#203b17', '#2c4e1c', '#3b6422', '#4f7b2a', '#6a9535', '#8bae48', '#b0c768'];
+const MOSS = ['#09110d', '#0e1913', '#14241a', '#1c3122', '#263f2c', '#324f37', '#426044', '#577356', '#71897a', '#93a698'];
 const DEAD_BARK = ['#1f1c18', '#2a2620', '#463f35', '#625a4c', '#837a68', '#a49a84'];
 
 /** Pine: stacked drooping tiers narrowing to a point, needles streaked by the light (pure). */

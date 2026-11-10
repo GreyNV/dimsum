@@ -143,7 +143,7 @@ class ChunkGenerator:
                     for key, value in definitions.items()):
                 raise ValueError("invalid land catalog")
             self.land_catalog = {key: LandDef(**asdict(value)) for key, value in sorted(definitions.items())}
-            self.land_catalog_digest = content_digest([asdict(value) for value in self.land_catalog.values()])
+            self.land_catalog_digest = content_digest([value.pinned() for value in self.land_catalog.values()])
         self._specs = {spec.id: spec for spec in self.dimensions}
         self._pools = {}
         for spec in self.dimensions:

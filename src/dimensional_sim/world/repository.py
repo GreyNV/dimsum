@@ -14,7 +14,7 @@ from .models import (
     ChunkKey, DimensionSpec, asset_from_dict, asset_to_dict, fields, integer,
 )
 
-WORLD_SCHEMA_VERSION = 9   # 9: generator v8 (guaranteed landmarks); 8: v7 (land edge); older worlds still load
+WORLD_SCHEMA_VERSION = 10   # 10: the road out and its sites (land/site catalogs; generator unchanged); 9: generator v8 (guaranteed landmarks); 8: v7 (land edge); older worlds still load
 MAX_MAP_RADIUS = 32
 
 
@@ -197,6 +197,20 @@ class WorldRepository:
             self.get(key)
         return tuple(self._resident[key] for key in selected)
 
+    def look(self, key, generate=False):
+        """A chunk for reading only (the full map): resident or recently evicted, else generated
+        afresh when `generate` (pure, never made resident), else None. Residency is untouched."""
+        key = self._key(key)
+        chunk = self._resident.get(key) or self._recycled.get(key)
+        if chunk is None and generate:
+            chunk = self._generator.generate(key)
+        return chunk
+
+    def discovered(self, dimension):
+        """(key, status) of every chunk seen in `dimension` ("generated" or "visited"), in key order."""
+        return [(key, self._discovery[key][0]) for key in sorted(self._discovery, key=lambda k: (k.x, k.y))
+                if key.dimension == dimension]
+
     def minimap(self, center, radius=2):
         self._key(center)
         integer(radius, "map radius", 0, MAX_MAP_RADIUS)
@@ -235,7 +249,7 @@ class WorldRepository:
                                     for value in self._generator.site_catalog.values()]
             data["site_catalog_digest"] = self._generator.site_catalog_digest
         if self.generator_version >= 7:
-            data["land_catalog"] = [asdict(value) for value in self._generator.land_catalog.values()]
+            data["land_catalog"] = [value.pinned() for value in self._generator.land_catalog.values()]
             data["land_catalog_digest"] = self._generator.land_catalog_digest
         return data
 
@@ -247,6 +261,9 @@ class WorldRepository:
         schema = data["schema_version"]
         if schema not in GENERATOR_OF_WORLD_SCHEMA:
             raise ValueError("unsupported world schema")
+        upgraded = schema == 9
+        if upgraded:
+            data, schema = _road_out_upgrade(data), 10
         fields(data, _BASE_FIELDS + tuple(name for since, names in _ADDED_FIELDS if schema >= since
                                           for name in names))
         if (type(data["generator_version"]) is not int or
@@ -277,6 +294,8 @@ class WorldRepository:
         digests = {"region": result.region_catalog_digest, "site": result._generator.site_catalog_digest,
                    "land": result._generator.land_catalog_digest}
         for name, since, *_ in _pinned_catalogs():
+            if upgraded and name in ("site", "land"):
+                continue   # the road out was added to these just now (_road_out_upgrade)
             if schema >= since and data[f"{name}_catalog_digest"] != digests[name]:
                 raise ValueError(f"world {name} catalog digest mismatch")
         for raw in data["discovery"]:
@@ -292,7 +311,7 @@ class WorldRepository:
 
 # ----- world save schemas ---------------------------------------------------------
 # The generator each world schema was written by: a save is replayed by exactly that one.
-GENERATOR_OF_WORLD_SCHEMA = {1: 1, 2: 2, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7, 9: 8}
+GENERATOR_OF_WORLD_SCHEMA = {1: 1, 2: 2, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7, 9: 8, 10: 8}
 # The schema a world is written in: the newest one its generator wrote (generator 2 wrote 2, then 3).
 WORLD_SCHEMA_OF_GENERATOR = {generator: max(s for s, g in GENERATOR_OF_WORLD_SCHEMA.items() if g == generator)
                              for generator in set(GENERATOR_OF_WORLD_SCHEMA.values())}
@@ -301,6 +320,39 @@ _BASE_FIELDS = ("schema_version", "generator_version", "world_seed", "cache_limi
                 "dimensions", "catalog", "catalog_digest", "discovery")
 _ADDED_FIELDS = ((2, ("region_catalog", "region_catalog_digest")), (3, ("region_version",)),
                  (6, ("site_catalog", "site_catalog_digest")), (8, ("land_catalog", "land_catalog_digest")))
+
+
+def _road_out_upgrade(data):
+    """World schema 9 -> 10: a pinned land gains its road out and the pinned sites the road's own
+    (docs/design/VILLAGE.md). It only opens ground that was closed: the corridor's chunks were never
+    reachable, a sealed side facing it loses its thicket, and the land's own landmarks stay put
+    (sites.bounded_site_plan draws them without the road)."""
+    from .catalog import LANDS, ROAD_SITE_IDS, SITES
+    from .seeds import content_digest
+    if type(data.get("land_catalog")) is not list or type(data.get("site_catalog")) is not list:
+        return data
+    # Validate the catalogs as they were pinned before adding the road. Otherwise a damaged
+    # schema-9 save would be accepted because its post-upgrade digest cannot match the old one.
+    for name, since, build, key_of, allow_empty, errors in _pinned_catalogs():
+        if name not in ("site", "land"):
+            continue
+        pinned = _pinned(data[f"{name}_catalog"], name, build, key_of,
+                         allow_empty=allow_empty, errors=errors)
+        rows = [asdict(value) if name == "site" else value.pinned()
+                for _, value in sorted(pinned.items())]
+        if data.get(f"{name}_catalog_digest") != content_digest(rows):
+            raise ValueError(f"world {name} catalog digest mismatch")
+    lands = []
+    for raw in data["land_catalog"]:
+        current = LANDS.get(raw.get("dimension")) if type(raw) is dict else None
+        if type(raw) is dict and "road_out" not in raw and current is not None and current.road_out is not None:
+            raw = {**raw, "road_out": list(current.road_out)}
+        lands.append(raw)
+    have = {raw.get("id") for raw in data["site_catalog"] if type(raw) is dict}
+    sites = list(data["site_catalog"]) + [{**asdict(SITES[ident]), "spots": list(SITES[ident].spots),
+                                           "size": list(SITES[ident].size)}
+                                          for ident in sorted(ROAD_SITE_IDS - have)]
+    return {**data, "schema_version": 10, "land_catalog": lands, "site_catalog": sites}
 
 
 def _pinned_catalogs():

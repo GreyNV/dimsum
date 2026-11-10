@@ -96,7 +96,8 @@ class PresentationMixin:
                 return {"encounter": "anchor_rest", "name": "Resting at the anchor camp", "kind": "rest",
                         "x": self.anchor[0], "y": self.anchor[1], "progress": progress}
             px, py = self._player()
-            return {"encounter": "campfire_rest", "name": "Resting by the campfire", "kind": "rest",
+            bed = bool((self.campfire or {}).get("bed"))
+            return {"encounter": "campfire_rest", "name": "Resting in the inn" if bed else "Resting by the campfire", "kind": "rest",
                     "x": px, "y": py, "progress": progress}
         spot = self._spot_by_id(task["spot"])
         if spot is None:
@@ -131,17 +132,20 @@ class PresentationMixin:
             return "fight"
         if self.task and self.task["type"] == "perform":
             return "encounter"
-        if self.goal and self.goal["kind"] in ("spot", "home"):
-            return "travel" if self.goal["kind"] == "spot" else "home"
+        if self.goal and self.goal["kind"] in ("spot", "home", "travel"):
+            return "home" if self.goal["kind"] == "home" else "travel"
         return "explore"
 
     def vitals(self):
         return {"hunger": self.hunger // 10_000, "health": self.health // 10_000, "max": 10_000,
+                "health_max": self.max_health() // 10_000,   # gear raises it (health slots)
                 "food_cooldown_ms": self.food_cooldown_ms, "food_cooldown_total_ms": FOOD_COOLDOWN_MS,
                 "ash": self.ash}
 
     def inventory_rows(self):
-        return [{"id": item, "name": ITEMS[item].name, "kind": ITEMS[item].kind,
+        return [{"id": item, "name": ITEMS[item].name, "kind": ITEMS[item].kind, "art": ITEMS[item].art,
+                 "about": item_about(ITEMS[item], is_equipped(self.equipped, item)
+                                     if ITEMS[item].kind == "gear" else False),
                  "glyph": ITEMS[item].glyph, "food": ITEMS[item].food, "count": count,
                  "slot": ITEMS[item].slot, "equipped": is_equipped(self.equipped, item)
                  if ITEMS[item].kind == "gear" else False, "color": ITEMS[item].color}
@@ -180,3 +184,19 @@ class PresentationMixin:
     def target_kinds(self):
         """Fight-spot id behind each target (see CombatMixin.target_action)."""
         return {target_id: self.target_action(target_id).id for target_id in self.game.targets}
+
+
+def item_about(item, equipped=False):
+    """What an item is and does, in a line (the inventory's hover title and tap card)."""
+    from ..catalog import EFFECT_STATS, EFFECT_WORDS, ITEM_KIND_NAMES
+    kind = ITEM_KIND_NAMES[item.kind]
+    if item.kind == "food":
+        return f"{kind}. Restores {item.food} hunger; eaten when it fully fits."
+    if item.kind == "gear":
+        effects = ", ".join(f"+{e.amount}{'%' if EFFECT_STATS[e.stat] == 'percent' else ''} {EFFECT_WORDS[e.stat]}"
+                            for e in item.effects)
+        worn = "worn" if equipped else "carried, not worn"
+        return f"{kind}, {item.slot}: {effects or 'no bonus'} ({worn})."
+    if item.kind == "material":
+        return f"{kind}. Used to craft and build; {item.ash_value} ash at the anchor."
+    return f"{kind}. No use out here; {item.ash_value} ash at the anchor."

@@ -28,7 +28,7 @@ SNARE_WHEN_HUNGER_BELOW = 60   # points; only when no food is carried
 
 # Exploration risk policy (autopilot.frontier): the auto-pilot only explores rings where
 # one boar fight costs at most this percent of full health (one ring more when starving).
-COMFORT_DAMAGE_PERCENT = 60
+COMFORT_DAMAGE_PERCENT = 90   # was 60: with fixed, heavier bites a fresh life never left ring 1 and starved there
 
 # Anchor camp (autopilot/camp.py): the storage chest and carry load.
 CHEST_SLOTS = 6                 # item stacks a storage chest holds (STACK_LIMIT each)
@@ -36,6 +36,16 @@ CHEST_SLOTS = 6                 # item stacks a storage chest holds (STACK_LIMIT
 # slowly (starvation must stay rare); wood thins fast (the crafting station is a milestone).
 PRESSURE_STEP = {"wood": 20, "game": 15, "berries": 8, "fungi": 10, "eggs": 10, "fish": 12}
 PRESSURE_FLOOR = 25            # % it never drops below: a worked area keeps a trickle
+FOOD_TRIP_CHUNKS = 4           # a hungry avatar with coins walks this many chunks to a food stall
+PRESSURE_RECOVER_MS = 180_000  # left untouched this long, a region cell's ecology forgets one harvest
+# Worked ground around a camp (autopilot/explored.py, docs/design/WORKED_GROUND.md): when the camp's
+# area has nothing left, its chunks are rolled again, one round more explored each time.
+EXPLORED_RECOVER_MS = 360_000  # untouched this long, a chunk forgets one round of exploration
+DANGER_RINGS_PER_ROUND = 1     # each round counts as this many rings deeper (fight tiers, company, rarity)
+DANGER_FIGHT_PERCENT = 35      # each round raises fight spots' weight by this percent
+DEN_ROUND = 2                  # from this round a reroll also opens an animal den (one fight for sure)
+CAMP_MAX_ROUNDS = 4            # the autopilot sets out on its own rather than work the area again
+EXPLORED_NAMES = ("Untouched", "Explored", "Picked over", "Hunted ground", "Dangerous")
 SHIMMER_RARITY_PERCENT = 250   # a shimmering region cell: odds of uncommon and rare spots x2.5 (capped per tier)
 CAMPFIRE_AWAY = 20             # tiles: a badly hurt avatar this far from the anchor and any fire makes one
 STOW_TRIP_AT = 30               # with a chest, carrying this many material units sends the avatar home
@@ -81,6 +91,8 @@ PERCEPTION_CELLS_PER_XP = 100   # 1 Perception XP per 100 newly seen cells (expl
 # Movement: the whole Agility multiplier speeds walking on a log curve,
 # bonus = MOVE_BONUS_PER_DECADE x log10(multiplier) permille: +3% at x2, +10% at x10.
 MOVE_BONUS_PER_DECADE = 100
+# Endurance slows hunger on the same curve (its only effect on vitals: it no longer softens bites).
+HUNGER_RELIEF_PER_DECADE = 100
 
 # The autopilot's dodge (combat.dodge_percent): walking trains Agility and Perception to about
 # level 10 each within a life, so a level is worth one percent: 5% fresh, about 25-30% for a
